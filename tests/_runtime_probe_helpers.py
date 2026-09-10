@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 import subprocess
@@ -254,3 +256,75 @@ def assert_protected_state_unchanged(
     assert after.workspace == before.workspace, f"{label}: workspace changed"
     assert after.task == before.task, f"{label}: task changed"
     assert after.repository == before.repository, f"{label}: repository changed"
+
+
+# --------------------------------------------------------------------------- #
+# Live MCP tool-call observation.
+# --------------------------------------------------------------------------- #
+
+# Map the fixed live catalog's tool names to the internal service operations they
+# dispatch (see ``flowgency/tickets/mcp_server.py``). A recorded ``operation`` is
+# translated back to the caller-visible ``tool`` name so live assertions can name
+# ``ticket_get`` even though the shared dispatch path uses ``get_ticket``.
+TICKET_TOOL_FOR_OPERATION = {
+    "list_workflows": "workflows_list",
+    "list_tickets": "tickets_list",
+    "get_ticket": "ticket_get",
+    "create_ticket": "ticket_create",
+    "start_work": "ticket_start_work",
+    "update_ticket": "ticket_update",
+    "report_ticket": "ticket_report",
+    "transition_ticket": "ticket_transition",
+    "end_work": "ticket_end_work",
+    "sign_off": "ticket_sign_off",
+    "publish_artifact": "ticket_artifact_publish",
+}
+
+
+@contextmanager
+def record_ticket_tool_calls():
+    """Observe every ticket tool the live run dispatches through the broker.
+
+    The worker-owned broker runs in-process (only the assistant CLI is a child),
+    so wrapping the shared ``_dispatch_authenticated_request`` boundary captures
+    the real, authenticated tool calls the installed CLI makes over MCP HTTP —
+    both the ``/mcp`` tools path and the raw ``/operations`` path resolve that
+    name late, so this sees every structured tool result with its success flag.
+    A raised ``TicketStorageError`` (auth/validation/forbidden) is recorded as an
+    unsuccessful call rather than a missing one, so revoke and stale-version
+    denials remain observable.
+    """
+    from flowgency.tickets import broker as broker_mod
+
+    calls: list[dict] = []
+    lock = threading.Lock()
+    original = broker_mod._dispatch_authenticated_request
+
+    def recording(service, registry, token, operation, payload):
+        try:
+            result = original(service, registry, token, operation, payload)
+        except Exception:
+            with lock:
+                calls.append(
+                    {
+                        "operation": operation,
+                        "tool": TICKET_TOOL_FOR_OPERATION.get(operation, operation),
+                        "ok": False,
+                    }
+                )
+            raise
+        with lock:
+            calls.append(
+                {
+                    "operation": operation,
+                    "tool": TICKET_TOOL_FOR_OPERATION.get(operation, operation),
+                    "ok": True,
+                }
+            )
+        return result
+
+    broker_mod._dispatch_authenticated_request = recording
+    try:
+        yield calls
+    finally:
+        broker_mod._dispatch_authenticated_request = original

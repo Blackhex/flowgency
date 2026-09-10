@@ -13,24 +13,31 @@ intersected with the adapters that explicitly declare a live ticket transport
 and authentication/quota/network/timeout failures remain failures, not skips.
 Run with ``-m real_runtime``.
 
-Scope note (measured on Copilot 1.0.84-3): an *enabled* Copilot sandbox refuses
-to spawn the stdio ticket MCP server -- its PowerShell launch of the interpreter
-fails drive initialization ("The file cannot be accessed by the system"), so no
-ticket tools register. A restricted read/search-only Copilot ticket run is
-therefore blocked by the installed CLI itself; see the task report. This live
-guarantee is established with the sandbox disabled, where "without rewriting" is
-a measured *choice* by the agent rather than an inability.
+Scope note (measured on Copilot 1.0.84-3, worker-owned MCP HTTP transport): an
+*enabled* Copilot sandbox classifies the worker's ``127.0.0.1`` MCP endpoint as
+local network and, by default, drops it -- so a restricted ticket run cannot see
+the ticket tools unless the agent instance carries the explicit, canonical
+``integration_config.allow_local_network`` opt-in approved for this fixed
+loopback endpoint. With that per-agent consent set (and nothing else in the
+sandbox widened), the restricted read/search-only run reaches the endpoint and
+operates the ticket tools; without it, the run fails a preflight gate before any
+CLI launch. This supersedes the earlier stdio-era note that restricted ticket
+runs were unattainable; see the task report.
 """
 from __future__ import annotations
 
+import subprocess
+import sys
 import hashlib
 import json
+import re
 from copy import deepcopy
 from pathlib import Path
 
 import pytest
 
 from flowgency.integrations import REGISTRY
+from flowgency.workflows.models import ArtifactRef
 from tests._runtime_probe_helpers import (
     AI_CLI_COMMANDS,
     supported_ticket_adapters,
@@ -70,15 +77,36 @@ def test_ticket_capable_runtimes_are_installed_and_supported():
         assert runtime.name in supported
 
 
+def test_record_ticket_tool_calls_observes_live_dispatch(workflow_env):
+    """Deterministic proof the live observer captures real broker dispatch.
+
+    The live tests below assert on ``ticket_get`` even though the shared dispatch
+    path names the operation ``get_ticket``; this guards that translation and the
+    in-process wrap the live suite relies on, without launching any CLI.
+    """
+    from tests._runtime_probe_helpers import record_ticket_tool_calls
+
+    env = workflow_env
+    ticket = env.create(values={"summary": "hello"})
+    env.service.assign(
+        env.user, ticket.version, "builder", env.operation("assign")
+    )
+    ref = env.read(ticket.ref).ref
+    authority = env.running_job("builder", "recorder-probe")
+
+    with record_ticket_tool_calls() as calls:
+        with env.broker_for(authority) as client:
+            result = client.call("get_ticket", {"ref": ref.model_dump(mode="json")})
+
+    assert result["ok"] is True
+    ticket_get_calls = [call for call in calls if call["tool"] == "ticket_get"]
+    assert ticket_get_calls, calls
+    assert all(call["ok"] for call in ticket_get_calls)
+
+
 # --------------------------------------------------------------------------- #
 # Live probe.
 # --------------------------------------------------------------------------- #
-
-
-PROJECT_RESULT = (
-    "test session: 42 checks executed, 42 passed, 0 failed.\n"
-    "coverage: 100% of the delivery contract.\n"
-)
 
 
 def _hash_files(paths: dict[str, Path]) -> dict[str, str]:
@@ -92,14 +120,66 @@ def _ticket_agent_config(raw_config: dict, runtime_name: str) -> dict:
     """A single-agent team bound to the installed ticket-capable runtime.
 
     The agent inherits the team's unrestricted, path-less policy, so Copilot's
-    sandbox stays off -- the only configuration under which the installed CLI
-    will spawn the stdio ticket MCP server (see the module docstring).
+    sandbox stays off and the worker-owned MCP HTTP endpoint is reachable without
+    any network opt-in.
     """
     raw = deepcopy(raw_config)
     builder = raw["teams"]["newsletter"]["agents"][0]
     assert builder["name"] == "builder"
     builder["integration"] = runtime_name
     return raw
+
+
+def _restricted_ticket_agent_config(
+    raw_config: dict,
+    runtime_name: str,
+    *,
+    allow_local_network: bool = True,
+) -> dict:
+    """A restricted read/search-only ticket agent.
+
+    The restricted sandbox treats the worker's loopback MCP endpoint as local
+    network, so a ticket run needs the explicit per-agent
+    ``integration_config.allow_local_network`` consent to reach it. Consented
+    cases set it here in the canonical agent config (not a test-side sandbox
+    patch); the preflight-denial case passes ``allow_local_network=False`` to
+    prove the default-off gate fails before any CLI launch.
+    """
+    raw = _ticket_agent_config(raw_config, runtime_name)
+    builder = raw["teams"]["newsletter"]["agents"][0]
+    workspace = Path(raw["teams"]["newsletter"]["workspace_path"])
+    raw["teams"]["newsletter"]["permissions"] = {
+        "mode": "restricted",
+        "rules": [{"path": str(workspace), "tools": ["read", "search"]}],
+    }
+    if allow_local_network:
+        builder["integration_config"] = {"allow_local_network": True}
+    return raw
+
+
+def _run_tiny_project_check(workspace: Path) -> bytes:
+    test_file = workspace / "test_presatisfied_result.py"
+    test_file.write_text(
+        "def test_existing_result_is_valid():\n"
+        "    assert 6 * 7 == 42\n",
+        encoding="utf-8",
+    )
+    completed = subprocess.run(
+        [sys.executable, "-m", "pytest", str(test_file), "-q"],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    # These are genuine pytest report bytes, but pytest pads the progress line
+    # with a terminal-width-dependent run of spaces before ``[100%]``. That long
+    # whitespace run is exactly what a model cannot faithfully base64-reproduce,
+    # so the artifact round-trip would flake on the padding rather than on the
+    # result. Collapsing internal space runs keeps the real tokens (the dots,
+    # ``[100%]``, and the ``N passed in Xs`` summary) while making the bytes
+    # short enough for the agent to publish back exactly.
+    normalized = re.sub(r"[ \t]{2,}", " ", completed.stdout)
+    return normalized.encode("utf-8")
 
 
 def _agent_task(ref_json: str, project_result: Path) -> str:
@@ -119,21 +199,77 @@ def _agent_task(ref_json: str, project_result: Path) -> str:
         '(id "evidence-reviewed").\n'
         "2. Call ticket_get again to obtain the freshest `version`, then call "
         'ticket_start_work with that version and operation_id "start-1".\n'
-        "3. Call ticket_get again to obtain the current `version`, then call "
+        "3. Read the result file bytes exactly as they are on disk, base64-encode "
+        "them, call ticket_get again to obtain the current `version`, then call "
+        'ticket_artifact_publish with that version, filename "result.txt", '
+        'media_type "text/plain", and content_b64 set to the exact base64 payload. '
+        "Keep the returned artifact reference for the transition output.\n"
+        "4. Call ticket_get again to obtain the current `version`, then call "
         'ticket_report with that version, operation_id "report-1", a message that '
         "summarizes the passing result you read from the result file, and exactly one "
         'assessment: criterion_id "evidence-reviewed", satisfied true, with reasoning '
         "that cites the passing result.\n"
-        "4. Call ticket_get again to obtain the current `version`, then call "
+        "5. Call ticket_get again to obtain the current `version`, then call "
         'ticket_transition with that version, operation_id "complete-1", transition_id '
         '"complete", inputs {"verdict": true}, outputs {"summary": "<one short line '
-        'summarizing the verified result>"}, and assessments with one entry: '
+        'summarizing the verified result>", "evidence": "<the retained artifact '
+        'reference from ticket_artifact_publish>"}, and assessments with one entry: '
         'criterion_id "evidence-reviewed", satisfied true, reasoning "<short>".\n'
-        "5. Confirm the transition response `ok` is true, then stop and reply with the "
+        "6. Confirm the transition response `ok` is true, then stop and reply with the "
         "single word DONE.\n\n"
         "Always pass the exact `version` object returned by your most recent ticket_get "
         "call to the next mutating call. Never invent a revision number or a digest. "
         "Do not create, edit, or delete any file on disk at any point."
+    )
+
+
+def _read_only_agent_task(ref_json: str) -> str:
+    return (
+        "Operate a single Flowgency workflow ticket using only the read-only "
+        'ticket_get tool exposed by the "flowgency-tickets" MCP server. Do not '
+        "create, edit, or delete any file on disk, and do not call any other ticket "
+        "tool or any shell, git, or write tool at any point.\n\n"
+        "Ticket reference (JSON):\n"
+        f"{ref_json}\n\n"
+        "Steps:\n"
+        "1. Call the ticket_get tool with that exact ref to load the ticket and its "
+        "current `version`.\n"
+        "2. Confirm the response `ok` is true, then stop and reply with the single "
+        "word DONE.\n\n"
+        "Do not attempt any workspace write and do not call any mutating ticket tool."
+    )
+
+
+def _restricted_agent_task(ref_json: str, project_result: Path, blocked_note: Path) -> str:
+    return (
+        "Operate a single Flowgency workflow ticket using the live ticket tools "
+        'exposed by the "flowgency-tickets" MCP server. Do every step, in order.\n\n'
+        f"The project result file is {project_result}. Read it first. The workspace "
+        f"path {blocked_note} is intentionally read-only for writes in this run: try "
+        "once to create that file with a short note, then continue after the refusal. "
+        "Do not try any other workspace write.\n\n"
+        "Ticket reference (JSON):\n"
+        f"{ref_json}\n\n"
+        "Steps:\n"
+        "1. Call ticket_get with that exact ref to load the ticket and its current `version`.\n"
+        "2. Call ticket_get again, then call ticket_start_work with operation_id \"start-1\".\n"
+        "3. Read the result file bytes exactly as they are on disk, base64-encode them, call "
+        "ticket_get again, then call ticket_artifact_publish with filename \"result.txt\", "
+        "media_type \"text/plain\", and the exact content_b64 payload. Keep the returned "
+        "artifact reference.\n"
+        f"4. Attempt exactly one workspace write by creating {blocked_note} with a short note. "
+        "If the write is refused, continue normally and do not retry.\n"
+        "5. Call ticket_get again, then call ticket_report with operation_id \"report-1\", a "
+        "short message summarizing the passing result and the denied write attempt, and one "
+        "satisfied evidence-reviewed assessment.\n"
+        "6. Call ticket_get again, then call ticket_transition with operation_id \"complete-1\", "
+        "transition_id \"complete\", inputs {\"verdict\": true}, outputs containing both summary "
+        "and the retained evidence artifact reference, and one satisfied evidence-reviewed "
+        "assessment.\n"
+        "7. Confirm the transition response `ok` is true, then stop and reply with the single word DONE.\n\n"
+        "Always pass the exact `version` object returned by your most recent ticket_get call to the "
+        "next mutating call. Never invent a revision number or a digest. Never use shell, git, or "
+        "any tool outside the ticket tools and ordinary file reads."
     )
 
 
@@ -147,6 +283,184 @@ if not TICKET_CAPABLE_RUNTIMES:
         )
 
 else:
+
+    @pytest.mark.real_runtime
+    @pytest.mark.parametrize(
+        "runtime",
+        tuple(runtime for runtime in TICKET_CAPABLE_RUNTIMES if runtime.name == "copilot"),
+        ids=lambda item: item.name,
+    )
+    def test_restricted_ticket_run_requires_explicit_local_network_opt_in(
+        runtime, tmp_path, raw_config
+    ):
+        """The preflight gate: a restricted Copilot ticket run whose agent has no
+        ``allow_local_network`` consent is rejected at job resolution, before any
+        job record is created or any CLI is launched. This is the default-off half
+        of the approved opt-in and needs no live subprocess -- the sandbox-confining
+        preflight rejects the submission deterministically.
+        """
+        from flowgency.blueprints import CompilationCache
+        from flowgency.blueprints.library import BlueprintLibrary
+        from flowgency.configuration.issues import ValidationFailed
+        from flowgency.jobs.models import JobRequest
+        from flowgency.jobs.resolution import resolve_job_request
+        from flowgency.prompts import PromptStore
+
+        raw = _restricted_ticket_agent_config(
+            raw_config, runtime.name, allow_local_network=False
+        )
+        env = make_workflow_environment(tmp_path, raw)
+        env.publish_criteria_workflow()
+
+        workspace = Path(env.store.load().config.teams[env.team_id].workspace_path)
+        project_result = workspace / "result.txt"
+        project_result.write_bytes(_run_tiny_project_check(workspace))
+
+        ticket = env.create(values={"summary": "initial"})
+        env.service.assign(
+            env.user,
+            ticket.version,
+            "builder",
+            env.operation("assign", actor_name="local-user"),
+        )
+        ref = env.read(ticket.ref).ref
+
+        snapshot = env.store.load()
+        task = _read_only_agent_task(json.dumps(ref.model_dump(mode="json")))
+
+        with pytest.raises(ValidationFailed) as excinfo:
+            resolve_job_request(
+                JobRequest(
+                    config_path=env.store.path,
+                    team_key=env.team_id,
+                    agent_name="builder",
+                    trigger="manual_prompt",
+                    routine_id=None,
+                    task_input=task,
+                    timeout_override=300,
+                ),
+                config_store=env.store,
+                library=BlueprintLibrary(snapshot.config.flowgency.agent_library),
+                cache=CompilationCache(
+                    snapshot.config.flowgency.compilation_cache,
+                    {runtime.name: REGISTRY[runtime.name].projector},
+                ),
+                prompt_store=PromptStore(snapshot.config.flowgency.prompt_store),
+                integrations={runtime.name: REGISTRY[runtime.name]},
+            )
+
+        codes = {issue.code for issue in excinfo.value.issues}
+        assert "ticket-local-network-required" in codes, (
+            f"{runtime.name}: preflight did not raise the local-network gate: {codes}"
+        )
+        assert "local-network consent" in str(excinfo.value)
+        # No job ran and the ticket is untouched: no start, no active run, still review.
+        final = env.read(ref).record
+        assert final.active_run is None
+        assert final.state_id == "review"
+
+    @pytest.mark.real_runtime
+    @pytest.mark.parametrize(
+        "runtime",
+        tuple(runtime for runtime in TICKET_CAPABLE_RUNTIMES if runtime.name == "copilot"),
+        ids=lambda item: item.name,
+    )
+    def test_restricted_agent_reads_ticket_over_http_without_editing(
+        runtime, tmp_path, raw_config
+    ):
+        """The first live acceptance gate: a restricted read/search-only Copilot
+        run with explicit ``allow_local_network`` consent reaches the worker-owned
+        MCP HTTP endpoint and calls ``ticket_get`` successfully, with no stdio
+        child, no widening of the sandbox beyond the single approved local-network
+        grant, and no change to the project on disk.
+        """
+        from flowgency.blueprints import CompilationCache
+        from flowgency.blueprints.library import BlueprintLibrary
+        from flowgency.jobs.execution import execute_job
+        from flowgency.jobs.models import JobRecord, JobRequest
+        from flowgency.jobs.resolution import resolve_job_request
+        from flowgency.jobs.store import read_job
+        from flowgency.prompts import PromptStore
+        from tests._runtime_probe_helpers import record_ticket_tool_calls
+
+        raw = _restricted_ticket_agent_config(raw_config, runtime.name)
+        env = make_workflow_environment(tmp_path, raw)
+        env.publish_criteria_workflow()
+
+        workspace = Path(env.store.load().config.teams[env.team_id].workspace_path)
+        project_result = workspace / "result.txt"
+        project_result.write_bytes(_run_tiny_project_check(workspace))
+        project_before = project_result.read_bytes()
+
+        ticket = env.create(values={"summary": "initial"})
+        env.service.assign(
+            env.user,
+            ticket.version,
+            "builder",
+            env.operation("assign", actor_name="local-user"),
+        )
+        ref = env.read(ticket.ref).ref
+
+        snapshot = env.store.load()
+        protected = {
+            "config": env.store.path,
+            "blueprint": snapshot.config.flowgency.agent_library
+            / "builder-blueprint"
+            / "AGENTS.md",
+            "workflow": env.library.root / env.blueprint_id / "workflow.yaml",
+            "project": project_result,
+        }
+        hashes_before = _hash_files(protected)
+
+        task = _read_only_agent_task(json.dumps(ref.model_dump(mode="json")))
+
+        spec = resolve_job_request(
+            JobRequest(
+                config_path=env.store.path,
+                team_key=env.team_id,
+                agent_name="builder",
+                trigger="manual_prompt",
+                routine_id=None,
+                task_input=task,
+                timeout_override=300,
+            ),
+            config_store=env.store,
+            library=BlueprintLibrary(snapshot.config.flowgency.agent_library),
+            cache=CompilationCache(
+                snapshot.config.flowgency.compilation_cache,
+                {runtime.name: REGISTRY[runtime.name].projector},
+            ),
+            prompt_store=PromptStore(snapshot.config.flowgency.prompt_store),
+            integrations={runtime.name: REGISTRY[runtime.name]},
+        )
+        authority = env.job_store.create(JobRecord.from_spec(spec))
+
+        with record_ticket_tool_calls() as calls:
+            record = execute_job(authority)
+
+        job = read_job(authority.path)
+        assert record.status == "complete", (
+            f"{runtime.name}: restricted read-only probe did not complete: "
+            f"status={record.status!r}; summary={job.execution_summary!r}; "
+            f"stderr_path={job.stderr_path!r}; stdout_path={job.stdout_path!r}"
+        )
+        assert record.exit_code == 0, (
+            f"{runtime.name}: non-zero exit {record.exit_code!r}; "
+            f"summary={job.execution_summary!r}"
+        )
+        ticket_get_calls = [call for call in calls if call["tool"] == "ticket_get"]
+        assert ticket_get_calls, (
+            f"{runtime.name}: ticket_get never reached the broker over MCP HTTP; "
+            f"observed={[call['tool'] for call in calls]}; stdout_path={job.stdout_path!r}"
+        )
+        assert all(call["ok"] for call in ticket_get_calls), (
+            f"{runtime.name}: a ticket_get call failed at the broker: {ticket_get_calls}"
+        )
+        # A read-only run leaves the ticket and every protected input untouched.
+        final = env.read(ref).record
+        assert final.active_run is None
+        assert project_result.read_bytes() == project_before
+        assert _hash_files(protected) == hashes_before
 
     @pytest.mark.real_runtime
     @pytest.mark.parametrize(
@@ -166,12 +480,12 @@ else:
         raw = _ticket_agent_config(raw_config, runtime.name)
         env = make_workflow_environment(tmp_path, raw)
 
-        # The completion contract needs a positive criterion assessment.
+        env.publish_artifact_field_workflow()
         env.publish_criteria_workflow()
 
         workspace = Path(env.store.load().config.teams[env.team_id].workspace_path)
         project_result = workspace / "result.txt"
-        project_result.write_text(PROJECT_RESULT, encoding="utf-8")
+        project_result.write_bytes(_run_tiny_project_check(workspace))
         project_before = project_result.read_bytes()
 
         ticket = env.create(values={"summary": "initial"})
@@ -234,6 +548,10 @@ else:
         assert final.assignee == "builder"
         assert final.active_run is None
         assert final.field_values.get("summary"), final.field_values
+        evidence = final.field_values["evidence"]
+        assert evidence == ArtifactRef(kind="id", value=evidence.value)
+        retained = env.current_provider().read_artifact(ref, evidence.value)
+        assert retained.content == project_before
 
         reported = [event for event in final.events if event.kind == "reported"]
         assert reported and reported[-1].summary.strip(), (
@@ -244,6 +562,103 @@ else:
 
         # The pre-satisfied project and every protected input are untouched: the
         # agent verified existing work instead of repeating it.
+        assert project_result.read_bytes() == project_before
+        assert _hash_files(protected) == hashes_before
+
+
+    @pytest.mark.real_runtime
+    @pytest.mark.parametrize(
+        "runtime",
+        tuple(runtime for runtime in TICKET_CAPABLE_RUNTIMES if runtime.name == "copilot"),
+        ids=lambda item: item.name,
+    )
+    def test_agent_in_restricted_workspace_keeps_ticket_flow_and_records_denied_write(
+        runtime, tmp_path, raw_config
+    ):
+        from flowgency.blueprints import CompilationCache
+        from flowgency.blueprints.library import BlueprintLibrary
+        from flowgency.jobs.execution import execute_job
+        from flowgency.jobs.models import JobRecord, JobRequest
+        from flowgency.jobs.resolution import resolve_job_request
+        from flowgency.jobs.store import read_job
+        from flowgency.prompts import PromptStore
+
+        raw = _restricted_ticket_agent_config(raw_config, runtime.name)
+        env = make_workflow_environment(tmp_path, raw)
+        env.publish_artifact_field_workflow()
+        env.publish_criteria_workflow()
+
+        workspace = Path(env.store.load().config.teams[env.team_id].workspace_path)
+        project_result = workspace / "result.txt"
+        project_result.write_bytes(_run_tiny_project_check(workspace))
+        project_before = project_result.read_bytes()
+        blocked_note = workspace / "blocked-note.txt"
+
+        ticket = env.create(values={"summary": "initial", "evidence": None})
+        env.service.assign(
+            env.user,
+            ticket.version,
+            "builder",
+            env.operation("assign", actor_name="local-user"),
+        )
+        ref = env.read(ticket.ref).ref
+
+        snapshot = env.store.load()
+        protected = {
+            "config": env.store.path,
+            "blueprint": snapshot.config.flowgency.agent_library
+            / "builder-blueprint"
+            / "AGENTS.md",
+            "workflow": env.library.root / env.blueprint_id / "workflow.yaml",
+            "project": project_result,
+        }
+        hashes_before = _hash_files(protected)
+
+        task = _restricted_agent_task(
+            json.dumps(ref.model_dump(mode="json")),
+            project_result,
+            blocked_note,
+        )
+
+        spec = resolve_job_request(
+            JobRequest(
+                config_path=env.store.path,
+                team_key=env.team_id,
+                agent_name="builder",
+                trigger="manual_prompt",
+                routine_id=None,
+                task_input=task,
+                timeout_override=300,
+            ),
+            config_store=env.store,
+            library=BlueprintLibrary(snapshot.config.flowgency.agent_library),
+            cache=CompilationCache(
+                snapshot.config.flowgency.compilation_cache,
+                {runtime.name: REGISTRY[runtime.name].projector},
+            ),
+            prompt_store=PromptStore(snapshot.config.flowgency.prompt_store),
+            integrations={runtime.name: REGISTRY[runtime.name]},
+        )
+        authority = env.job_store.create(JobRecord.from_spec(spec))
+
+        record = execute_job(authority)
+        job = read_job(authority.path)
+        assert record.status == "complete", (
+            f"{runtime.name}: restricted ticket flow did not complete: "
+            f"status={record.status!r}; summary={job.execution_summary!r}; "
+            f"stderr_path={job.stderr_path!r}; stdout_path={job.stdout_path!r}"
+        )
+
+        final = env.read(ref).record
+        assert final.state_id == "done"
+        assert final.assignee == "builder"
+        assert final.active_run is None
+        evidence = final.field_values["evidence"]
+        assert evidence == ArtifactRef(kind="id", value=evidence.value)
+        retained = env.current_provider().read_artifact(ref, evidence.value)
+        assert retained.content == project_before
+        assert read_job(authority.path).result_metadata["write_attempts"] == [blocked_note.name]
+        assert not blocked_note.exists()
         assert project_result.read_bytes() == project_before
         assert _hash_files(protected) == hashes_before
 
@@ -261,22 +676,28 @@ def _multi_ticket_task(ref_a_json: str) -> str:
         'version and operation_id "start-1".\n'
         "3. Call ticket_get on ticket A, then ticket_update on A with that version, "
         'operation_id "update-1", and field_values {"summary": "updated by agent"}.\n'
-        '4. Create a second ticket in workflow "board-a": call ticket_create with '
-        'workflow_id "board-a", title "Follow-up verification", description '
-        '"Track the follow-up review.", operation_id "create-1", and field_values '
-        '{"summary": "draft summary"}.\n'
-        "5. Call ticket_get on ticket A, then ticket_report on A with that version, "
+        '4. Create a second ticket ("ticket B") in workflow "board-a": call '
+        'ticket_create with workflow_id "board-a", title "Follow-up verification", '
+        'description "Track the follow-up review.", operation_id "create-1", and '
+        'field_values {"summary": "draft summary"}. Keep the ticket reference and '
+        "`version` that ticket_create returns for ticket B.\n"
+        "5. Operate ticket B, not just create it: call ticket_start_work on B with "
+        'B\'s version from ticket_create and operation_id "start-b-1".\n'
+        "6. Call ticket_get on ticket B to obtain B's fresh `version`, then call "
+        'ticket_update on B with that version, operation_id "update-b-1", and '
+        'field_values {"summary": "operated by agent"}.\n'
+        "7. Call ticket_get on ticket A, then ticket_report on A with that version, "
         'operation_id "report-1", a short message, and one assessment: criterion_id '
         '"evidence-reviewed", satisfied true, reasoning "<short>".\n'
-        "6. Call ticket_get on ticket A, then ticket_transition on A with that "
+        "8. Call ticket_get on ticket A, then ticket_transition on A with that "
         'version, operation_id "complete-1", transition_id "complete", inputs '
         '{"verdict": true}, outputs {"summary": "A verified"}, and assessments with '
         'one entry: criterion_id "evidence-reviewed", satisfied true, reasoning '
         '"<short>".\n'
-        "7. Reply with the single word DONE.\n\n"
+        "9. Reply with the single word DONE.\n\n"
         "Always pass the exact `version` object returned by your most recent "
-        "ticket_get for ticket A to the next mutating call on it. Never invent a "
-        "revision number or a digest."
+        "ticket_get for a ticket to the next mutating call on that same ticket. "
+        "Never invent a revision number or a digest."
     )
 
 
@@ -296,6 +717,7 @@ if TICKET_CAPABLE_RUNTIMES:
         from flowgency.jobs.resolution import resolve_job_request
         from flowgency.jobs.store import read_job
         from flowgency.prompts import PromptStore
+        from tests._runtime_probe_helpers import record_ticket_tool_calls
 
         raw = _ticket_agent_config(raw_config, runtime.name)
         env = make_workflow_environment(tmp_path, raw)
@@ -334,12 +756,26 @@ if TICKET_CAPABLE_RUNTIMES:
         )
         authority = env.job_store.create(JobRecord.from_spec(spec))
 
-        record = execute_job(authority)
+        with record_ticket_tool_calls() as calls:
+            record = execute_job(authority)
         job = read_job(authority.path)
         assert record.status == "complete", (
             f"{runtime.name}: job did not complete: status={record.status!r}; "
             f"summary={job.execution_summary!r}"
         )
+
+        # The dispatch observer captured the live tool calls in the order the run
+        # made them. Creation and update are observable strictly before the run's
+        # terminal transition -- i.e. before completion, not reconstructed after.
+        tools_in_order = [call["tool"] for call in calls if call["ok"]]
+        assert "ticket_create" in tools_in_order, tools_in_order
+        assert "ticket_update" in tools_in_order, tools_in_order
+        assert "ticket_transition" in tools_in_order, tools_in_order
+        last_transition = len(tools_in_order) - 1 - tools_in_order[::-1].index(
+            "ticket_transition"
+        )
+        assert tools_in_order.index("ticket_create") < last_transition, tools_in_order
+        assert tools_in_order.index("ticket_update") < last_transition, tools_in_order
 
         # Ticket A: the run started, updated (while owned), reported, and
         # transitioned it to done.
@@ -356,8 +792,8 @@ if TICKET_CAPABLE_RUNTIMES:
         assert any(event.kind == "reported" for event in final_a.events)
         assert any(event.kind == "transitioned" for event in final_a.events)
 
-        # A second ticket was created in the same run, observable before the run
-        # completed: one run handled multiple tickets live.
+        # A second ticket was created AND operated in the same run: it was
+        # started and updated live, not merely created.
         others = [
             view
             for view in env.service.list_tickets(env.user, "board-a")
@@ -369,5 +805,21 @@ if TICKET_CAPABLE_RUNTIMES:
         )
         created = others[0].record
         assert created.title == "Follow-up verification"
-        assert created.state_id == "review"
+        assert created.assignee == "builder", (
+            f"{runtime.name}: ticket B was not claimed by the operating agent; "
+            f"assignee={created.assignee!r}"
+        )
+        created_events = [event.kind for event in created.events]
+        assert "started-work" in created_events, (
+            f"{runtime.name}: ticket B was created but never started; "
+            f"events={created_events}"
+        )
+        assert "updated" in created_events, (
+            f"{runtime.name}: ticket B was created but never updated; "
+            f"events={created_events}"
+        )
+        assert created.field_values.get("summary") == "operated by agent", (
+            f"{runtime.name}: ticket B update did not land; "
+            f"summary={created.field_values.get('summary')!r}"
+        )
 
