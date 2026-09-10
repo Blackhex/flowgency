@@ -1,7 +1,45 @@
-import { expect, test, type Locator } from '@playwright/test';
+import AxeBuilder from '@axe-core/playwright';
+import { readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+
+import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 
 import { expectBodyFocus, tabTo } from './keyboard';
 import { assertNoConsoleErrors, assertNoLayoutIssues, installBasePageSetup } from './layout';
+
+const runtimeConfigPath = path.resolve(__dirname, '.runtime', 'current', 'config.yaml');
+
+async function resetUiRuntime(request: APIRequestContext): Promise<void> {
+  const response = await request.post('/__ui/reset');
+  expect(response.status()).toBe(204);
+}
+
+async function readRuntimeConfig(): Promise<string> {
+  return await readFile(runtimeConfigPath, 'utf8');
+}
+
+async function writeRuntimeConfig(source: string): Promise<void> {
+  await writeFile(runtimeConfigPath, source, 'utf8');
+}
+
+async function seedAdvisorCopilotModel(): Promise<void> {
+  const source = await readRuntimeConfig();
+  const seeded = source.replace(
+    '      integration: copilot\n      identity:\n',
+    '      integration: copilot\n      integration_config:\n        model: gpt-5.4\n      identity:\n',
+  );
+  if (seeded === source) {
+    throw new Error('advisor Copilot fixture block not found');
+  }
+  await writeRuntimeConfig(seeded);
+}
+
+async function expectNoAxeViolations(page: Page): Promise<void> {
+  const results = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze();
+  expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
+}
 
 // Absolute paths vary in length per checkout; pin them to one line so they cannot reflow the page.
 async function pinToSingleLine(locator: Locator) {
@@ -16,10 +54,16 @@ async function pinToSingleLine(locator: Locator) {
 
 const tabs = ['Profile', 'Blueprint', 'Runtime', 'Permissions', 'Routines', 'Prompts', 'Memory', 'Activity'];
 
-test.beforeEach(async ({ page }, testInfo) => {
+test.beforeEach(async ({ page, request }, testInfo) => {
+  await resetUiRuntime(request);
   const dark = testInfo.project.name.endsWith('dark');
   await installBasePageSetup(page, dark ? 'dark' : 'light');
   await page.addStyleTag({ content: '* { animation: none !important; transition: none !important; caret-color: transparent !important; }' });
+});
+
+test.afterEach(async ({ page, request }) => {
+  await page.close();
+  await resetUiRuntime(request);
 });
 
 test('team settings leads to the sole roster and inherited runtime', async ({ page }) => {
@@ -89,6 +133,81 @@ test('all agent detail tabs have stable selected semantics and keyboard focus', 
     await expect(page.getByRole('tab', { name: tab })).toHaveAttribute('aria-current', 'page');
     await assertNoLayoutIssues(page);
   }
+  await assertNoConsoleErrors(page);
+});
+
+test('copilot runtime consent saves true then false and preserves timeout and unrelated config', async ({ page }) => {
+  await seedAdvisorCopilotModel();
+  await page.goto('/newsletter/agents/advisor/runtime');
+
+  const consent = page.locator('input[name="integration_config.allow_local_network"]');
+  const timeoutField = page.locator('input[name="timeout"]');
+  const saveButton = page.getByRole('button', { name: 'Save runtime', exact: true });
+
+  await expect(consent).not.toBeChecked();
+  await expect(timeoutField).toHaveValue('1200');
+  await expect(page.getByText('Allows connections to local services and LAN hosts, not only Flowgency.', { exact: true })).toBeVisible();
+
+  await consent.check();
+  await timeoutField.fill('1801');
+  const saveTrue = page.waitForResponse((response) => response.url().includes('/newsletter/agents/advisor/runtime') && response.request().method() === 'POST');
+  await saveButton.click();
+  expect((await saveTrue).status()).toBe(303);
+  await page.reload();
+
+  await expect(consent).toBeChecked();
+  await expect(timeoutField).toHaveValue('1801');
+  const enabledConfig = await readRuntimeConfig();
+  expect(enabledConfig).toContain('model: gpt-5.4');
+  expect(enabledConfig).toContain('allow_local_network: true');
+  expect(enabledConfig).toContain('timeout: 1801');
+
+  await consent.uncheck();
+  const saveFalse = page.waitForResponse((response) => response.url().includes('/newsletter/agents/advisor/runtime') && response.request().method() === 'POST');
+  await saveButton.click();
+  expect((await saveFalse).status()).toBe(303);
+  await page.reload();
+
+  await expect(consent).not.toBeChecked();
+  await expect(timeoutField).toHaveValue('1801');
+  const disabledConfig = await readRuntimeConfig();
+  expect(disabledConfig).toContain('model: gpt-5.4');
+  expect(disabledConfig).toContain('allow_local_network: false');
+  expect(disabledConfig).toContain('timeout: 1801');
+  await assertNoLayoutIssues(page);
+  await expectNoAxeViolations(page);
+  await assertNoConsoleErrors(page);
+});
+
+test('stale runtime save keeps the submitted timeout and consent draft visible', async ({ page }) => {
+  await seedAdvisorCopilotModel();
+  await page.goto('/newsletter/agents/advisor/runtime');
+
+  const consent = page.locator('input[name="integration_config.allow_local_network"]');
+  const timeoutField = page.locator('input[name="timeout"]');
+  const saveButton = page.getByRole('button', { name: 'Save runtime', exact: true });
+
+  await consent.check();
+  await timeoutField.fill('1801');
+  await writeRuntimeConfig((await readRuntimeConfig()).replace('title: Flowgency UI Gate', 'title: Changed elsewhere'));
+
+  const staleSave = page.waitForResponse((response) => response.url().includes('/newsletter/agents/advisor/runtime') && response.request().method() === 'POST');
+  await saveButton.click();
+  expect((await staleSave).status()).toBe(409);
+
+  await expect(page.getByText('config.yaml changed; reload before saving', { exact: true })).toBeVisible();
+  await expect(timeoutField).toHaveValue('1801');
+  await expect(consent).toBeChecked();
+  await assertNoLayoutIssues(page);
+});
+
+test('non-copilot runtime hides the local-network consent control', async ({ page }) => {
+  await page.goto('/newsletter/agents/builder/runtime');
+
+  await expect(page.getByRole('heading', { name: 'Runtime', exact: true })).toBeVisible();
+  await expect(page.locator('input[name="integration_config.allow_local_network"]')).toHaveCount(0);
+  await expect(page.getByText('Allows connections to local services and LAN hosts, not only Flowgency.', { exact: true })).toHaveCount(0);
+  await assertNoLayoutIssues(page);
   await assertNoConsoleErrors(page);
 });
 

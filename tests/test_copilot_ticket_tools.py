@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from flowgency.configuration import ValidationFailed
 from flowgency.integrations.flowgency.copilot import CopilotIntegration
 from flowgency.integrations.errors import IntegrationError
 from flowgency.integrations.models import (
@@ -236,6 +237,43 @@ def test_copilot_ticket_tools_use_http_config(copilot_request, monkeypatch):
     assert "flowgency-tickets" in tool_grants
     assert "fixture-only-token" not in " ".join(argv)
     assert captured["config_payload"]["mcpServers"]["flowgency-tickets"]["type"] == "http"
+
+
+def test_copilot_rejects_missing_local_network_consent_before_prompt_read_or_launch(
+    copilot_request,
+    monkeypatch,
+):
+    request = dataclasses.replace(copilot_request, ticket_tools=_launch_with_lifecycle())
+    original_read_text = Path.read_text
+
+    def guarded_read_text(path: Path, *args, **kwargs):
+        if path == request.task_file:
+            raise AssertionError("run() must validate before reading the task prompt")
+        return original_read_text(path, *args, **kwargs)
+
+    import flowgency.integrations.flowgency.copilot as copilot_mod
+
+    monkeypatch.setattr(Path, "read_text", guarded_read_text)
+    monkeypatch.setattr(
+        copilot_mod,
+        "run_supervised",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("run() must validate before launching the supervised process")
+        ),
+    )
+    monkeypatch.setattr(
+        copilot_mod.subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("run() must validate before launching the subprocess")
+        ),
+    )
+    _patch_common(monkeypatch)
+
+    with pytest.raises(ValidationFailed) as excinfo:
+        CopilotIntegration().run(request)
+
+    assert any(issue.code == "ticket-local-network-required" for issue in excinfo.value.issues)
 
 
 def test_ticket_tools_do_not_grant_shell(copilot_request, monkeypatch):

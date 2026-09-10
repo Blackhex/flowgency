@@ -192,6 +192,23 @@ def test_job_spec_round_trips_integration_config_with_local_network_opt_in(tmp_p
     assert restored.integration_config == payload["integration_config"]
 
 
+def test_job_spec_immutable_digest_changes_when_local_network_opt_in_changes(tmp_path):
+    base = make_spec(tmp_path)
+    opted_out = dc_replace(
+        base,
+        integration_config={"model": "gpt-5.4", "allow_local_network": False},
+    )
+    opted_in = dc_replace(
+        base,
+        integration_config={"model": "gpt-5.4", "allow_local_network": True},
+    )
+
+    assert opted_out.to_dict()["integration_config"]["model"] == opted_in.to_dict()["integration_config"]["model"]
+    assert opted_out.integration_name == opted_in.integration_name
+    assert opted_out.runtime_policy == opted_in.runtime_policy
+    assert opted_out.immutable_digest() != opted_in.immutable_digest()
+
+
 def test_ticket_job_target_requires_canonical_binding_relation(tmp_path):
     spec = make_spec(tmp_path)
     binding = StorageBinding(

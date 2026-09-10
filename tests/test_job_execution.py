@@ -2,6 +2,7 @@ from pathlib import Path
 import hashlib
 import threading
 import time
+from dataclasses import replace as dc_replace
 from types import SimpleNamespace
 
 import pytest
@@ -16,7 +17,7 @@ from flowgency.integrations.models import EffectiveRuntimePolicy, IntegrationRun
 from flowgency.blueprints.projectors import get_projector
 from flowgency.jobs.authority import JobStore
 from flowgency.jobs.artifacts import JobArtifact
-from flowgency.jobs.execution import execute_job
+from flowgency.jobs.execution import execute_job, resolve_job_context
 from flowgency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, PromptSnapshot, RuntimePolicySnapshot
 from flowgency.jobs.store import cancel_job
 from flowgency.jobs.reconciliation import worker_alive
@@ -25,6 +26,7 @@ from flowgency.jobs.worker import main as worker_main
 from flowgency.memory import MemoryStore
 from flowgency.memory.selectors import resolve_memory_selector
 from flowgency.configuration.models import MemorySelector
+from flowgency.integrations.models import TicketToolLaunch
 from flowgency.blueprints.cache import active_pins, pin_artifact
 from flowgency.fs.locks import exclusive_lock
 from flowgency.permissions.zones import ZONE_INSTRUCTIONS, ZONE_MEMORY, ZONE_OUTBOX
@@ -544,6 +546,62 @@ def test_execute_job_transitions_writes_logs_and_changes(tmp_path, monkeypatch):
     ]
     assert not path.with_suffix(".prompt").exists()
     assert read_job(path) == result
+
+
+def test_resolve_job_context_uses_frozen_spec_consent_after_config_changes(tmp_path):
+    _, base_spec = queued_job(tmp_path, private_prompt_content="---\nname: local-triage\n---\n\nLocal prompt.\n")
+    spec = dc_replace(base_spec, agent_name="advisor")
+    config_path = Path(spec.config_path)
+    config_path.write_text(
+        "schema_version: 1\n"
+        "teams:\n"
+        "  newsletter:\n"
+        "    agents:\n"
+        "      - name: advisor\n"
+        "        integration_config:\n"
+        "          allow_local_network: false\n",
+        encoding="utf-8",
+    )
+    frozen_spec = dc_replace(
+        spec,
+        integration_config={"model": "gpt-5.4", "allow_local_network": True},
+        runtime_policy=RuntimePolicySnapshot(
+            timeout=60,
+            mode="restricted",
+            rules=(
+                {
+                    "path": str(Path(spec.workspace_root)),
+                    "tools": ["read", "search"],
+                },
+            ),
+        ),
+    )
+    request = IntegrationRunRequest(
+        workspace_root=Path(frozen_spec.workspace_root),
+        launch_dir=tmp_path / "runtime",
+        task_file=tmp_path / "task.prompt",
+        timeout=60,
+        runtime_policy=frozen_spec.runtime_policy.to_effective_policy(),
+        ticket_tools=TicketToolLaunch(
+            url="http://127.0.0.1:9999/mcp",
+            headers={"Authorization": "Bearer fixture-only-token"},
+        ),
+    )
+
+    context = resolve_job_context(frozen_spec)
+    issues = context.integration.validate_run(request)
+
+    assert not any(issue.code == "ticket-local-network-required" for issue in issues)
+
+    updated_context = resolve_job_context(
+        dc_replace(
+            frozen_spec,
+            integration_config={"model": "gpt-5.4", "allow_local_network": False},
+        )
+    )
+    updated_issues = updated_context.integration.validate_run(request)
+
+    assert any(issue.code == "ticket-local-network-required" for issue in updated_issues)
 
 
 def test_execute_job_v5_spec_carries_no_skill_to_integration(tmp_path, monkeypatch):
