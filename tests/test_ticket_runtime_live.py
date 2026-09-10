@@ -188,6 +188,35 @@ def test_assert_sandbox_denied_write_accepts_only_a_correlated_policy_denial():
         assert_sandbox_denied_write([], target_name=target)
 
 
+def test_reclaim_gated_worker_releases_and_joins_even_when_body_raises():
+    """Deterministic proof the timeout scenario cannot leak its worker.
+
+    The gate release and the join must run on *every* exit path, so an early
+    assertion failure inside the guarded block still unblocks a worker waiting on
+    the response gate and reclaims the thread instead of leaving it running.
+    """
+    from tests._runtime_probe_helpers import reclaim_gated_worker
+
+    gate = threading.Event()
+    released_in_time = threading.Event()
+
+    def blocked_worker() -> None:
+        # Stands in for execute_job blocked on the held transition response.
+        if gate.wait(timeout=10):
+            released_in_time.set()
+
+    worker = threading.Thread(target=blocked_worker, daemon=True)
+    worker.start()
+
+    with pytest.raises(AssertionError, match="early failure"):
+        with reclaim_gated_worker(worker, gate, join_timeout=10):
+            assert False, "early failure before the gate is released"
+
+    assert gate.is_set(), "the response gate must be released on the failure path"
+    assert released_in_time.is_set(), "the blocked worker must be unblocked"
+    assert not worker.is_alive(), "the worker must be joined, not leaked"
+
+
 # --------------------------------------------------------------------------- #
 # Live probe.
 # --------------------------------------------------------------------------- #
@@ -255,14 +284,17 @@ def _run_tiny_project_check(workspace: Path) -> bytes:
         capture_output=True,
         text=True,
     )
-    # These are genuine pytest report bytes, but pytest pads the progress line
-    # with a terminal-width-dependent run of spaces before ``[100%]``. That long
-    # whitespace run is exactly what a model cannot faithfully base64-reproduce,
-    # so the artifact round-trip would flake on the padding rather than on the
-    # result. Collapsing internal space runs keeps the real tokens (the dots,
-    # ``[100%]``, and the ``N passed in Xs`` summary) while making the bytes
-    # short enough for the agent to publish back exactly.
-    normalized = re.sub(r"[ \t]{2,}", " ", completed.stdout)
+    # These are genuine pytest report bytes, but two kinds of whitespace make
+    # them impossible for a model to base64-reproduce faithfully. First, pytest
+    # pads the progress line with a terminal-width-dependent run of spaces
+    # before ``[100%]``. Second, the report spans several lines, and a model
+    # round-tripping the file through the CLI's text view cannot tell which
+    # newline bytes are on disk (LF here, but re-encoded as CRLF on Windows).
+    # Collapsing every whitespace run -- horizontal padding and line breaks
+    # alike -- to a single space keeps the real tokens (the dots, ``[100%]``,
+    # and the ``N passed in Xs`` summary) on one unambiguous line whose exact
+    # bytes the agent can publish back and we can compare byte-for-byte.
+    normalized = re.sub(r"\s+", " ", completed.stdout).strip()
     return normalized.encode("utf-8")
 
 
@@ -733,7 +765,10 @@ else:
         from flowgency.jobs.resolution import resolve_job_request
         from flowgency.jobs.store import read_job
         from flowgency.prompts import PromptStore
-        from tests._runtime_probe_helpers import record_ticket_tool_calls
+        from tests._runtime_probe_helpers import (
+            reclaim_gated_worker,
+            record_ticket_tool_calls,
+        )
 
         timeout_seconds = 120
         raw = _restricted_ticket_agent_config(raw_config, runtime.name)
@@ -818,17 +853,24 @@ else:
 
         worker = threading.Thread(target=run_job, daemon=True)
         worker.start()
-        try:
+        # Release the response gate and reclaim the worker on *every* exit path:
+        # an early assertion failure (for example a committed transition that
+        # never arrives) must still drop the gate and join the daemon thread, or
+        # a worker still blocked in execute_job / the MCP round-trip leaks into
+        # the next live test. The join waits past run_supervised's own timeout so
+        # a genuinely running worker can unwind.
+        with reclaim_gated_worker(
+            worker, release_response, join_timeout=timeout_seconds + 90
+        ):
             assert committed.wait(timeout=timeout_seconds), (
                 f"{runtime.name}: the committed transition was never observed"
             )
             assert timeout_observed.wait(timeout=timeout_seconds + 60), (
                 f"{runtime.name}: run_supervised never reported a real timeout"
             )
-        finally:
-            release_response.set()
 
-        worker.join(timeout=30)
+        # Reached only when both waits above succeeded; an early failure has
+        # already propagated after the gate was released and the worker joined.
         assert not worker.is_alive(), f"{runtime.name}: execute_job remained blocked after gate release"
         if "error" in outcome:
             raise outcome["error"]
@@ -1236,4 +1278,3 @@ if TICKET_CAPABLE_RUNTIMES:
             f"{runtime.name}: ticket B update did not land; "
             f"summary={created.field_values.get('summary')!r}"
         )
-

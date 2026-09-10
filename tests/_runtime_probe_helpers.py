@@ -302,6 +302,24 @@ def _observed_ticket_id(payload: object) -> str | None:
 
 
 @contextmanager
+def reclaim_gated_worker(worker, gate, *, join_timeout):
+    """Release a gated live-test worker and join it on *every* exit path.
+
+    A timeout scenario keeps a background worker blocked on a response ``gate``
+    until the assertions have observed the committed transition. If one of those
+    assertions fails early, the gate must still be released and the daemon
+    thread joined, or a worker left blocked in ``execute_job`` / the MCP
+    round-trip leaks into the next live test. Yields for the caller's
+    assertions; the release-and-join runs whether they pass or raise.
+    """
+    try:
+        yield
+    finally:
+        gate.set()
+        worker.join(timeout=join_timeout)
+
+
+@contextmanager
 def record_ticket_tool_calls(*, before_dispatch=None, after_dispatch=None):
     """Observe every ticket tool the live run dispatches through the broker.
 
