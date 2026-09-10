@@ -139,3 +139,83 @@ UI counts `474 passed, 2 skipped` and deterministic `2574 passed` are historical
 ## Next Investigation Boundary
 
 The local-network one-job experiment is done and failed. The next minimal candidate, if approved, is a single instrumented replay combining the `allowLocalNetwork: true` wrapper with the earlier child connect-phase trace, so the remaining boundary can be narrowed to `TCP connect still blocked under this setting` versus `later broker/source failure after connect`. Alternatively, inspect the actual CLI→MCP translation to determine why the flag may not be restoring broker connectivity. Do not claim the network grant alone is sufficient, that TCP connect is now resolved, or that any broader permission or firewall change is needed. No merge, push, or waiver is claimed.
+
+## Task 3 — HTTP transport + consent live acceptance (2026-09-10, supersedes the BLOCKED restricted result)
+
+**Status:** the required restricted live ticket acceptance now **PASSES** through the
+approved per-agent `integration_config.allow_local_network: true` consent. This
+supersedes the "restricted live is unattainable" conclusion above: that conclusion was
+measured *without* the consent path, which the user subsequently approved. The consent is
+the only delta — no sandbox knob was widened by the test, no test-side sandbox patch or
+permission override was used, and no real user config was edited.
+
+Interpreter `./.superpowers/venv-cpython/Scripts/python.exe` (CPython 3.13.13, mcp SDK);
+Copilot CLI `1.0.84-3` (authenticated), model `gpt-5.6-sol`. Commands ran through
+controller-owned `Diagnostics/*` tasks (`run_in_terminal` was stuck in an alternate
+buffer); `.vscode/tasks.json` was not staged.
+
+### Live acceptance (`-m real_runtime`)
+
+```text
+pytest tests/test_ticket_runtime_live.py -m real_runtime -k requires_explicit_local_network -v
+=> 1 passed, 2.23s   (preflight: no-consent restricted ticket submission raises
+                      ValidationFailed code ticket-local-network-required at
+                      resolve_job_request, before any job record or CLI launch)
+
+pytest tests/test_ticket_runtime_live.py -m real_runtime -k reads_ticket_over_http_without_editing -v
+=> 1 passed, 25.57s  (restricted read/search-only run WITH consent calls ticket_get over
+                      MCP HTTP; ticket untouched; protected hashes unchanged)
+
+pytest tests/test_ticket_runtime_live.py -m real_runtime -k restricted_workspace_keeps_ticket_flow_and_records_denied_write -vv
+=> 1 passed, 86.17s  (restricted full artifact flow; the model's apply_patch write to
+                      blocked-note.txt was denied by the sandbox — success:false,
+                      "Outside the sandbox's writable paths.", sandbox_denied:true;
+                      write_attempts == ['blocked-note.txt']; retained artifact bytes ==
+                      on-disk result; protected hashes unchanged; active_run cleared)
+
+pytest tests/test_ticket_runtime_live.py -m real_runtime -k one_run_creates_updates_and_transitions_multiple_tickets -v
+=> 1 passed, 107.19s (one run started/updated/reported/transitioned ticket A to done AND
+                      created+operated ticket B; the dispatch observer captured
+                      ticket_create and ticket_update strictly before the terminal
+                      ticket_transition)
+
+pytest tests/test_ticket_runtime_live.py -m real_runtime -v
+=> 5 passed, 3 deselected, 1 warning, 392.64s (0:06:32)
+   (adds the unrestricted presatisfied full-flow control)
+```
+
+### Deterministic cross-layer lifecycle (real broker/service/provider/job lifecycle)
+
+```text
+pytest tests/test_ticket_end_to_end.py -q -k 'sign_off or stale or committed_transition_survives'
+=> 3 passed, 4.14s
+   - sign-off is optional (the ticket reaches done with no signed-off event; sign-off,
+     when used, releases the assignment)
+   - a stale transition is rejected as stale-ticket after a genuine intervening update,
+     then succeeds on refresh
+   - a committed transition survives a timed-out run (exit 124 + confirmed
+     ProcessStopEvidence): state stays done, assignment and retained artifact intact,
+     active_run cleared
+
+pytest tests/test_copilot_output.py -q
+=> 22 passed (adds apply_patch denied-write and add/update/delete change regressions)
+
+pytest tests/test_copilot_output.py tests/test_copilot_ticket_tools.py \
+  tests/test_ticket_runtime_live.py tests/test_ticket_end_to_end.py \
+  tests/test_job_execution.py -m 'not real_runtime' -q
+=> 77 passed, 5 deselected
+```
+
+### Production change
+
+`flowgency/integrations/flowgency/copilot.py` — the output parser now recognises the
+`apply_patch` tool used by `gpt-5.6-sol`, whose target files live in the patch envelope
+rather than an `arguments.path` field. A sandbox-denied patch is now recorded as a real
+write attempt, and a successful patch contributes add/modify/delete changes. Without this,
+a genuine denied write over `apply_patch` left no telemetry. The 64KiB result contract and
+the request field-type catalog were unchanged.
+
+### Still pending for the whole feature
+
+Full deterministic + UI matrix rerun under the transport/consent change, whole-branch
+review, and integration gates. No feature-complete claim is made here.
