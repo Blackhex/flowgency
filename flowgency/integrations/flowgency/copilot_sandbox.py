@@ -83,13 +83,16 @@ def build_sandbox_settings(
     if allow_local_network:
         user_policy["network"] = {"allowLocalNetwork": True}
 
+    # The installed CLI (1.0.84-3) reads git/gh injection from ``sandbox.auth``;
+    # the older top-level ``gitAuth``/``ghAuth`` keys are logged as unknown and
+    # have no effect. Tokens are only injected while the sandbox is enabled, so
+    # the denial is enforceable exactly when ``confines`` is true.
     return {
-        "gitAuth": credentialed,
-        "ghAuth": credentialed,
         "sandbox": {
             "enabled": confines,
             "allowBypass": False,
             "addCurrentWorkingDirectory": False,
+            "auth": {"git": credentialed, "gh": credentialed},
             "userPolicy": user_policy,
         },
     }, tuple(unenforceable)
