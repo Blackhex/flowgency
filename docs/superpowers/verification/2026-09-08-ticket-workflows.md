@@ -2,13 +2,22 @@
 
 **Branch:** `feat/ticket-workflows`  
 **Worktree:** `C:/Projekty/Flowgency/.worktrees/ticket-workflows`  
-**HEAD:** `a19af6d`  
-**Recorded:** 2026-09-09  
-**Status:** `BLOCKED` — required restricted live acceptance is still failing in the measured environment.
+**HEAD:** `a49ecd4`  
+**Recorded:** 2026-09-10  
+**Status:** `BLOCKED` — the user-approved isolated non-Store CPython experiment unblocked restricted MCP startup, but the required restricted live acceptance still fails later at broker request time.
 
 ## Scope
 
-This note records Task 16 verification checkpoints. It does not claim feature scope was added at verification time, does not waive remaining gates, and does not replace branch review or integration.
+This note records Task 16 verification checkpoints and the bounded 2026-09-10 non-Store interpreter experiment. It does not waive any remaining gate and does not replace whole-branch review or integration.
+
+## Latest Outcome
+
+- The isolated non-Store install was completed and measured. `uv` was already present, `uv --no-config python install 3.13.14 --no-bin --no-registry` was unavailable (`catalog not found`), and `uv --no-config python install 3.13` selected CPython `3.13.13` under `.superpowers/python/cpython-3.13.13-windows-x86_64-none`.
+- New virtual environment: `.superpowers/venv-cpython`. Original `.venv` Store CPython `3.13.14` remained untouched. No PATH, registry, default-Python, or global-auth settings changed.
+- `uv pip freeze` comparison excluding the editable install matched 50 package versions across the two environments. The application remained editable from this feature worktree. The patch difference `3.13.14` vs `3.13.13` is real, so this was not a single-bit-controlled environment swap.
+- Test-only commit `a49ecd4` reinjects `__PYVENV_LAUNCHER__` into each generated native `Popen` in the live-process tests. That fixes CPython child portability in tests only. It does not change production launcher policy, sandbox policy, or native process containment.
+- The old Store-only symptom, where `flowgency-tickets` tools never appeared, is now historical for this experiment. In the restricted non-Store run the MCP server initialized, tools registered, and `ticket_get` executed.
+- Acceptance is still blocked because both live `ticket_get` calls returned `Ticket broker is unavailable`, the ticket stayed in `review`, and no artifact publication or workspace write was reached.
 
 ## Checkpoints
 
@@ -16,91 +25,85 @@ This note records Task 16 verification checkpoints. It does not claim feature sc
 | --- | --- | --- | --- |
 | Clean baseline in the feature worktree | `89c0cb2` | 2222 passed, 6 skipped, 1 warning | `.superpowers/sdd/2026-09-08-ticket-workflows/baseline-clean.txt` |
 | Deterministic verification checkpoint | `98345fc` | 2574 passed, 7 skipped, 5 deselected, 1 warning | `.superpowers/sdd/2026-09-08-ticket-workflows/task-16-deterministic-green.txt` |
-| Full UI matrix | `9ede8d3` | `npm run test:ui -- --reporter=dot` -> 474 passed, 2 skipped, 10.2m, exit 0 | `.superpowers/sdd/2026-09-08-ticket-workflows/task-16b-ui-final.txt` |
-| Native-launch containment repair slice | `374a356` | 62 passed, 2 skipped, 1 warning | superseding section in `.superpowers/sdd/2026-09-08-ticket-workflows/task-16-report.md` |
-| Required restricted live probe | `374a356` + uncommitted live test | 1 failed, 4 deselected, 1 warning, 21.47s | superseding section in `.superpowers/sdd/2026-09-08-ticket-workflows/task-16-report.md` |
+| Full UI matrix | `9ede8d3` | `npm run test:ui -- --reporter=dot` -> 474 passed, 2 skipped, exit 0 | `.superpowers/sdd/2026-09-08-ticket-workflows/task-16b-ui-final.txt` |
+| Native-launch containment repair slice | `374a356` | 62 passed, 2 skipped, 1 warning | superseding Task 16 report section |
+| Required restricted live probe, Store `.venv` | `374a356` + uncommitted live test | 1 failed, 4 deselected, 1 warning, 21.47s | superseding Task 16 report section |
+| Non-Store portability correction | `a49ecd4` | 27 passed, 2 skipped, 1 warning | `task-16-report.md`, `task-16c-cpython-launch.txt/xml` |
+| Required restricted live probe, non-Store `.superpowers/venv-cpython` | `a49ecd4` + uncommitted live test | 1 failed, 4 deselected, 1 warning, 59.80s first probe; 53.39s bounded retry | `task-16c-cpython-live.txt/xml`, `task-16c-cpython-diag-runtime.xml` |
 
-`89c0cb2` was not `master`; it was the clean baseline rerun inside this feature worktree.
+`89c0cb2` was the clean baseline rerun inside this feature worktree, not `master`.
 
 ## Commands And Evidence
 
-### Baseline and deterministic
+### Historical baseline and UI
 
 ```text
 .venv/Scripts/python.exe -m pytest tests/ -q
 => 2222 passed, 6 skipped, 1 warning in 259.19s
-```
 
-```text
 .venv/Scripts/python.exe -m pytest tests/ -m 'not real_runtime' -q \
   --junitxml=.superpowers/sdd/2026-09-08-ticket-workflows/task-16-deterministic-green.xml
 => 2574 passed, 7 skipped, 5 deselected, 1 warning in 295.97s
-```
 
-The deterministic checkpoint is a historical verification checkpoint at `98345fc`, not a full current-tip rerun.
-
-### UI verification
-
-```text
 npm run test:ui -- --reporter=dot
-=> 474 passed, 2 skipped (10.2m), exit 0
+=> 474 passed, 2 skipped, exit 0
 ```
 
-No `--update-snapshots` was used in that normal UI green run. The two skips are the desktop members of a mobile-only navigation test.
+Snapshot order matters: `cca63d1` committed the 96-file snapshot baseline first, and `9ede8d3` later regenerated only the eight settings/create/error PNGs. No `--update-snapshots` was used in the normal UI green run.
 
-Snapshot baseline commit `cca63d1` committed 96 remaining PNGs; no dirty PNG set remained after that snapshot commit. Commit `9ede8d3` later regenerated only the eight settings/create/error PNGs.
-
-Approved actual-versus-source UI checks covered eight image pairs plus the corrected create/error images. The reviewed surfaces were UI-scoped and approved by direct comparison against the source assets in [docs/superpowers/specs/assets/2026-09-07-ticket-workflows](../../specs/assets/2026-09-07-ticket-workflows).
-
-Actual snapshot directories reviewed:
-
-| Surface | Actual snapshots | Approved source assets |
-| --- | --- | --- |
-| Workflow board / ticket | [tests/ui/workflow_board.spec.ts-snapshots](../../../tests/ui/workflow_board.spec.ts-snapshots) | [docs/superpowers/specs/assets/2026-09-07-ticket-workflows](../../specs/assets/2026-09-07-ticket-workflows) |
-| Workflow overview / states / transitions | [tests/ui/workflow_library.spec.ts-snapshots](../../../tests/ui/workflow_library.spec.ts-snapshots) | [docs/superpowers/specs/assets/2026-09-07-ticket-workflows](../../specs/assets/2026-09-07-ticket-workflows) |
-| Workflow settings / create / storage error | [tests/ui/workflow_settings.spec.ts-snapshots](../../../tests/ui/workflow_settings.spec.ts-snapshots) | [docs/superpowers/specs/assets/2026-09-07-ticket-workflows](../../specs/assets/2026-09-07-ticket-workflows) |
-
-Reviewed filenames include `workflow-ticket-desktop-*`, `workflow-ticket-mobile-*`, `workflow-overview-*`, `workflow-states-*`, `workflow-transitions-*`, `workflow-create-*`, and `workflow-storage-error-*`. Earlier references to non-existent `workflow-ticket-detail-*` and `workflow-library-*` files were inaccurate.
-
-### Live-runtime facts
-
-Authentication evidence came from:
+### Non-Store environment and focused validation
 
 ```text
-.venv/Scripts/python.exe -m pytest tests/test_runtime_projectors_live.py \
-  -m real_runtime -k 'basic and copilot'
-=> 1 passed in 19.36s
+uv --no-config python install 3.13
+=> selected CPython 3.13.13 under .superpowers/python/cpython-3.13.13-windows-x86_64-none
+
+.superpowers/venv-cpython/Scripts/python.exe -m pytest \
+  tests/test_runtime_process_lifecycle.py tests/test_copilot_ticket_tools.py tests/test_ticket_mcp.py -q
+=> 26 passed, 1 failed, 2 skipped, 1 warning
+
+.superpowers/venv-cpython/Scripts/python.exe -m pytest \
+  tests/test_runtime_process_lifecycle.py tests/test_copilot_ticket_tools.py tests/test_ticket_mcp.py -q
+=> 27 passed, 2 skipped, 1 warning
+
+.venv/Scripts/python.exe -m pytest tests/test_runtime_process_lifecycle.py \
+  -k test_run_supervised_timeout_kills_native_descendants_after_root_exit -v
+=> 1 passed, 18 deselected in 1.24s
 ```
 
-That probe verifies basic CLI authentication only. It does not prove ticket acceptance and does not prove MCP success under restriction.
+The first non-Store failure was the CPython `__PYVENV_LAUNCHER__` test-environment bug fixed in `a49ecd4`. The focused Store rerun stayed green, which confirms the test-only portability fix did not break the original environment.
 
-The recorded Python launcher fact is narrower than the earlier doc claimed: `py --list-paths` showed only a Microsoft Store Python 3.13 installation under WindowsApps. No standard non-Store CPython was present.
-
-Earlier unrestricted live passes at `dc4eb0d` used a temporarily relaxed launcher and are superseded. They are not accepted as read-only or artifact-retention proof, and no hardcoded `42 passed` claim is accepted as live evidence.
-
-### Restored containment and restricted live blocker
-
-Commit `374a356` restored the native ticket MCP launcher because the real Task 9b boundary evidence showed the WindowsApps alias path can escape the Job Object under the relaxed launcher. StdIO EOF was not confirmed as a stop guarantee.
-
-The measured environment also showed MCP unavailable under restriction. That is an observed environment result here, not a universal claim that all configurations fail.
-
-Required restricted probe:
+### Required restricted live probe
 
 ```text
-.venv/Scripts/python.exe -m pytest tests/test_ticket_runtime_live.py \
-  -m real_runtime -k restricted_workspace -v
-=> 1 failed, 4 deselected, 1 warning in 21.47s
+.superpowers/venv-cpython/Scripts/python.exe -m pytest tests/test_ticket_runtime_live.py \
+  -m real_runtime -k restricted_workspace -v \
+  --basetemp=.superpowers/sdd/2026-09-08-ticket-workflows/task-16c-cpython-live-runtime \
+  --junitxml=.superpowers/sdd/2026-09-08-ticket-workflows/task-16c-cpython-live.xml
+=> 1 failed, 4 deselected, 1 warning in 59.80s
+
+.superpowers/venv-cpython/Scripts/python.exe -m pytest tests/test_ticket_runtime_live.py \
+  -m real_runtime -k restricted_workspace -v \
+  --basetemp=.superpowers/sdd/2026-09-08-ticket-workflows/task-16c-cpython-diag-runtime \
+  --junitxml=.superpowers/sdd/2026-09-08-ticket-workflows/task-16c-cpython-diag-runtime.xml
+=> 1 failed, 4 deselected, 1 warning in 53.39s
 ```
 
-Observed result recorded in the Task 16 report:
+Measured restricted-runtime facts:
 
-- model output reported the `flowgency-tickets` tools were unavailable before any artifact publication or write attempt
-- persisted job state still ended `complete` with exit `0`
-- the ticket remained in `review`
-- `write_attempts` stayed empty because the tools never became available
-- `changed_files` stayed empty
+- Copilot version remained `1.0.84-3`.
+- Security sample stayed constrained: `sandbox.enabled=true`, `allowBypass=false`, workspace read-only, `gitAuth=false`, `ghAuth=false`.
+- The MCP service initialized as `flowgency-tickets`, tools registered, and `ticket_get` ran twice.
+- Each `ticket_get` took about 5.3s, close to `BROKER_CLIENT_TIMEOUT_SECONDS = 5.0`.
+- The returned tool payload was the unchanged redacted broker error: `Ticket broker is unavailable`.
+- No ticket mutation, artifact publication, or workspace write attempt occurred. The ticket remained in `review`; `write_attempts` and `changed_files` stayed empty.
 
-Earlier native and PowerShell errors support an environment hypothesis, but they should not be conflated into a single root-cause claim. The measured statement is narrower: this installed environment blocked the required restricted ticket-tool run before the workflow could proceed.
+### Root-cause boundary
+
+The experiment changed the blocker from startup failure to post-startup broker failure. The best current hypothesis is a timeout or connectivity problem on the sandboxed bridge's localhost broker transport. The exact live OS error remains unknown.
+
+Do not quote `10061` as the live cause here. That code was captured only from the deliberate shutdown unit control, not from the restricted live artifacts. A bounded temporary broker warning logged only safe exception metadata, did not surface in the live MCP stderr, and was removed immediately with no production diff.
+
+Earlier unrestricted live passes from `dc4eb0d` remain superseded and are not accepted as evidence for the required restricted workflow gate.
 
 ## Protected Inputs
 
@@ -116,10 +119,8 @@ The protected hashes asserted by the live probes covered the temporary config, c
 | Whole-branch review | Pending |
 | Integration / merge / push | Not started |
 
-The required failing live probe lives in the uncommitted `tests/test_ticket_runtime_live.py` state referenced by the superseding Task 16 report section. Known untracked files preserved throughout: `config.yaml.example.lock` and `tests/test_records_worker.py`. No SDD artifacts were committed.
+UI counts `474 passed, 2 skipped` and deterministic `2574 passed` are historical checkpoints, not 2026-09-10 reruns. No merge, push, or waiver is claimed. The uncommitted live acceptance tightening in `tests/test_ticket_runtime_live.py`, plus preserved local `config.yaml.example.lock` and `tests/test_records_worker.py`, remain outside this docs-only commit.
 
-## Blocked Requirement And Next Prerequisite
+## Next Investigation Boundary
 
-The missing prerequisite is still environmental: an isolated standard non-Store CPython and a Copilot environment compatible with the reviewed native launcher may be needed to retry the restricted live acceptance path. That candidate is untested and not guaranteed.
-
-No partial-live-evidence waiver is accepted here. Existing deterministic, UI, live, and review gates remain mandatory. The only approval this record asks for before more runtime work is the environment change needed to measure the restricted live path again.
+The next justified investigation is the sandboxed bridge-to-loopback broker path and its timeout behavior. This record does not prove a Windows Firewall cause, does not prove all configurations impossible, and does not justify broader permission changes, localhost policy grants, bypass enablement, or a CLI upgrade as part of this checkpoint.
