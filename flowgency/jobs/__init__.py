@@ -20,7 +20,6 @@ from .models import (
     TicketJobTarget,
 )
 from .processes import ProcessStopEvidence, may_clear_active_work
-from .resolution import JobValidationError, resolve_job_request
 from .store import (
     active_jobs,
     cancel_job,
@@ -28,7 +27,6 @@ from .store import (
     latest_executed_job,
     latest_terminal_job,
 )
-from .submission import JobSubmissionError, submit_job_request
 
 
 def reconcile_jobs(teams: dict, *, memory_store_root):
@@ -56,6 +54,20 @@ def queue_snapshot(config, *, memory_store):
 
 
 def __getattr__(name):
+    if name in {"JobSubmissionError", "submit_job_request"}:
+        from .submission import JobSubmissionError, submit_job_request
+
+        return {
+            "JobSubmissionError": JobSubmissionError,
+            "submit_job_request": submit_job_request,
+        }[name]
+    if name in {"JobValidationError", "resolve_job_request"}:
+        from .resolution import JobValidationError, resolve_job_request
+
+        return {
+            "JobValidationError": JobValidationError,
+            "resolve_job_request": resolve_job_request,
+        }[name]
     if name in {"CleanupResult", "TicketJobCoordinator"}:
         from .tickets import CleanupResult, TicketJobCoordinator
 
