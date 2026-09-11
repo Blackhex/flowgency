@@ -59,12 +59,14 @@ test.afterEach(async ({ page, request }) => {
 
 test('existing workflow settings stay editable and preserve compact approved layout', async ({ page }, testInfo) => {
   await page.goto('/newsletter/workflows/delivery/settings');
+  const storageRoot = page.getByLabel('Storage root', { exact: true });
 
   await expect(page.locator('h1')).toContainText('Delivery settings');
   await expect(page.getByLabel('Name', { exact: true })).toBeEnabled();
   await expect(page.getByLabel('Blueprint', { exact: true })).toBeEnabled();
   await expect(page.getByLabel('Integration', { exact: true })).toBeEnabled();
-  await expect(page.getByLabel('Storage root', { exact: true })).toBeEnabled();
+  await expect(storageRoot).toBeEnabled();
+  await expect(storageRoot).toHaveValue(/tests[\\/]ui[\\/]\.runtime[\\/]current[\\/]tickets[\\/]delivery$/);
   await expect(page.getByText(/Blueprint and storage in use/)).toHaveCount(0);
   await expect(page.getByLabel(/identifier/i)).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Workflow settings', exact: true })).toHaveCount(0);
@@ -83,10 +85,11 @@ test('existing workflow settings stay editable and preserve compact approved lay
   await tabTo(page, { role: 'textbox', name: 'Storage root' });
   await tabTo(page, { role: 'button', name: 'Check storage' });
   await assertNoLayoutIssues(page);
+  // The storage root value is checkout-dependent; assert it separately and mask only the input text.
   if (testInfo.project.name.startsWith('mobile')) {
-    await expect(page).toHaveScreenshot('workflow-settings-mobile.png', { fullPage: true });
+    await expect(page).toHaveScreenshot('workflow-settings-mobile.png', { fullPage: true, mask: [storageRoot] });
   } else {
-    await expect(page).toHaveScreenshot('workflow-settings.png', { fullPage: true });
+    await expect(page).toHaveScreenshot('workflow-settings.png', { fullPage: true, mask: [storageRoot] });
   }
   await assertNoConsoleErrors(page);
 });
@@ -304,14 +307,17 @@ test('check storage distinguishes unavailable from empty and create follows sele
   await expect(page.getByLabel(/identifier/i)).toHaveCount(0);
   await page.getByLabel('Blueprint', { exact: true }).selectOption('research-workflow');
   await expect(page.getByRole('link', { name: 'Open blueprint', exact: true })).toHaveAttribute('href', '/admin/workflow-library/blueprints/research-workflow');
+  const storageRoot = page.getByLabel('Storage root', { exact: true });
   await page.getByLabel('Name', { exact: true }).fill('Investigation');
-  await fillStorageRoot(page, path.join(path.dirname(originalRoot), 'investigation-root'));
+  const investigationRoot = path.join(path.dirname(originalRoot), 'investigation-root');
+  await fillStorageRoot(page, investigationRoot);
+  await expect(storageRoot).toHaveValue(investigationRoot);
   // Screenshot of the filled create form before submission
   await assertNoLayoutIssues(page);
   if (testInfo.project.name.startsWith('mobile')) {
-    await expect(page).toHaveScreenshot('workflow-create-mobile.png', { fullPage: true });
+    await expect(page).toHaveScreenshot('workflow-create-mobile.png', { fullPage: true, mask: [storageRoot] });
   } else {
-    await expect(page).toHaveScreenshot('workflow-create.png', { fullPage: true });
+    await expect(page).toHaveScreenshot('workflow-create.png', { fullPage: true, mask: [storageRoot] });
   }
 
   const saveCreated = page.waitForResponse((response) => response.url().includes('/newsletter/workflows/new') && response.request().method() === 'POST');
