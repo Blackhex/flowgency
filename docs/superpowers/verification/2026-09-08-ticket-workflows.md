@@ -4,6 +4,8 @@ Branch: `fix/ticket-artifact-exact-bytes`
 Worktree: `C:/Projekty/Flowgency/.worktrees/ticket-artifact-exact-bytes`
 Base: `9bcd218`
 Recorded: 2026-09-10
+Documentation updated: 2026-09-11 (restored transport/version/asset references dropped
+from this checkpoint; no new test run performed for this update)
 Status: `REPAIR WORKTREE VERIFIED / MAIN INTEGRATION REQUIRED`
 
 ## Repair checkpoint scope
@@ -20,6 +22,29 @@ and the job must successfully read the exact file before
 `ticket_artifact_publish`. Strict stored-byte equality, protected hashes, the
 actual transition flow, and the restricted-policy denied-write proof remain in
 force.
+
+## Retained transport, environment, and asset references
+
+- Current transport (unchanged by this repair): Copilot ticket tools use a
+  worker-owned authenticated loopback MCP HTTP endpoint. Restricted Copilot
+  ticket runs keep local-network access off by default and require explicit
+  per-agent `integration_config.allow_local_network: true`; this repair made
+  no policy change to that consent gate.
+- Measured runtime: Copilot CLI `1.0.84-3`, non-Store CPython `3.13.13`. The
+  repair worktree ran under its own `.venv`; the main-workspace verification
+  environment is the separately owned
+  `.superpowers/ticket-workflows-integration/venv` (not installed or changed
+  by this repair).
+- Design and plan references:
+  [ticket HTTP transport design](../specs/2026-09-10-ticket-http-transport-design.md),
+  [ticket HTTP transport plan](../plans/2026-09-10-ticket-http-transport.md),
+  [ticket workflows design](../specs/2026-09-08-ticket-workflows-design.md).
+- Approved design assets:
+  [workflow overview desktop](../specs/assets/2026-09-07-ticket-workflows/workflow-overview-desktop.png),
+  [workflow overview mobile](../specs/assets/2026-09-07-ticket-workflows/workflow-overview-mobile.png).
+- Current verified UI screenshots:
+  [board overview desktop](../../../tests/ui/workflow_board.spec.ts-snapshots/workflow-board-overview-desktop-light-win32.png),
+  [board overview mobile](../../../tests/ui/workflow_board.spec.ts-snapshots/workflow-board-mobile-mobile-light-win32.png).
 
 ## Verified worktree evidence
 
