@@ -12,7 +12,7 @@ from flowgency.configuration import ValidationFailed
 from flowgency.configuration.store import ConfigConflictError
 from flowgency.tickets.models import StorageBinding
 from flowgency.web.dependencies import FlowgencyServices, get_services
-from flowgency.web.routes.workflows import _team_context, _workflow_nav
+from flowgency.web.team_navigation import build_team_context
 from flowgency.web.workflow_context import user_context
 from flowgency.workflows.configuration import require_compatible
 from flowgency.workflows.forms import WorkflowSettingsForm
@@ -157,18 +157,18 @@ def _form_context(
     health: dict[str, Any] | None = None,
     status_code: int = 200,
 ) -> HTMLResponse:
-    ticket_service = services.tickets
-    actor = None
-    workflow_nav = []
-    if ticket_service is not None:
-        actor = user_context(team_id)
-        workflow_nav = _workflow_nav(ticket_service, actor, snapshot, team_id)
-    context = _team_context(request, snapshot, team_id)
+    context = build_team_context(
+        snapshot,
+        team_id,
+        theme_css=_theme_css(request),
+        show_tips=False,
+        tips_dismissed=[],
+        ticket_service=services.tickets,
+    )
     context.update(
         {
             "request": request,
             "active": "workflow-board",
-            "workflow_nav": workflow_nav,
             "active_workflow_id": None if create_mode else workflow_id,
             "flowgency_title": snapshot.config.flowgency.title,
             "theme_css": _theme_css(request),

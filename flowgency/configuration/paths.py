@@ -493,7 +493,38 @@ def initialize_storage_directories(config: FlowgencyConfig) -> None:
         _ensure_real_directory(path, create=True)
 
 
+def _local_workflow_roots(config: FlowgencyConfig) -> tuple[Path, ...]:
+    roots: dict[str, Path] = {}
+    for team in config.teams.values():
+        for workflow in team.workflows.values():
+            if workflow.integration != "local":
+                continue
+            root_value = workflow.integration_config.get("root")
+            if root_value is None:
+                continue
+            root = Path(str(root_value)).resolve(strict=False)
+            roots.setdefault(_path_key(root), root)
+    return tuple(roots.values())
+
+
+def initialize_new_local_workflow_roots(
+    config: FlowgencyConfig,
+    *,
+    previous_config: FlowgencyConfig | None,
+) -> None:
+    previous_roots = set()
+    if previous_config is not None:
+        previous_roots = {
+            _path_key(root) for root in _local_workflow_roots(previous_config)
+        }
+    for root in _local_workflow_roots(config):
+        if _path_key(root) in previous_roots:
+            continue
+        _ensure_real_directory(root, create=True)
+
+
 __all__ = [
+    "initialize_new_local_workflow_roots",
     "initialize_storage_directories",
     "job_store_root",
     "validate_resolved_paths",

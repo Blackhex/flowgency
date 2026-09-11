@@ -14,7 +14,11 @@ from flowgency.fs.locks import exclusive_lock
 
 from .issues import ValidationFailed
 from .models import FlowgencyConfig, parse_config
-from .paths import initialize_storage_directories, validate_resolved_paths
+from .paths import (
+    initialize_new_local_workflow_roots,
+    initialize_storage_directories,
+    validate_resolved_paths,
+)
 
 
 ABSENT_REVISION = "absent"
@@ -93,6 +97,10 @@ class ConfigStore:
             payload = self._encode(raw)
             candidate = self._validated_config(raw)
             initialize_storage_directories(candidate)
+            initialize_new_local_workflow_roots(
+                candidate,
+                previous_config=None,
+            )
             atomic_write_bytes(self.path, payload)
         return self._snapshot(payload)
 
@@ -103,6 +111,11 @@ class ConfigStore:
     ) -> ConfigSnapshot:
         with exclusive_lock(self.lock_path, wait=True):
             original = self.path.read_bytes() if self.path.exists() else None
+            previous_config = (
+                self._snapshot(original).config
+                if original is not None
+                else None
+            )
             current_revision = (
                 config_revision(original)
                 if original is not None
@@ -120,6 +133,10 @@ class ConfigStore:
                 )
             candidate = self._validated_config(raw)
             initialize_storage_directories(candidate)
+            initialize_new_local_workflow_roots(
+                candidate,
+                previous_config=previous_config,
+            )
             atomic_write_bytes(self.path, updated)
         return self._snapshot(updated)
 
@@ -130,6 +147,7 @@ class ConfigStore:
     ) -> ConfigSnapshot:
         with exclusive_lock(self.lock_path, wait=True):
             original = self.path.read_bytes()
+            previous_config = self._snapshot(original).config
             if config_revision(original) != expected_revision:
                 raise ConfigConflictError(
                     "config.yaml changed; reload before saving"
@@ -143,6 +161,10 @@ class ConfigStore:
                 )
             candidate = self._validated_config(raw)
             initialize_storage_directories(candidate)
+            initialize_new_local_workflow_roots(
+                candidate,
+                previous_config=previous_config,
+            )
             atomic_write_bytes(self.path, updated)
         return self._snapshot(updated)
 

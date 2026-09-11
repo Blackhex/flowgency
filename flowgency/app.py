@@ -66,6 +66,7 @@ from flowgency.workspaces import REGISTRY as WORKSPACE_REGISTRY
 from flowgency.web import FlowgencyServices, build_services, get_services
 from flowgency.web.log_preview import read_log_preview
 from flowgency.web.state import flowgency_settings, runtime_team
+from flowgency.web.team_navigation import build_team_context
 from flowgency.web.routes import (
     admin_teams_router,
     admin_library_router,
@@ -433,29 +434,14 @@ def team_context(g: dict) -> dict:
     """Return standard template context for a team."""
     snapshot = _load_snapshot()
     flowgency = flowgency_settings(snapshot)
-    team_cfg = snapshot.config.teams[g["key"]]
-    return {
-        "team": g["key"],
-        "team_name": g["name"],
-        "teams": {
-            key: value.name for key, value in snapshot.config.teams.items()
-        },
-        "flowgency_title": flowgency.get("title", "Flowgency"),
-        "admin_active": False,
-        "workspaces": [
-            workspace.model_dump(mode="json")
-            for workspace in team_cfg.workspaces
-        ],
-        "workspaces_available": bool(team_cfg.workspaces),
-        "nav_open_observations": 0,
-        "nav_actionable": 0,
-        "nav_actionable_proposals": 0,
-        "nav_agent_count": len(g["agents"]),
-        "nav_running_decisions": 0,
-        "show_tips": flowgency.get("show_tips", True),
-        "tips_dismissed": flowgency.get("tips_dismissed", []),
-        "theme_css": get_theme_css(),
-    }
+    return build_team_context(
+        snapshot,
+        g["key"],
+        theme_css=get_theme_css(),
+        show_tips=flowgency.get("show_tips", True),
+        tips_dismissed=flowgency.get("tips_dismissed", []),
+        ticket_service=_services().tickets,
+    )
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

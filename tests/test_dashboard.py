@@ -2,6 +2,7 @@
 from copy import deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
+import re
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -80,6 +81,12 @@ def _add_second_workflow(env, root, *, name="Board B", workflow_id="board-b"):
     )
 
 
+def _sidebar_html(body: str) -> str:
+    match = re.search(r'<nav id="sidebar".*?</nav>', body, re.DOTALL)
+    assert match is not None
+    return match.group(0)
+
+
 def test_home_partial_workflow_availability_preserves_readable_board(workflow_web_env):
     import shutil
 
@@ -115,6 +122,70 @@ def test_home_empty_configured_workflow_reports_zero_not_unavailable(workflow_we
     assert "0 tickets" in body
     assert "Ticket storage root does not exist" not in body
     assert "unavailable" not in body.lower()
+
+
+@pytest.mark.parametrize("path", ["/{team}/", "/{team}/agents/builder/profile", "/{team}/jobs"])
+def test_team_sidebar_lists_current_team_workflows_on_non_workflow_pages(
+    workflow_web_env,
+    path,
+):
+    env = workflow_web_env
+    _add_second_workflow(env, env.root_b, name="Board B", workflow_id="board-b")
+
+    response = env.client.get(path.format(team=env.team_id))
+
+    assert response.status_code == 200
+    sidebar = _sidebar_html(response.text)
+    assert sidebar.count(f'href="/{env.team_id}/workflows/board-a"') == 1
+    assert sidebar.count(f'href="/{env.team_id}/workflows/board-b"') == 1
+    assert sidebar.count('aria-label="New workflow"') == 1
+    assert "Board A" in sidebar
+    assert "Board B" in sidebar
+    assert 'href="/support/workflows/board-a"' not in sidebar
+
+
+def test_team_sidebar_marks_unavailable_workflows_without_false_zero_count(
+    workflow_web_env,
+):
+    import shutil
+
+    env = workflow_web_env
+    _add_second_workflow(env, env.root_b, name="Board B", workflow_id="board-b")
+    shutil.rmtree(env.root_b)
+
+    response = env.client.get(f"/{env.team_id}/")
+
+    assert response.status_code == 200
+    sidebar = _sidebar_html(response.text)
+    assert "Board B" in sidebar
+    assert 'data-workflow-state="unavailable"' in sidebar
+    assert 'href="/support/workflows/board-a"' not in sidebar
+
+
+def test_team_sidebar_offers_new_workflow_when_team_has_no_configured_workflows(
+    monkeypatch,
+    tmp_path,
+    raw_config,
+):
+    raw = deepcopy(raw_config)
+    workflow_library = tmp_path / "workflow-library"
+    (workflow_library / "delivery").mkdir(parents=True)
+    (workflow_library / "delivery" / "workflow.yaml").write_text(
+        yaml.safe_dump({"name": "Delivery", "states": [], "transitions": []}, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    raw["flowgency"]["workflow_library"] = str(workflow_library)
+    raw["teams"]["newsletter"]["workflows"] = {}
+
+    client, _, _ = _seed_dashboard_app(monkeypatch, tmp_path, raw)
+
+    response = client.get("/newsletter/")
+
+    assert response.status_code == 200
+    sidebar = _sidebar_html(response.text)
+    assert "Workflows" in sidebar
+    assert sidebar.count('aria-label="New workflow"') == 1
+    assert 'href="/newsletter/workflows/new"' in sidebar
 
 
 def _write_yaml(path: Path, raw: dict) -> Path:

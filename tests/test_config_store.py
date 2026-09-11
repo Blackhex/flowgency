@@ -331,3 +331,64 @@ def test_create_validates_before_initializing_storage(raw_config, config_paths):
     assert not job_store_root(config_paths["memory_store"]).exists()
     assert not config_paths["team_path"].exists()
     assert not config_paths["config_path"].exists()
+
+
+def test_create_initializes_new_local_workflow_roots(raw_config, config_paths):
+    from flowgency.configuration.store import ConfigStore
+
+    local_root = config_paths["config_dir"] / "tickets" / "shared"
+    workflow_library = config_paths["config_dir"] / "workflow-library"
+    workflow_library.mkdir()
+    raw = deepcopy(raw_config)
+    raw["flowgency"]["workflow_library"] = str(workflow_library)
+    raw["teams"]["newsletter"]["workflows"] = {
+        "delivery": {
+            "name": "Delivery",
+            "blueprint": "delivery",
+            "integration": "local",
+            "integration_config": {"root": str(local_root)},
+        },
+        "research": {
+            "name": "Research",
+            "blueprint": "research",
+            "integration": "local",
+            "integration_config": {"root": str(local_root)},
+        },
+    }
+
+    ConfigStore(config_paths["config_path"]).create(raw)
+
+    assert local_root.is_dir()
+
+
+def test_patch_does_not_recreate_missing_registered_local_workflow_root_on_unrelated_change(
+    raw_config, config_paths
+):
+    from flowgency.configuration.store import ConfigStore
+
+    local_root = config_paths["config_dir"] / "tickets" / "shared"
+    workflow_library = config_paths["config_dir"] / "workflow-library"
+    workflow_library.mkdir()
+    raw = deepcopy(raw_config)
+    raw["flowgency"]["workflow_library"] = str(workflow_library)
+    raw["teams"]["newsletter"]["workflows"] = {
+        "delivery": {
+            "name": "Delivery",
+            "blueprint": "delivery",
+            "integration": "local",
+            "integration_config": {"root": str(local_root)},
+        }
+    }
+    store = ConfigStore(config_paths["config_path"])
+    created = store.create(raw)
+
+    local_root.rmdir()
+    assert not local_root.exists()
+
+    updated = store.patch(
+        created.revision,
+        lambda current: current["flowgency"].__setitem__("title", "Updated"),
+    )
+
+    assert updated.raw["flowgency"]["title"] == "Updated"
+    assert not local_root.exists()

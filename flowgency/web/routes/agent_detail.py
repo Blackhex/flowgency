@@ -46,6 +46,7 @@ from flowgency.prompts.catalog import effective_prompt_catalog
 from flowgency.tickets.models import UserTicketContext
 from flowgency.tickets.views import build_board_view
 from flowgency.web.dependencies import FlowgencyServices, get_services
+from flowgency.web.team_navigation import build_team_context
 
 
 router = APIRouter()
@@ -79,24 +80,14 @@ def _theme_css(request: Request) -> str:
 
 
 def _team_context(request: Request, snapshot, team_id: str) -> dict[str, Any]:
-    team_cfg = snapshot.config.teams[team_id]
-    return {
-        "team": team_id,
-        "team_name": team_cfg.name,
-        "teams": {key: value.name for key, value in snapshot.config.teams.items()},
-        "flowgency_title": snapshot.config.flowgency.title,
-        "admin_active": False,
-        "workspaces": [workspace.model_dump(mode="json") for workspace in team_cfg.workspaces],
-        "workspaces_available": bool(team_cfg.workspaces),
-        "nav_open_observations": 0,
-        "nav_actionable": 0,
-        "nav_actionable_proposals": 0,
-        "nav_agent_count": len(team_cfg.agents),
-        "nav_running_decisions": 0,
-        "show_tips": False,
-        "tips_dismissed": [],
-        "theme_css": _theme_css(request),
-    }
+    return build_team_context(
+        snapshot,
+        team_id,
+        theme_css=_theme_css(request),
+        show_tips=False,
+        tips_dismissed=[],
+        ticket_service=request.app.state.services.tickets,
+    )
 
 
 def _get_snapshot_instance(snapshot, team_id: str, agent_id: str):

@@ -11,6 +11,7 @@ from starlette.concurrency import run_in_threadpool
 
 from flowgency.tickets.views import build_board_view
 from flowgency.web.dependencies import FlowgencyServices, get_services
+from flowgency.web.team_navigation import build_team_context
 from flowgency.web.workflow_context import require_team_and_workflow, require_ticket_services
 
 
@@ -26,37 +27,16 @@ def _theme_css(request: Request) -> str:
 
 
 def _team_context(request: Request, snapshot, team_id: str) -> dict[str, Any]:
-    team_cfg = snapshot.config.teams[team_id]
-    return {
-        "team": team_id,
-        "team_name": team_cfg.name,
-        "team_agents": tuple(team_cfg.agents.keys()),
-        "teams": {key: value.name for key, value in snapshot.config.teams.items()},
-        "flowgency_title": snapshot.config.flowgency.title,
-        "admin_active": False,
-        "workspaces": [workspace.model_dump(mode="json") for workspace in team_cfg.workspaces],
-        "workspaces_available": bool(team_cfg.workspaces),
-        "nav_open_observations": 0,
-        "nav_actionable": 0,
-        "nav_actionable_proposals": 0,
-        "nav_agent_count": len(team_cfg.agents),
-        "nav_running_decisions": 0,
-        "show_tips": False,
-        "tips_dismissed": [],
-        "theme_css": _theme_css(request),
-    }
-
-
-def _workflow_nav(ticket_service, actor, snapshot, team_id: str) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    workflows = snapshot.config.teams[team_id].workflows
-    for workflow_id, workflow in workflows.items():
-        try:
-            count = len(ticket_service.list_tickets(actor, workflow_id))
-        except Exception:
-            count = 0
-        rows.append({"id": workflow_id, "name": workflow.name, "count": count})
-    return rows
+    context = build_team_context(
+        snapshot,
+        team_id,
+        theme_css=_theme_css(request),
+        show_tips=False,
+        tips_dismissed=[],
+        ticket_service=request.app.state.services.tickets,
+    )
+    context["team_agents"] = tuple(snapshot.config.teams[team_id].agents.keys())
+    return context
 
 
 def _form_operation_id(prefix: str) -> str:
@@ -71,7 +51,6 @@ def _workflow_page_context(request: Request, services: FlowgencyServices, team_i
     context.update(
         {
             "active": "workflow-board",
-            "workflow_nav": _workflow_nav(ticket_service, actor, snapshot, team_id),
             "active_workflow_id": workflow_id,
             "board": board,
             "selected_ticket_id": ticket_id,
