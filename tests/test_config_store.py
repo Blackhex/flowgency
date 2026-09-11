@@ -222,6 +222,36 @@ def test_replace_preserves_existing_bytes_when_new_payload_is_invalid(
     assert path.read_bytes() == original
 
 
+def test_replace_accepts_matching_revision_for_invalid_current_bytes(
+    raw_config, config_paths
+):
+    from flowgency.configuration.store import ConfigStore
+
+    invalid_raw = deepcopy(raw_config)
+    invalid_raw["extensions"] = {"beta": True}
+    path = _write_yaml(config_paths["config_path"], invalid_raw)
+    store = ConfigStore(path)
+
+    updated = store.replace(store.inspect().revision, raw_config)
+
+    assert updated.raw == raw_config
+    assert path.read_text(encoding="utf-8")
+
+
+def test_replace_rejects_stale_revision_before_parsing_invalid_current_bytes(
+    raw_config, config_paths
+):
+    from flowgency.configuration.store import ConfigConflictError, ConfigStore
+
+    invalid_raw = deepcopy(raw_config)
+    invalid_raw["extensions"] = {"beta": True}
+    path = _write_yaml(config_paths["config_path"], invalid_raw)
+    store = ConfigStore(path)
+
+    with pytest.raises(ConfigConflictError):
+        store.replace("stale-revision", raw_config)
+
+
 def test_replace_rejects_stale_revision_and_preserves_newer_bytes(
     raw_config, config_paths
 ):
@@ -361,6 +391,136 @@ def test_create_initializes_new_local_workflow_roots(raw_config, config_paths):
     assert local_root.is_dir()
 
 
+def test_replace_absent_revision_initializes_shared_relative_local_workflow_roots(
+    raw_config, config_paths
+):
+    from flowgency.configuration.store import ABSENT_REVISION, ConfigStore
+
+    workflow_library = config_paths["config_dir"] / "workflow-library"
+    workflow_library.mkdir()
+    raw = deepcopy(raw_config)
+    raw["flowgency"]["workflow_library"] = str(workflow_library)
+    raw["teams"]["newsletter"]["workflows"] = {
+        "delivery": {
+            "name": "Delivery",
+            "blueprint": "delivery",
+            "integration": "local",
+            "integration_config": {"root": "tickets/shared"},
+        },
+        "research": {
+            "name": "Research",
+            "blueprint": "research",
+            "integration": "local",
+            "integration_config": {"root": "tickets/shared"},
+        },
+    }
+
+    ConfigStore(config_paths["config_path"]).replace(ABSENT_REVISION, raw)
+
+    assert (config_paths["config_dir"] / "tickets" / "shared").is_dir()
+
+
+def test_create_rejects_local_workflow_root_under_symlink_ancestor(
+    raw_config, config_paths, monkeypatch
+):
+    from flowgency.configuration import ValidationFailed
+    from flowgency.configuration.store import ConfigStore
+    from tests.test_path_validation import _make_hostile_directory_entry
+
+    workflow_library = config_paths["config_dir"] / "workflow-library"
+    workflow_library.mkdir()
+    real_parent = config_paths["config_dir"] / "outside-root"
+    real_parent.mkdir()
+    hostile_parent = config_paths["config_dir"] / "tickets-link"
+    _make_hostile_directory_entry(hostile_parent, real_parent, monkeypatch)
+
+    raw = deepcopy(raw_config)
+    raw["flowgency"]["workflow_library"] = str(workflow_library)
+    raw["teams"]["newsletter"]["workflows"] = {
+        "delivery": {
+            "name": "Delivery",
+            "blueprint": "delivery",
+            "integration": "local",
+            "integration_config": {"root": str(hostile_parent / "shared")},
+        }
+    }
+
+    with pytest.raises(ValidationFailed):
+        ConfigStore(config_paths["config_path"]).create(raw)
+
+    assert not config_paths["config_path"].exists()
+    assert not (real_parent / "shared").exists()
+
+
+def test_patch_initializes_new_local_workflow_root_registration(
+    raw_config, config_paths
+):
+    from flowgency.configuration.store import ConfigStore
+
+    workflow_library = config_paths["config_dir"] / "workflow-library"
+    workflow_library.mkdir()
+    raw = deepcopy(raw_config)
+    raw["flowgency"]["workflow_library"] = str(workflow_library)
+    raw["teams"]["newsletter"]["workflows"] = {}
+    store = ConfigStore(config_paths["config_path"])
+    created = store.create(raw)
+
+    created = store.patch(
+        created.revision,
+        lambda current: current["teams"]["newsletter"]["workflows"].update(
+            {
+                "delivery": {
+                    "name": "Delivery",
+                    "blueprint": "delivery",
+                    "integration": "local",
+                    "integration_config": {"root": "tickets/delivery"},
+                }
+            }
+        ),
+    )
+
+    assert (config_paths["config_dir"] / "tickets" / "delivery").is_dir()
+    assert "delivery" in created.raw["teams"]["newsletter"]["workflows"]
+
+
+def test_replace_initializes_new_local_workflow_root_when_root_changes(
+    raw_config, config_paths
+):
+    from flowgency.configuration.store import ConfigStore
+
+    workflow_library = config_paths["config_dir"] / "workflow-library"
+    workflow_library.mkdir()
+    original_root = config_paths["config_dir"] / "tickets" / "delivery"
+    replacement_root = config_paths["config_dir"] / "tickets" / "research"
+    raw = deepcopy(raw_config)
+    raw["flowgency"]["workflow_library"] = str(workflow_library)
+    raw["teams"]["newsletter"]["workflows"] = {
+        "delivery": {
+            "name": "Delivery",
+            "blueprint": "delivery",
+            "integration": "local",
+            "integration_config": {"root": str(original_root)},
+        }
+    }
+    store = ConfigStore(config_paths["config_path"])
+    created = store.create(raw)
+    updated_raw = deepcopy(created.raw)
+    updated_raw["teams"]["newsletter"]["workflows"]["delivery"][
+        "integration_config"
+    ]["root"] = str(replacement_root)
+
+    updated = store.replace(created.revision, updated_raw)
+
+    assert original_root.is_dir()
+    assert replacement_root.is_dir()
+    assert (
+        updated.raw["teams"]["newsletter"]["workflows"]["delivery"][
+            "integration_config"
+        ]["root"]
+        == str(replacement_root)
+    )
+
+
 def test_patch_does_not_recreate_missing_registered_local_workflow_root_on_unrelated_change(
     raw_config, config_paths
 ):
@@ -392,3 +552,116 @@ def test_patch_does_not_recreate_missing_registered_local_workflow_root_on_unrel
 
     assert updated.raw["flowgency"]["title"] == "Updated"
     assert not local_root.exists()
+
+
+def test_replace_does_not_recreate_missing_registered_local_workflow_root_on_unrelated_change(
+    raw_config, config_paths
+):
+    from flowgency.configuration.store import ConfigStore
+
+    local_root = config_paths["config_dir"] / "tickets" / "shared"
+    workflow_library = config_paths["config_dir"] / "workflow-library"
+    workflow_library.mkdir()
+    raw = deepcopy(raw_config)
+    raw["flowgency"]["workflow_library"] = str(workflow_library)
+    raw["teams"]["newsletter"]["workflows"] = {
+        "delivery": {
+            "name": "Delivery",
+            "blueprint": "delivery",
+            "integration": "local",
+            "integration_config": {"root": str(local_root)},
+        }
+    }
+    store = ConfigStore(config_paths["config_path"])
+    created = store.create(raw)
+
+    local_root.rmdir()
+    assert not local_root.exists()
+    updated_raw = deepcopy(created.raw)
+    updated_raw["flowgency"]["title"] = "Updated"
+
+    updated = store.replace(created.revision, updated_raw)
+
+    assert updated.raw["flowgency"]["title"] == "Updated"
+    assert not local_root.exists()
+
+
+def test_replace_invalid_but_readable_current_bytes_do_not_recreate_missing_registered_local_workflow_root(
+    raw_config, config_paths
+):
+    from flowgency.configuration.store import ConfigStore
+
+    local_root = config_paths["config_dir"] / "tickets" / "shared"
+    workflow_library = config_paths["config_dir"] / "workflow-library"
+    workflow_library.mkdir()
+    invalid_raw = deepcopy(raw_config)
+    invalid_raw["flowgency"]["workflow_library"] = str(workflow_library)
+    invalid_raw["teams"]["newsletter"]["workflows"] = {
+        "delivery": {
+            "name": "Delivery",
+            "blueprint": "delivery",
+            "integration": "local",
+            "integration_config": {"root": str(local_root)},
+        }
+    }
+    invalid_raw["extensions"] = {"beta": True}
+    path = _write_yaml(config_paths["config_path"], invalid_raw)
+    store = ConfigStore(path)
+    expected_revision = store.inspect().revision
+
+    updated_raw = deepcopy(raw_config)
+    updated_raw["flowgency"]["workflow_library"] = str(workflow_library)
+    updated_raw["flowgency"]["title"] = "Updated"
+    updated_raw["teams"]["newsletter"]["workflows"] = {
+        "delivery": {
+            "name": "Delivery",
+            "blueprint": "delivery",
+            "integration": "local",
+            "integration_config": {"root": str(local_root)},
+        }
+    }
+
+    updated = store.replace(expected_revision, updated_raw)
+
+    assert updated.raw["flowgency"]["title"] == "Updated"
+    assert not local_root.exists()
+
+
+def test_replace_preserves_existing_bytes_and_revision_when_local_workflow_root_initialization_fails(
+    raw_config, config_paths, monkeypatch
+):
+    import flowgency.configuration.paths as paths_module
+    from flowgency.configuration.store import ConfigStore
+
+    workflow_library = config_paths["config_dir"] / "workflow-library"
+    workflow_library.mkdir()
+    raw = deepcopy(raw_config)
+    raw["flowgency"]["workflow_library"] = str(workflow_library)
+    raw["teams"]["newsletter"]["workflows"] = {}
+    store = ConfigStore(config_paths["config_path"])
+    created = store.create(raw)
+    original_bytes = config_paths["config_path"].read_bytes()
+    broken_root = config_paths["config_dir"] / "tickets" / "broken"
+    original_ensure = paths_module._ensure_real_directory
+
+    def fail_target(path, *, create):
+        if Path(path) == broken_root:
+            raise ValueError("boom")
+        return original_ensure(path, create=create)
+
+    monkeypatch.setattr(paths_module, "_ensure_real_directory", fail_target)
+    updated_raw = deepcopy(created.raw)
+    updated_raw["teams"]["newsletter"]["workflows"] = {
+        "delivery": {
+            "name": "Delivery",
+            "blueprint": "delivery",
+            "integration": "local",
+            "integration_config": {"root": str(broken_root)},
+        }
+    }
+
+    with pytest.raises(ValueError, match="boom"):
+        store.replace(created.revision, updated_raw)
+
+    assert config_paths["config_path"].read_bytes() == original_bytes
+    assert store.inspect().revision == created.revision

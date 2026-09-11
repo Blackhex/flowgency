@@ -61,6 +61,7 @@ def test_home_reports_unavailable_workflow_storage(workflow_web_env):
     assert "Board A" in response.text
     assert "Ticket storage root does not exist" in response.text
     assert "How the pipeline works" not in response.text
+    assert not missing_root.exists()
 
 
 def _add_second_workflow(env, root, *, name="Board B", workflow_id="board-b"):
@@ -124,7 +125,16 @@ def test_home_empty_configured_workflow_reports_zero_not_unavailable(workflow_we
     assert "unavailable" not in body.lower()
 
 
-@pytest.mark.parametrize("path", ["/{team}/", "/{team}/agents/builder/profile", "/{team}/jobs"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/{team}/",
+        "/{team}/agents/builder/profile",
+        "/{team}/jobs",
+        "/{team}/logs",
+        "/{team}/workspaces",
+    ],
+)
 def test_team_sidebar_lists_current_team_workflows_on_non_workflow_pages(
     workflow_web_env,
     path,
@@ -160,6 +170,124 @@ def test_team_sidebar_marks_unavailable_workflows_without_false_zero_count(
     assert "Board B" in sidebar
     assert 'data-workflow-state="unavailable"' in sidebar
     assert 'href="/support/workflows/board-a"' not in sidebar
+
+
+def test_build_workflow_nav_counts_storage_records_without_listing_rich_tickets(
+    workflow_web_env,
+):
+    from flowgency.web.team_navigation import build_workflow_nav
+
+    env = workflow_web_env
+    env.create(title="Alpha review")
+    _add_second_workflow(env, env.root_b, name="Board B", workflow_id="board-b")
+    env.service.create(
+        env.user,
+        "board-b",
+        "Beta review",
+        "",
+        None,
+        env.operation("create-board-b"),
+    )
+    snapshot = env.store.load()
+
+    class DirectCountOnlyService:
+        def __init__(self, delegate):
+            self.storage_factory = delegate.storage_factory
+
+        def list_tickets(self, *args, **kwargs):
+            raise AssertionError("build_workflow_nav should count storage records directly")
+
+    rows, available = build_workflow_nav(
+        snapshot,
+        env.team_id,
+        DirectCountOnlyService(env.service),
+    )
+
+    assert available is True
+    assert {row["id"]: row["count"] for row in rows} == {
+        "board-a": 1,
+        "board-b": 1,
+    }
+    assert {row["id"]: row["status"] for row in rows} == {
+        "board-a": "count",
+        "board-b": "count",
+    }
+
+
+def test_team_sidebar_lists_current_team_workflows_on_job_detail_page(
+    workflow_web_env,
+):
+    env = workflow_web_env
+    _add_second_workflow(env, env.root_b, name="Board B", workflow_id="board-b")
+    spec = _job_spec(env.team_root, env.store.path, status="queued", job_id="job-sidebar")
+    path = env.job_store.path(env.team_id, spec.job_id)
+    write_job(path, JobRecord.from_spec(spec))
+
+    response = env.client.get(f"/{env.team_id}/jobs/{spec.job_id}")
+
+    assert response.status_code == 200
+    sidebar = _sidebar_html(response.text)
+    assert sidebar.count(f'href="/{env.team_id}/workflows/board-a"') == 1
+    assert sidebar.count(f'href="/{env.team_id}/workflows/board-b"') == 1
+    assert 'href="/support/workflows/board-a"' not in sidebar
+
+
+def test_team_sidebar_isolated_per_team_for_empty_and_populated_workflow_sets(
+    workflow_web_env,
+):
+    env = workflow_web_env
+    raw = yaml.safe_load(env.store.path.read_text(encoding="utf-8"))
+    support_paths = create_team_environment(env.tmp_path, "support")
+    for rel in [("logs",), ("observations",), ("proposals",), ("decisions",), ("locks",)]:
+        support_paths.state_root.joinpath(*rel).mkdir(parents=True, exist_ok=True)
+    raw["teams"]["support"] = apply_team_paths(
+        {
+            "name": "Support",
+            "default_integration": "copilot",
+            "agents": [],
+            "workflows": {},
+        },
+        support_paths,
+    )
+    _write_yaml(env.store.path, raw)
+    app_mod.refresh_services()
+    app_mod.app.state.services = app_mod.build_services(env.store.path)
+
+    empty_response = env.client.get("/support/")
+
+    assert empty_response.status_code == 200
+    empty_sidebar = _sidebar_html(empty_response.text)
+    assert "Workflows" in empty_sidebar
+    assert 'href="/support/workflows/new"' in empty_sidebar
+    assert 'href="/support/workflows/board-a"' not in empty_sidebar
+    assert 'href="/newsletter/workflows/board-a"' not in empty_sidebar
+
+    support_root = env.tmp_path / "support-tickets"
+    support_root.mkdir()
+    raw["teams"]["support"]["workflows"] = {
+        "support-board": {
+            "name": "Support Board",
+            "blueprint": env.blueprint_id,
+            "integration": "local",
+            "integration_config": {"root": str(support_root)},
+        }
+    }
+    _write_yaml(env.store.path, raw)
+    app_mod.refresh_services()
+    app_mod.app.state.services = app_mod.build_services(env.store.path)
+
+    populated_support = env.client.get("/support/")
+    newsletter = env.client.get(f"/{env.team_id}/")
+
+    assert populated_support.status_code == 200
+    populated_sidebar = _sidebar_html(populated_support.text)
+    assert 'href="/support/workflows/support-board"' in populated_sidebar
+    assert 'href="/support/workflows/new"' in populated_sidebar
+    assert 'href="/support/workflows/board-a"' not in populated_sidebar
+    assert newsletter.status_code == 200
+    newsletter_sidebar = _sidebar_html(newsletter.text)
+    assert 'href="/newsletter/workflows/board-a"' in newsletter_sidebar
+    assert 'href="/support/workflows/support-board"' not in newsletter_sidebar
 
 
 def test_team_sidebar_offers_new_workflow_when_team_has_no_configured_workflows(

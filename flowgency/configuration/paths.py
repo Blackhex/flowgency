@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 import os
 from pathlib import Path
@@ -38,6 +39,15 @@ def _path_key(path: Path) -> str:
     return os.path.normcase(str(path.resolve(strict=False)))
 
 
+def _config_path(value: object, config_dir: Path, *, resolve: bool) -> Path:
+    path = Path(str(value)).expanduser()
+    if not path.is_absolute():
+        path = config_dir / path
+    if resolve:
+        return path.resolve(strict=False)
+    return Path(os.path.abspath(os.fspath(path)))
+
+
 def _overlap(left: Path, right: Path) -> bool:
     left_key = Path(_path_key(left))
     right_key = Path(_path_key(right))
@@ -56,6 +66,14 @@ def _nearest_existing_parent(path: Path) -> Path | None:
             return None
         candidate = parent
     return candidate
+
+
+def _path_has_entry(path: Path) -> bool:
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return False
+    return True
 
 
 class DirectoryPreparationError(ValueError):
@@ -211,6 +229,37 @@ def _validate_creatable_directory(
             )
         ]
     return []
+
+
+def validate_local_workflow_root_candidate(
+    root_value: object,
+    *,
+    config_dir: Path,
+    scope: str,
+) -> list[ValidationIssue]:
+    field = "integration_config.root"
+    path = _config_path(root_value, config_dir, resolve=False)
+    for component in _path_chain(path):
+        if not _path_has_entry(component):
+            continue
+        try:
+            _assert_real_directory(component)
+        except ValueError:
+            return [
+                _issue(
+                    "invalid-workflow-provider",
+                    scope,
+                    field,
+                    f"Configured local workflow root must stay under real directories: {path}",
+                    "Use a real local directory that is not under a symlink, junction, reparse point, or file.",
+                )
+            ]
+    return _validate_creatable_directory(
+        path,
+        code="invalid-workflow-provider",
+        scope=scope,
+        field=field,
+    )
 
 
 def _overlap_issue(
@@ -510,22 +559,52 @@ def _local_workflow_roots(config: FlowgencyConfig) -> tuple[Path, ...]:
 def initialize_new_local_workflow_roots(
     config: FlowgencyConfig,
     *,
-    previous_config: FlowgencyConfig | None,
+    previous_root_keys: set[str] | None,
 ) -> None:
-    previous_roots = set()
-    if previous_config is not None:
-        previous_roots = {
-            _path_key(root) for root in _local_workflow_roots(previous_config)
-        }
+    previous_roots = previous_root_keys or set()
     for root in _local_workflow_roots(config):
         if _path_key(root) in previous_roots:
             continue
         _ensure_real_directory(root, create=True)
 
 
+def registered_local_workflow_root_keys(
+    raw: Mapping[str, object],
+    *,
+    config_dir: Path,
+) -> set[str]:
+    teams = raw.get("teams")
+    if not isinstance(teams, Mapping):
+        return set()
+
+    roots: set[str] = set()
+    for team in teams.values():
+        if not isinstance(team, Mapping):
+            continue
+        workflows = team.get("workflows")
+        if not isinstance(workflows, Mapping):
+            continue
+        for workflow in workflows.values():
+            if not isinstance(workflow, Mapping):
+                continue
+            if workflow.get("integration") != "local":
+                continue
+            integration_config = workflow.get("integration_config")
+            if not isinstance(integration_config, Mapping):
+                continue
+            root_value = integration_config.get("root")
+            if root_value is None:
+                continue
+            root = _config_path(root_value, config_dir, resolve=True)
+            roots.add(_path_key(root))
+    return roots
+
+
 __all__ = [
     "initialize_new_local_workflow_roots",
     "initialize_storage_directories",
     "job_store_root",
+    "registered_local_workflow_root_keys",
+    "validate_local_workflow_root_candidate",
     "validate_resolved_paths",
 ]

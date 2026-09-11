@@ -17,6 +17,7 @@ from .models import FlowgencyConfig, parse_config
 from .paths import (
     initialize_new_local_workflow_roots,
     initialize_storage_directories,
+    registered_local_workflow_root_keys,
     validate_resolved_paths,
 )
 
@@ -99,7 +100,7 @@ class ConfigStore:
             initialize_storage_directories(candidate)
             initialize_new_local_workflow_roots(
                 candidate,
-                previous_config=None,
+                previous_root_keys=None,
             )
             atomic_write_bytes(self.path, payload)
         return self._snapshot(payload)
@@ -111,11 +112,6 @@ class ConfigStore:
     ) -> ConfigSnapshot:
         with exclusive_lock(self.lock_path, wait=True):
             original = self.path.read_bytes() if self.path.exists() else None
-            previous_config = (
-                self._snapshot(original).config
-                if original is not None
-                else None
-            )
             current_revision = (
                 config_revision(original)
                 if original is not None
@@ -124,6 +120,12 @@ class ConfigStore:
             if current_revision != expected_revision:
                 raise ConfigConflictError(
                     "config.yaml changed; reload before saving"
+                )
+            previous_root_keys = None
+            if original is not None:
+                previous_root_keys = registered_local_workflow_root_keys(
+                    _load_raw_mapping(original),
+                    config_dir=self.path.parent,
                 )
             updated = self._encode(raw)
             current = self.path.read_bytes() if self.path.exists() else None
@@ -135,7 +137,7 @@ class ConfigStore:
             initialize_storage_directories(candidate)
             initialize_new_local_workflow_roots(
                 candidate,
-                previous_config=previous_config,
+                previous_root_keys=previous_root_keys,
             )
             atomic_write_bytes(self.path, updated)
         return self._snapshot(updated)
@@ -147,7 +149,10 @@ class ConfigStore:
     ) -> ConfigSnapshot:
         with exclusive_lock(self.lock_path, wait=True):
             original = self.path.read_bytes()
-            previous_config = self._snapshot(original).config
+            previous_root_keys = registered_local_workflow_root_keys(
+                _load_raw_mapping(original),
+                config_dir=self.path.parent,
+            )
             if config_revision(original) != expected_revision:
                 raise ConfigConflictError(
                     "config.yaml changed; reload before saving"
@@ -163,7 +168,7 @@ class ConfigStore:
             initialize_storage_directories(candidate)
             initialize_new_local_workflow_roots(
                 candidate,
-                previous_config=previous_config,
+                previous_root_keys=previous_root_keys,
             )
             atomic_write_bytes(self.path, updated)
         return self._snapshot(updated)

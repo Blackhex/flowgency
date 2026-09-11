@@ -2,14 +2,15 @@ from __future__ import annotations
 
 from typing import Any
 
+from flowgency.tickets.errors import TicketStorageError, WorkflowUnavailable
 from flowgency.tickets.models import UserTicketContext
+from flowgency.workflows.configuration import resolve_workflow_binding
 
 
 def build_workflow_nav(snapshot, team_id: str, ticket_service) -> tuple[list[dict[str, Any]], bool]:
     if snapshot.config.flowgency.workflow_library is None:
         return [], False
 
-    actor = UserTicketContext(team_id=team_id)
     rows: list[dict[str, Any]] = []
     for workflow_id, workflow in snapshot.config.teams[team_id].workflows.items():
         row = {
@@ -20,9 +21,11 @@ def build_workflow_nav(snapshot, team_id: str, ticket_service) -> tuple[list[dic
         }
         if ticket_service is not None:
             try:
-                row["count"] = len(ticket_service.list_tickets(actor, workflow_id))
+                binding = resolve_workflow_binding(snapshot, team_id, workflow_id)
+                provider = ticket_service.storage_factory(binding.storage)
+                row["count"] = len(tuple(provider.list(team_id, workflow_id)))
                 row["status"] = "count"
-            except Exception:
+            except (TicketStorageError, WorkflowUnavailable):
                 pass
         rows.append(row)
     return rows, True

@@ -650,7 +650,7 @@ def _validate_default_team(default_team: Any, teams: Mapping[str, Any]) -> list[
 
 
 def _validate_workflows(
-    team_name: str, team: Mapping[str, Any]
+    team_name: str, team: Mapping[str, Any], config_path: Path
 ) -> tuple[list[ValidationIssue], bool]:
     workflows = team.get("workflows")
     if not _is_mapping(workflows):
@@ -715,6 +715,7 @@ def _validate_workflows(
             if config is None:
                 config = {}
             if _is_mapping(config):
+                from .paths import validate_local_workflow_root_candidate
                 from flowgency.tickets.storages.registry import (
                     validate_storage_config,
                 )
@@ -727,6 +728,14 @@ def _validate_workflows(
                             field="integration_config",
                             message=message,
                             hint="Configure a supported provider with only its required keys.",
+                        )
+                    )
+                if integration == "local" and config.get("root") is not None:
+                    issues.extend(
+                        validate_local_workflow_root_candidate(
+                            config["root"],
+                            config_dir=config_path.parent,
+                            scope=scope,
                         )
                     )
         generation = workflow.get("context_generation")
@@ -811,7 +820,11 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                 )
         runtime = team.get("runtime") or {}
         issues.extend(_validate_team_runtime(runtime, f"teams.{team_name}"))
-        workflow_issues, team_has_workflows = _validate_workflows(team_name, team)
+        workflow_issues, team_has_workflows = _validate_workflows(
+            team_name,
+            team,
+            config_path,
+        )
         issues.extend(workflow_issues)
         any_workflows = any_workflows or team_has_workflows
         agents = team.get("agents") if _is_list(team.get("agents")) else []

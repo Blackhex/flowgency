@@ -10,6 +10,7 @@ from flowgency.configuration.paths import (
     DirectoryPreparationError,
     job_store_root,
     prepare_writable_directory,
+    validate_local_workflow_root_candidate,
     validate_resolved_paths,
 )
 
@@ -317,6 +318,37 @@ def test_prepare_writable_directory_rejects_link_or_reparse(
         match="symlink or reparse point",
     ):
         prepare_writable_directory(root, label="Flowgency data root")
+
+
+def test_local_workflow_root_candidate_rejects_file_parent(tmp_path):
+    parent = tmp_path / "tickets-parent"
+    parent.write_text("not a directory", encoding="utf-8")
+
+    issues = validate_local_workflow_root_candidate(
+        parent / "shared",
+        config_dir=tmp_path,
+        scope="teams.newsletter.workflows.delivery",
+    )
+
+    assert any(issue.code == "invalid-workflow-provider" for issue in issues)
+    assert any(issue.field == "integration_config.root" for issue in issues)
+
+
+def test_local_workflow_root_candidate_rejects_broken_link_parent(tmp_path):
+    broken_parent = tmp_path / "tickets-link"
+    try:
+        broken_parent.symlink_to(tmp_path / "missing-target", target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation unavailable")
+
+    issues = validate_local_workflow_root_candidate(
+        broken_parent / "shared",
+        config_dir=tmp_path,
+        scope="teams.newsletter.workflows.delivery",
+    )
+
+    assert any(issue.code == "invalid-workflow-provider" for issue in issues)
+    assert any(issue.field == "integration_config.root" for issue in issues)
 
 
 def test_prepare_writable_directory_rejects_unwritable_parent(
