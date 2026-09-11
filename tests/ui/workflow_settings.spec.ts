@@ -33,6 +33,30 @@ async function currentRoot(page: Page): Promise<string> {
   return await page.getByLabel('Storage root', { exact: true }).inputValue();
 }
 
+async function expectWorkflowScreenshotWithStableStorageRoot(
+  page: Page,
+  storageRoot: ReturnType<Page['getByLabel']>,
+  screenshotName: string,
+): Promise<void> {
+  const originalValue = await storageRoot.inputValue();
+  await storageRoot.evaluate((element, value) => {
+    const input = element as HTMLInputElement;
+    input.value = value;
+    input.style.textOverflow = 'clip';
+    input.style.overflow = 'hidden';
+  }, 'C:\\flowgency\\tickets\\delivery');
+  try {
+    await expect(page).toHaveScreenshot(screenshotName, { fullPage: true });
+  } finally {
+    await storageRoot.evaluate((element, value) => {
+      const input = element as HTMLInputElement;
+      input.value = value;
+      input.style.textOverflow = '';
+      input.style.overflow = '';
+    }, originalValue);
+  }
+}
+
 async function openNewWorkflow(page: Page, projectName: string): Promise<void> {
   if (projectName.startsWith('mobile')) {
     await page.getByRole('button', { name: 'Open navigation', exact: true }).click();
@@ -85,11 +109,10 @@ test('existing workflow settings stay editable and preserve compact approved lay
   await tabTo(page, { role: 'textbox', name: 'Storage root' });
   await tabTo(page, { role: 'button', name: 'Check storage' });
   await assertNoLayoutIssues(page);
-  // The storage root value is checkout-dependent; assert it separately and mask only the input text.
   if (testInfo.project.name.startsWith('mobile')) {
-    await expect(page).toHaveScreenshot('workflow-settings-mobile.png', { fullPage: true, mask: [storageRoot] });
+    await expectWorkflowScreenshotWithStableStorageRoot(page, storageRoot, 'workflow-settings-mobile.png');
   } else {
-    await expect(page).toHaveScreenshot('workflow-settings.png', { fullPage: true, mask: [storageRoot] });
+    await expectWorkflowScreenshotWithStableStorageRoot(page, storageRoot, 'workflow-settings.png');
   }
   await assertNoConsoleErrors(page);
 });
@@ -312,12 +335,11 @@ test('check storage distinguishes unavailable from empty and create follows sele
   const investigationRoot = path.join(path.dirname(originalRoot), 'investigation-root');
   await fillStorageRoot(page, investigationRoot);
   await expect(storageRoot).toHaveValue(investigationRoot);
-  // Screenshot of the filled create form before submission
   await assertNoLayoutIssues(page);
   if (testInfo.project.name.startsWith('mobile')) {
-    await expect(page).toHaveScreenshot('workflow-create-mobile.png', { fullPage: true, mask: [storageRoot] });
+    await expectWorkflowScreenshotWithStableStorageRoot(page, storageRoot, 'workflow-create-mobile.png');
   } else {
-    await expect(page).toHaveScreenshot('workflow-create.png', { fullPage: true, mask: [storageRoot] });
+    await expectWorkflowScreenshotWithStableStorageRoot(page, storageRoot, 'workflow-create.png');
   }
 
   const saveCreated = page.waitForResponse((response) => response.url().includes('/newsletter/workflows/new') && response.request().method() === 'POST');
