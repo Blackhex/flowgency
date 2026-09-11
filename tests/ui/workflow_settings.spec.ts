@@ -39,21 +39,19 @@ async function expectWorkflowScreenshotWithStableStorageRoot(
   screenshotName: string,
 ): Promise<void> {
   const originalValue = await storageRoot.inputValue();
+  const stableValue = path.join('C:\\flowgency\\tickets', path.basename(path.normalize(originalValue)));
   await storageRoot.evaluate((element, value) => {
     const input = element as HTMLInputElement;
     input.value = value;
-    input.style.textOverflow = 'clip';
-    input.style.overflow = 'hidden';
-  }, 'C:\\flowgency\\tickets\\delivery');
+  }, stableValue);
   try {
     await expect(page).toHaveScreenshot(screenshotName, { fullPage: true });
   } finally {
     await storageRoot.evaluate((element, value) => {
       const input = element as HTMLInputElement;
       input.value = value;
-      input.style.textOverflow = '';
-      input.style.overflow = '';
     }, originalValue);
+    await expect(storageRoot).toHaveValue(originalValue);
   }
 }
 
