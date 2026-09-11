@@ -149,14 +149,14 @@ class ConfigStore:
     ) -> ConfigSnapshot:
         with exclusive_lock(self.lock_path, wait=True):
             original = self.path.read_bytes()
-            previous_root_keys = registered_local_workflow_root_keys(
-                _load_raw_mapping(original),
-                config_dir=self.path.parent,
-            )
             if config_revision(original) != expected_revision:
                 raise ConfigConflictError(
                     "config.yaml changed; reload before saving"
                 )
+            previous_root_keys = registered_local_workflow_root_keys(
+                _load_raw_mapping(original),
+                config_dir=self.path.parent,
+            )
             raw = deepcopy(_load_raw_mapping(original))
             patcher(raw)
             updated = self._encode(raw)

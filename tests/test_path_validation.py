@@ -10,6 +10,7 @@ from flowgency.configuration.paths import (
     DirectoryPreparationError,
     job_store_root,
     prepare_writable_directory,
+    registered_local_workflow_root_keys,
     validate_local_workflow_root_candidate,
     validate_resolved_paths,
 )
@@ -349,6 +350,80 @@ def test_local_workflow_root_candidate_rejects_broken_link_parent(tmp_path):
 
     assert any(issue.code == "invalid-workflow-provider" for issue in issues)
     assert any(issue.field == "integration_config.root" for issue in issues)
+
+
+def test_registered_local_workflow_root_keys_ignores_blank_and_malformed_root(
+    tmp_path,
+):
+    raw = {
+        "teams": {
+            "newsletter": {
+                "workflows": {
+                    "blank": {
+                        "integration": "local",
+                        "integration_config": {"root": "   "},
+                    },
+                    "malformed": {
+                        "integration": "local",
+                        "integration_config": {"root": ["not", "a", "string"]},
+                    },
+                }
+            }
+        }
+    }
+
+    keys = registered_local_workflow_root_keys(raw, config_dir=tmp_path)
+
+    assert keys == set()
+
+
+def test_registered_local_workflow_root_keys_ignores_root_under_symlink_ancestor(
+    tmp_path, monkeypatch
+):
+    target = tmp_path / "target"
+    target.mkdir()
+    hostile = tmp_path / "tickets-link"
+    _make_hostile_directory_entry(hostile, target, monkeypatch)
+    raw = {
+        "teams": {
+            "newsletter": {
+                "workflows": {
+                    "delivery": {
+                        "integration": "local",
+                        "integration_config": {"root": str(hostile / "shared")},
+                    }
+                }
+            }
+        }
+    }
+
+    keys = registered_local_workflow_root_keys(raw, config_dir=tmp_path)
+
+    assert keys == set()
+
+
+def test_registered_local_workflow_root_keys_keeps_safe_root_that_disappeared(
+    tmp_path,
+):
+    root = tmp_path / "tickets" / "shared"
+    root.mkdir(parents=True)
+    raw = {
+        "teams": {
+            "newsletter": {
+                "workflows": {
+                    "delivery": {
+                        "integration": "local",
+                        "integration_config": {"root": str(root)},
+                    }
+                }
+            }
+        }
+    }
+    root.rmdir()
+
+    keys = registered_local_workflow_root_keys(raw, config_dir=tmp_path)
+
+    assert keys == {os.path.normcase(str(root.resolve(strict=False)))}
 
 
 def test_prepare_writable_directory_rejects_unwritable_parent(

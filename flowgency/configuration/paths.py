@@ -231,6 +231,17 @@ def _validate_creatable_directory(
     return []
 
 
+def _lexical_ancestor_is_unsafe(path: Path) -> bool:
+    for component in _path_chain(path):
+        if not _path_has_entry(component):
+            continue
+        try:
+            _assert_real_directory(component)
+        except ValueError:
+            return True
+    return False
+
+
 def validate_local_workflow_root_candidate(
     root_value: object,
     *,
@@ -239,21 +250,16 @@ def validate_local_workflow_root_candidate(
 ) -> list[ValidationIssue]:
     field = "integration_config.root"
     path = _config_path(root_value, config_dir, resolve=False)
-    for component in _path_chain(path):
-        if not _path_has_entry(component):
-            continue
-        try:
-            _assert_real_directory(component)
-        except ValueError:
-            return [
-                _issue(
-                    "invalid-workflow-provider",
-                    scope,
-                    field,
-                    f"Configured local workflow root must stay under real directories: {path}",
-                    "Use a real local directory that is not under a symlink, junction, reparse point, or file.",
-                )
-            ]
+    if _lexical_ancestor_is_unsafe(path):
+        return [
+            _issue(
+                "invalid-workflow-provider",
+                scope,
+                field,
+                f"Configured local workflow root must stay under real directories: {path}",
+                "Use a real local directory that is not under a symlink, junction, reparse point, or file.",
+            )
+        ]
     return _validate_creatable_directory(
         path,
         code="invalid-workflow-provider",
@@ -593,7 +599,10 @@ def registered_local_workflow_root_keys(
             if not isinstance(integration_config, Mapping):
                 continue
             root_value = integration_config.get("root")
-            if root_value is None:
+            if not isinstance(root_value, str) or not root_value.strip():
+                continue
+            lexical = _config_path(root_value, config_dir, resolve=False)
+            if _lexical_ancestor_is_unsafe(lexical):
                 continue
             root = _config_path(root_value, config_dir, resolve=True)
             roots.add(_path_key(root))

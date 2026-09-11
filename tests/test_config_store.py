@@ -252,6 +252,24 @@ def test_replace_rejects_stale_revision_before_parsing_invalid_current_bytes(
         store.replace("stale-revision", raw_config)
 
 
+def test_patch_rejects_stale_revision_before_parsing_non_mapping_current_bytes(
+    raw_config, config_paths
+):
+    from flowgency.configuration.store import ConfigConflictError, ConfigStore
+
+    path = _write_yaml(config_paths["config_path"], raw_config)
+    store = ConfigStore(path)
+    stale_revision = store.load().revision
+
+    path.write_text(yaml.safe_dump(["not", "a", "mapping"]), encoding="utf-8")
+
+    with pytest.raises(ConfigConflictError):
+        store.patch(
+            stale_revision,
+            lambda raw: raw["flowgency"].update({"title": "New"}),
+        )
+
+
 def test_replace_rejects_stale_revision_and_preserves_newer_bytes(
     raw_config, config_paths
 ):
@@ -450,6 +468,52 @@ def test_create_rejects_local_workflow_root_under_symlink_ancestor(
 
     assert not config_paths["config_path"].exists()
     assert not (real_parent / "shared").exists()
+
+
+def test_replace_does_not_treat_unsafe_old_local_workflow_root_alias_as_registered(
+    raw_config, config_paths, monkeypatch
+):
+    """An old config's symlinked root spelling must not suppress creating a
+    genuinely new, safe root that happens to canonicalize to the same path."""
+    from flowgency.configuration.store import ConfigStore
+    from tests.test_path_validation import _make_hostile_directory_entry
+
+    workflow_library = config_paths["config_dir"] / "workflow-library"
+    workflow_library.mkdir()
+    real_ancestor = config_paths["config_dir"] / "outside-root"
+    real_ancestor.mkdir()
+    new_root = real_ancestor / "shared"
+    old_alias = config_paths["config_dir"] / "tickets-link"
+    _make_hostile_directory_entry(old_alias, new_root, monkeypatch)
+
+    stale_raw = deepcopy(raw_config)
+    stale_raw["flowgency"]["workflow_library"] = str(workflow_library)
+    stale_raw["teams"]["newsletter"]["workflows"] = {
+        "delivery": {
+            "name": "Delivery",
+            "blueprint": "delivery",
+            "integration": "local",
+            "integration_config": {"root": str(old_alias)},
+        }
+    }
+    path = _write_yaml(config_paths["config_path"], stale_raw)
+    store = ConfigStore(path)
+    expected_revision = store.inspect().revision
+
+    updated_raw = deepcopy(raw_config)
+    updated_raw["flowgency"]["workflow_library"] = str(workflow_library)
+    updated_raw["teams"]["newsletter"]["workflows"] = {
+        "delivery": {
+            "name": "Delivery",
+            "blueprint": "delivery",
+            "integration": "local",
+            "integration_config": {"root": str(new_root)},
+        }
+    }
+
+    store.replace(expected_revision, updated_raw)
+
+    assert new_root.is_dir()
 
 
 def test_patch_initializes_new_local_workflow_root_registration(
