@@ -187,10 +187,38 @@ def test_agent_detail_tabs_have_stable_urls(monkeypatch, tmp_path, raw_config):
         ("routines", "Routines"),
         ("memory", "Memory"),
         ("activity", "Activity"),
+        ("logs", "Logs"),
     ]:
         response = client.get(f"/newsletter/agents/advisor/{tab}")
         assert response.status_code == 200
         assert f'aria-current="page">{label}' in response.text
+
+
+def test_agent_logs_tab_uses_execution_logs(monkeypatch, tmp_path, raw_config):
+    client, config_path, log_file = _seed_activity_app(monkeypatch, tmp_path, raw_config)
+    before = config_path.read_bytes()
+
+    response = client.get("/newsletter-prod/agents/advisor/logs")
+
+    assert response.status_code == 200
+    assert 'aria-current="page">Logs' in response.text
+    assert "Execution Logs" in response.text
+    assert log_file.name in response.text
+    assert "1 file" in response.text
+    assert config_path.read_bytes() == before
+
+
+def test_agent_logs_tab_is_not_truncated_to_eight_files(monkeypatch, tmp_path, raw_config):
+    client, _config_path, log_file = _seed_activity_app(monkeypatch, tmp_path, raw_config)
+    day = log_file.parent
+    for index in range(8):
+        day.joinpath(f"advisor-run-{index}.out").write_text(f"log {index}", encoding="utf-8")
+
+    response = client.get("/newsletter-prod/agents/advisor/logs")
+
+    assert response.status_code == 200
+    assert "9 files" in response.text
+    assert "advisor-run-7.out" in response.text
 
 
 def test_profile_tab_uses_config_identity_fields(monkeypatch, tmp_path, raw_config):

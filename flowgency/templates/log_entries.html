@@ -1,0 +1,23 @@
+{% for date, entries in logs.items() %}
+<div class="mb-6">
+  <h2 class="mb-2 text-sm font-semibold uppercase tracking-wider text-gray-500">{{ date }}</h2>
+  <div class="divide-y divide-gray-100 rounded-lg border border-gray-200 bg-white">
+    {% for e in entries %}
+    <a href="{{ e.href }}" class="block px-4 py-2.5 transition-colors hover:bg-gray-50">
+      <div class="flex items-center justify-between gap-3">
+        <div class="flex min-w-0 items-center gap-3">
+          <span class="w-12 shrink-0 text-xs font-mono text-gray-400">{{ e.timestamp.strftime('%H:%M') }}</span>
+          {% if e.suffix == ".err" %}
+          <span class="shrink-0 rounded bg-red-100 px-1.5 py-0.5 text-xs font-mono text-red-700">ERR</span>
+          {% else %}
+          <span class="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-xs font-mono text-gray-600">OUT</span>
+          {% endif %}
+          <span class="min-w-0 truncate font-mono text-sm font-medium text-gray-900" title="{{ e.name }}" aria-label="{{ e.name }}">{{ e.name }}</span>
+        </div>
+        <span class="shrink-0 text-xs text-gray-400">{{ (e.size / 1024) | round(1) }} KB</span>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+</div>
+{% endfor %}

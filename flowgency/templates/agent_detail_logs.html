@@ -1,0 +1,12 @@
+<section class="space-y-6">
+  <div>
+    <h2 class="text-lg font-semibold text-gray-900">Execution Logs</h2>
+    <p class="text-sm text-gray-500">{{ log_count }} file{{ '' if log_count == 1 else 's' }}</p>
+  </div>
+
+  {% if logs %}
+  {% include "log_entries.html" %}
+  {% else %}
+  <div class="rounded-lg border border-gray-200 bg-white p-8 text-center text-gray-500">No logs yet</div>
+  {% endif %}
+</section>

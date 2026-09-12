@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 import yaml
 from fastapi.testclient import TestClient
@@ -366,6 +366,30 @@ def test_job_detail_links_logs_to_viewer(monkeypatch, tmp_path, raw_config):
     assert f"/newsletter/logs/view?path={quote(str(stderr_log.resolve()))}" in response.text
     assert "advisor-scheduled_prompt-job-logs.out" in response.text
     assert "advisor-scheduled_prompt-job-logs.err" in response.text
+
+
+def test_job_detail_encodes_log_paths_for_viewer(monkeypatch, tmp_path, raw_config):
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    path = _write_job_record(team_root, config_path, job_id="job-logs-encoded", status="queued")
+    log_dir = team_root / "logs" / "2026-07-16"
+    stdout_log = log_dir / "advisor report & łog.out"
+    stdout_log.write_text("stdout", encoding="utf-8")
+    record = read_job(path)
+    write_job(
+        path,
+        replace(
+            record,
+            status="complete",
+            stdout_path=str(stdout_log.resolve()),
+            stderr_path=None,
+        ),
+    )
+
+    response = client.get("/newsletter/jobs/job-logs-encoded")
+
+    assert response.status_code == 200
+    assert f"/newsletter/logs/view?{urlencode({'path': str(stdout_log.resolve())})}" in response.text
+    assert "advisor report" in response.text
 
 
 def test_job_detail_omits_log_link_without_path(monkeypatch, tmp_path, raw_config):

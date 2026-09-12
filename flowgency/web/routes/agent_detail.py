@@ -46,6 +46,8 @@ from flowgency.prompts.catalog import effective_prompt_catalog
 from flowgency.tickets.models import UserTicketContext
 from flowgency.tickets.views import build_board_view
 from flowgency.web.dependencies import FlowgencyServices, get_services
+from flowgency.web.job_presentation import load_team_jobs
+from flowgency.web.logs import collect_agent_logs, log_href, with_log_links
 from flowgency.web.team_navigation import build_team_context
 
 
@@ -60,6 +62,7 @@ _TAB_LABELS = {
     "routines": "Routines",
     "memory": "Memory",
     "activity": "Activity",
+    "logs": "Logs",
 }
 
 
@@ -186,7 +189,12 @@ def _recent_log_rows(
             rows.append(
                 {
                     "name": candidate.name,
-                    "href": f"/{quote(team_id, safe='')}/logs/view?path={quote(str(candidate.resolve()))}",
+                    "href": log_href(
+                        team_id,
+                        str(candidate.resolve()),
+                        agent_id=agent_id,
+                        source="activity",
+                    ),
                     "when": candidate.stat().st_mtime_ns,
                 }
             )
@@ -578,6 +586,22 @@ def _detail_context(
                 services,
             )
         )
+    elif tab == "logs":
+        records, _warnings = load_team_jobs(services.job_store, team_id)
+        groups = collect_agent_logs(
+            resolve_team_paths(team_cfg).logs,
+            team_id,
+            agent_id,
+            records,
+            tuple(team_cfg.agents.keys()),
+        )
+        log_count = sum(len(entries) for entries in groups.values())
+        context.update(
+            {
+                "logs": with_log_links(groups, team_id, agent_id=agent_id, source="logs"),
+                "log_count": log_count,
+            }
+        )
     # Merge handler-supplied issues with any tab-supplied issues, dedup on (code, field, message).
     tab_issues = context["issues"]
     seen_keys: set[tuple[str, str, str]] = set()
@@ -741,6 +765,11 @@ async def agent_detail_runtime_save(request: Request, team: str, agent: str, ser
 @router.get("/{team}/agents/{agent}/prompts", response_class=HTMLResponse)
 async def agent_detail_prompts(request: Request, team: str, agent: str, services: FlowgencyServices = Depends(get_services)):
     return _detail_context(request, services, team, agent, "prompts")
+
+
+@router.get("/{team}/agents/{agent}/logs", response_class=HTMLResponse)
+async def agent_detail_logs(request: Request, team: str, agent: str, services: FlowgencyServices = Depends(get_services)):
+    return _detail_context(request, services, team, agent, "logs")
 
 
 @router.post("/{team}/agents/{agent}/prompts/create", response_class=HTMLResponse)

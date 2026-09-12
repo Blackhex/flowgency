@@ -2,6 +2,8 @@ import asyncio
 import json
 import os
 import threading
+from html import escape
+from types import SimpleNamespace
 import yaml
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +14,17 @@ from fastapi.testclient import TestClient
 
 import flowgency.app as app_mod
 from flowgency.app import build_agent_timeline, collect_logs, get_agent_logs
+from flowgency.web.logs import collect_agent_logs
+from tests.test_agent_detail import _seed_activity_app
+from tests.test_local_ticket_storage import _make_reparse
+
+
+def _job_log_record(team_id: str, agent_name: str, *, stdout_path: str | None = None, stderr_path: str | None = None):
+    return SimpleNamespace(
+        spec=SimpleNamespace(team_key=team_id, agent_name=agent_name),
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+    )
 
 
 def test_collect_logs_omits_empty_error_files(tmp_path):
@@ -56,6 +69,103 @@ def test_collect_logs_orders_by_mtime_and_prefers_out_for_ties(tmp_path):
         datetime.fromtimestamp(newer_err.stat().st_mtime),
         datetime.fromtimestamp(older.stat().st_mtime),
     ]
+
+
+def test_collect_logs_skips_hidden_non_files_and_empty_error_only_groups(tmp_path):
+    logs_dir = tmp_path / "logs" / "2026-07-12"
+    logs_dir.mkdir(parents=True)
+    (logs_dir / ".hidden.out").write_text("hidden", encoding="utf-8")
+    (logs_dir / "agent-run.err").write_text("", encoding="utf-8")
+    (logs_dir / "not-a-log.out").mkdir()
+
+    logs = collect_logs({"logs": tmp_path / "logs"})
+
+    assert logs == {}
+
+
+def test_collect_logs_rejects_reparse_date_directory(tmp_path):
+    logs_root = tmp_path / "logs"
+    logs_root.mkdir()
+    target = tmp_path / "outside"
+    day = target / "2026-07-12"
+    day.mkdir(parents=True)
+    (day / "agent-run.out").write_text("outside", encoding="utf-8")
+    _make_reparse(logs_root / "2026-07-12", day)
+
+    logs = collect_logs({"logs": logs_root})
+
+    assert logs == {}
+
+
+def test_collect_agent_logs_keeps_more_than_eight_files(tmp_path):
+    day = tmp_path / "logs" / "2026-07-12"
+    day.mkdir(parents=True)
+    for index in range(9):
+        (day / f"advisor-run-{index}.out").write_text(f"log {index}", encoding="utf-8")
+
+    logs = collect_agent_logs(tmp_path / "logs", "test", "advisor", (), ("advisor",))
+
+    assert sum(len(entries) for entries in logs.values()) == 9
+
+
+def test_collect_agent_logs_uses_exact_record_owner_before_filename_fallback(tmp_path):
+    day = tmp_path / "logs" / "2026-07-12"
+    day.mkdir(parents=True)
+    path = day / "advisor-run.out"
+    path.write_text("owned elsewhere", encoding="utf-8")
+    record = _job_log_record("test", "advisor-extra", stdout_path=str(path.resolve()))
+
+    logs = collect_agent_logs(
+        tmp_path / "logs",
+        "test",
+        "advisor",
+        (record,),
+        ("advisor", "advisor-extra"),
+    )
+
+    assert logs == {}
+
+
+def test_collect_agent_logs_rejects_overlapping_fallback_names(tmp_path):
+    day = tmp_path / "logs" / "2026-07-12"
+    day.mkdir(parents=True)
+    path = day / "advisor-extra-run.out"
+    path.write_text("overlap", encoding="utf-8")
+
+    advisor_logs = collect_agent_logs(
+        tmp_path / "logs",
+        "test",
+        "advisor",
+        (),
+        ("advisor", "advisor-extra"),
+    )
+    advisor_extra_logs = collect_agent_logs(
+        tmp_path / "logs",
+        "test",
+        "advisor-extra",
+        (),
+        ("advisor", "advisor-extra"),
+    )
+
+    assert advisor_logs == {}
+    assert [entry["name"] for entry in advisor_extra_logs["2026-07-12"]] == [path.name]
+
+
+def test_collect_agent_logs_skips_missing_and_outside_recorded_paths(tmp_path):
+    day = tmp_path / "logs" / "2026-07-12"
+    day.mkdir(parents=True)
+    outside = tmp_path / "elsewhere.out"
+    outside.write_text("outside", encoding="utf-8")
+    record = _job_log_record(
+        "test",
+        "advisor",
+        stdout_path=str(outside.resolve()),
+        stderr_path=str((day / "missing.err").resolve()),
+    )
+
+    logs = collect_agent_logs(tmp_path / "logs", "test", "advisor", (record,), ("advisor",))
+
+    assert logs == {}
 
 
 def test_agent_log_views_omit_empty_error_files(tmp_path):
@@ -240,6 +350,97 @@ def test_log_route_does_not_inject_markup(preview_team, suffix):
 def test_log_route_missing_file_is_404(preview_team):
     response = TestClient(app_mod.app).get("/test/logs/view", params={"path": str(preview_team / "missing.out")})
     assert response.status_code == 404
+
+
+def test_log_view_returns_to_agent_logs_with_valid_context(monkeypatch, tmp_path, raw_config):
+    client, _config_path, log_file = _seed_activity_app(monkeypatch, tmp_path, raw_config)
+
+    response = client.get(
+        "/newsletter-prod/logs/view",
+        params={"path": str(log_file), "agent": "advisor", "source": "logs"},
+    )
+
+    assert response.status_code == 200
+    assert "Back to Logs" in response.text
+    assert "/newsletter-prod/agents/advisor/logs" in response.text
+
+
+def test_log_view_returns_to_agent_activity_with_valid_context(monkeypatch, tmp_path, raw_config):
+    client, _config_path, log_file = _seed_activity_app(monkeypatch, tmp_path, raw_config)
+
+    response = client.get(
+        "/newsletter-prod/logs/view",
+        params={"path": str(log_file), "agent": "advisor", "source": "activity"},
+    )
+
+    assert response.status_code == 200
+    assert "Back to Activity" in response.text
+    assert "/newsletter-prod/agents/advisor/activity" in response.text
+
+
+@pytest.mark.parametrize(
+    ("params", "expected_status"),
+    [
+        ({"agent": "advisor"}, 400),
+        ({"source": "logs"}, 400),
+        ({"agent": "advisor", "source": "bad"}, 400),
+        ({"agent": "missing", "source": "logs"}, 404),
+    ],
+)
+def test_log_view_rejects_invalid_agent_context_without_redirect(monkeypatch, tmp_path, raw_config, params, expected_status):
+    client, _config_path, log_file = _seed_activity_app(monkeypatch, tmp_path, raw_config)
+
+    response = client.get(
+        "/newsletter-prod/logs/view",
+        params={"path": str(log_file), **params},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == expected_status
+    assert "location" not in response.headers
+
+
+def test_log_view_forbids_agent_context_for_unscoped_file(monkeypatch, tmp_path, raw_config):
+    client, config_path, _log_file = _seed_activity_app(monkeypatch, tmp_path, raw_config)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["teams"]["newsletter-prod"]["agents"].append(
+        {
+            **raw["teams"]["newsletter-prod"]["agents"][0],
+            "name": "advisor-extra",
+        }
+    )
+    config_path.write_text(
+        yaml.safe_dump(raw, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    other_log = tmp_path / "groups" / "newsletter-workspace" / "logs" / "2026-07-16" / "advisor-extra-run.out"
+    other_log.write_text("other agent", encoding="utf-8")
+    app_mod.refresh_services()
+    app_mod.app.state.services = app_mod.build_services(config_path)
+
+    response = client.get(
+        "/newsletter-prod/logs/view",
+        params={"path": str(other_log), "agent": "advisor", "source": "logs"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 403
+    assert "location" not in response.headers
+
+
+def test_log_view_accepts_special_characters_in_valid_agent_context(monkeypatch, tmp_path, raw_config):
+    client, _config_path, _log_file = _seed_activity_app(monkeypatch, tmp_path, raw_config)
+    special = tmp_path / "groups" / "newsletter-workspace" / "logs" / "2026-07-16" / "advisor-demo & łog.out"
+    special.write_text("special", encoding="utf-8")
+
+    response = client.get(
+        "/newsletter-prod/logs/view",
+        params={"path": str(special), "agent": "advisor", "source": "logs"},
+    )
+
+    assert response.status_code == 200
+    assert escape(special.name) in response.text
+    assert "Back to Logs" in response.text
 
 
 def test_log_work_does_not_block_event_loop(preview_team, monkeypatch):

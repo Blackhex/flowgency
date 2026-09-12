@@ -4,7 +4,6 @@ import os
 import re
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
@@ -22,6 +21,11 @@ from flowgency.jobs.models import JobRecord
 from flowgency.jobs.queue import queue_snapshot
 from flowgency.jobs.store import InvalidJobTransition, cancel_job, read_job
 from flowgency.web.dependencies import FlowgencyServices, get_services
+from flowgency.web.job_presentation import friendly_status as _friendly_status
+from flowgency.web.job_presentation import friendly_trigger as _friendly_trigger
+from flowgency.web.job_presentation import routine_title as _routine_title
+from flowgency.web.job_presentation import status_badge_classes as _status_badge_classes
+from flowgency.web.logs import log_href as _shared_log_href
 from flowgency.web.team_navigation import build_team_context
 
 
@@ -60,7 +64,7 @@ def _job_path(job_store: JobStore, team_id: str, job_id: str) -> Path:
 def _log_href(team_id: str, log_path: str | None) -> str:
     if not log_path:
         return ""
-    return f"/{quote(team_id, safe='')}/logs/view?path={quote(log_path)}"
+    return _shared_log_href(team_id, log_path)
 
 
 _SAFE_SESSION_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
@@ -95,62 +99,6 @@ def _integration_display_name(record: JobRecord) -> str:
     except KeyError:
         return record.spec.integration_name
     return integration.display_name or record.spec.integration_name
-
-
-def _friendly_status(status: str) -> str:
-    return {
-        "waiting_for_memory": "Waiting for memory",
-        "queued": "Queued",
-        "running": "Running",
-        "complete": "Complete",
-        "failed": "Failed",
-        "cancelled": "Cancelled",
-    }.get(status, status.replace("_", " ").title())
-
-
-def _status_badge_classes(status: str) -> str:
-    return {
-        "waiting_for_memory": (
-            "bg-amber-100 text-amber-800 dark:bg-amber-900/50 "
-            "dark:text-amber-100"
-        ),
-        "queued": (
-            "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-100"
-        ),
-        "running": (
-            "bg-sky-100 text-sky-700 dark:bg-sky-900/50 dark:text-sky-100"
-        ),
-        "complete": (
-            "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 "
-            "dark:text-emerald-100"
-        ),
-        "failed": (
-            "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-100"
-        ),
-        "cancelled": (
-            "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-100"
-        ),
-    }.get(
-        status,
-        "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-100",
-    )
-
-
-def _friendly_trigger(trigger: str) -> str:
-    return {
-        "scheduled_prompt": "Scheduled routine",
-        "manual_prompt": "Manual routine",
-        "decision": "Decision",
-        "decision_retry": "Decision retry",
-    }.get(trigger, trigger.replace("_", " ").title())
-
-
-def _routine_title(routine_id: str | None, prompt_source: dict[str, Any] | None) -> str:
-    if prompt_source and isinstance(prompt_source.get("title"), str) and prompt_source.get("title"):
-        return str(prompt_source["title"])
-    if routine_id:
-        return routine_id
-    return "Ad hoc"
 
 
 def _memory_label(selector_data: dict[str, object], snapshot) -> str:

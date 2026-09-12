@@ -8,31 +8,9 @@
   <h1 class="text-2xl font-bold text-gray-900">Execution Logs</h1>
 </div>
 
-{% for date, entries in logs.items() %}
-<div class="mb-6">
-  <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">{{ date }}</h2>
-  <div class="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
-    {% for e in entries %}
-    {% if e.suffix in [".out", ".err"] %}
-    <a href="/{{ team }}/logs/view?path={{ e.path }}" class="block px-4 py-2.5 hover:bg-gray-50 transition-colors">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-3 min-w-0">
-          <span class="w-12 shrink-0 text-xs font-mono text-gray-400">{{ e.timestamp.strftime('%H:%M') }}</span>
-          {% if e.suffix == ".err" %}
-          <span class="text-xs font-mono px-1.5 py-0.5 rounded bg-red-100 text-red-700">ERR</span>
-          {% else %}
-          <span class="text-xs font-mono px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">OUT</span>
-          {% endif %}
-          <span class="text-sm font-medium text-gray-900 font-mono truncate">{{ e.name }}</span>
-        </div>
-        <span class="text-xs text-gray-400">{{ (e.size / 1024) | round(1) }} KB</span>
-      </div>
-    </a>
-    {% endif %}
-    {% endfor %}
-  </div>
-</div>
-{% endfor %}
+{% if logs %}
+{% include "log_entries.html" %}
+{% endif %}
 
 {% if not logs %}
 <div class="bg-white rounded-lg border border-gray-200 p-8 text-center text-gray-500">No logs found.</div>

@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import markdown
 import nh3
@@ -64,6 +65,10 @@ from flowgency.tickets.views import build_board_view
 import json as json_module
 from flowgency.workspaces import REGISTRY as WORKSPACE_REGISTRY
 from flowgency.web import FlowgencyServices, build_services, get_services
+from flowgency.web.job_presentation import load_team_jobs
+from flowgency.web.logs import collect_agent_logs
+from flowgency.web.logs import collect_logs as _collect_logs
+from flowgency.web.logs import with_log_links
 from flowgency.web.log_preview import read_log_preview
 from flowgency.web.state import flowgency_settings, runtime_team
 from flowgency.web.team_navigation import build_team_context
@@ -619,35 +624,7 @@ def _is_empty_error_log(path: Path, size: int | None = None) -> bool:
 
 def collect_logs(g: dict) -> dict[str, list[dict]]:
     """Collect log files grouped by date."""
-    logs_dir = Path(g["logs"])
-    if not logs_dir.exists():
-        return {}
-    result = {}
-    for date_dir in sorted(logs_dir.iterdir(), reverse=True):
-        if not date_dir.is_dir():
-            continue
-        entries = []
-        for f in date_dir.iterdir():
-            if f.name.startswith("."):
-                continue
-            file_stat = f.stat()
-            size = file_stat.st_size
-            if _is_empty_error_log(f, size):
-                continue
-            entries.append({
-                "name": f.name,
-                "path": str(f),
-                "suffix": f.suffix,
-                "size": size,
-                "timestamp": datetime.fromtimestamp(file_stat.st_mtime),
-            })
-        if entries:
-            entries.sort(
-                key=lambda entry: (entry["timestamp"], entry["suffix"].lower() == ".out"),
-                reverse=True,
-            )
-            result[date_dir.name] = entries
-    return result
+    return _collect_logs(g)
 
 
 def status_badge(status: str) -> Markup:
@@ -1851,15 +1828,18 @@ async def decision_verify(request: Request, team: str, slug: str):
 async def logs_list(request: Request, team: str):
     """Browse execution logs by date."""
     g = get_team(team)
-    logs = collect_logs(g)
+    logs = with_log_links(collect_logs(g), team)
     return templates.TemplateResponse(request, "logs.html", {
         "request": request,
         **team_context(g),
         "logs": logs,
     })
-
-
-def _log_view_context(team: str, path: str) -> dict:
+def _log_view_context(
+    team: str,
+    path: str,
+    agent: str | None = None,
+    source: str | None = None,
+) -> dict:
     group = get_team(team)
     file_path = Path(path)
     logs_dir = Path(group["logs"]).resolve()
@@ -1868,18 +1848,57 @@ def _log_view_context(team: str, path: str) -> dict:
         preview = read_log_preview(file_path)
     except FileNotFoundError:
         raise HTTPException(404, "Log not found")
+    return_label = "Back to logs"
+    return_href = f"/{quote(team, safe='')}/logs"
+    if agent is not None or source is not None:
+        if not agent or not source:
+            raise HTTPException(400, "agent and source must be provided together")
+        if source not in {"activity", "logs"}:
+            raise HTTPException(400, "Invalid source")
+        snapshot = _load_snapshot()
+        if team not in snapshot.config.teams:
+            raise HTTPException(404, f"Unknown team: {team}")
+        team_cfg = snapshot.config.teams[team]
+        if agent not in team_cfg.agents:
+            raise HTTPException(404, "Unknown agent")
+        services = _services()
+        records, _warnings = load_team_jobs(services.job_store, team)
+        available = collect_agent_logs(
+            resolve_team_paths(team_cfg).logs,
+            team,
+            agent,
+            records,
+            tuple(team_cfg.agents.keys()),
+        )
+        allowed_paths = {
+            entry["path"]
+            for entries in available.values()
+            for entry in entries
+        }
+        if str(file_path.resolve(strict=False)) not in allowed_paths:
+            raise HTTPException(403, "Access denied")
+        return_label = "Back to Activity" if source == "activity" else "Back to Logs"
+        return_href = f"/{quote(team, safe='')}/agents/{quote(agent, safe='')}/{source}"
     return {
         **team_context(group),
         "filename": file_path.name,
         "content_html": preview.content_html,
         "raw": preview.text,
         "truncated": preview.truncated,
+        "return_label": return_label,
+        "return_href": return_href,
     }
 
 
 @app.get("/{team}/logs/view", response_class=HTMLResponse)
-async def log_view(request: Request, team: str, path: str):
-    context = await run_in_threadpool(_log_view_context, team, path)
+async def log_view(
+    request: Request,
+    team: str,
+    path: str,
+    agent: str | None = None,
+    source: str | None = None,
+):
+    context = await run_in_threadpool(_log_view_context, team, path, agent, source)
     return templates.TemplateResponse(request, "log_view.html", {
         "request": request,
         **context,
