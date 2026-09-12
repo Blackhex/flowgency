@@ -485,6 +485,32 @@ def test_user_may_edit_during_active_work_and_provenance_is_trusted(workflow_env
     assert provenance.actor_kind == "user"
     assert provenance.actor_name == env.user.actor_name
     assert provenance.event_id == updated.event_id
+    assert "job_id" not in env.read(ticket.ref).record.events[-1].data
+
+
+def test_agent_update_records_originating_job(workflow_env):
+    env = workflow_env
+    ticket = env.create(values={"summary": "before"})
+    actor = env.agent("builder", "run-a")
+    env.service.start_work(
+        actor,
+        ticket.version,
+        env.operation("start-update", actor_name=actor.agent_name),
+    )
+    active = env.read(ticket.ref)
+    updated = env.service.update(
+        actor,
+        active.version,
+        active.patch(field_values={"summary": "after"}),
+        env.operation("agent-edit", actor_name=actor.agent_name),
+    )
+    persisted = env.read(ticket.ref).record
+    event = persisted.events[-1]
+    assert updated.ticket.assignee == "builder"
+    assert updated.ticket.active_run is not None
+    assert event.kind == "updated"
+    assert event.actor == actor.agent_name
+    assert event.data["job_id"] == actor.job_id
 
 
 def test_transition_ready_update_retains_assignment(workflow_env):
@@ -609,6 +635,7 @@ def test_sign_off_clears_assignment_and_active_run_with_one_event(workflow_env):
         env.operation("signoff-start", actor_name=actor.agent_name),
     )
     active = env.read(ticket.ref)
+    assert active.record.events[-1].data["job_id"] == actor.job_id
     before_event_ids = [event.id for event in active.record.events]
     result = env.service.sign_off(
         actor,
@@ -637,8 +664,10 @@ def test_end_work_retains_assignment(workflow_env):
         active.version,
         env.operation("end", actor_name=actor.agent_name),
     )
+    persisted = env.read(ticket.ref).record
     assert result.ticket.assignee == actor.agent_name
     assert result.ticket.active_run is None
+    assert persisted.events[-1].data["job_id"] == actor.job_id
 
 
 def test_sign_off_replay_returns_original_result_without_second_event(workflow_env):

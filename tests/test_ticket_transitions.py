@@ -35,15 +35,35 @@ def test_rejected_transition_leaves_record_unchanged_and_report_is_separate(work
     unchanged = env.read(ticket.ref).record
     assert unchanged == before.record
 
+    assessment = CriterionAssessment(
+        criterion_id="evidence-reviewed",
+        satisfied=True,
+        reasoning="Evidence was inspected and confirmed complete",
+        supporting_fields=("verdict",),
+    )
+
     reported = env.service.report(
         actor,
         before.version,
-        env.ticket_report("Review declined"),
+        env.ticket_report("Review declined", assessments=(assessment,)),
         env.operation("report", actor_name=actor.agent_name),
     )
+    persisted = env.read(ticket.ref).record
+    event = persisted.events[-1]
     assert reported.ticket.state_id == before.record.state_id
     assert len(reported.ticket.events) == len(before.record.events) + 1
-    assert reported.ticket.events[-1].kind == "reported"
+    assert event.kind == "reported"
+    assert event.data["job_id"] == actor.job_id
+    assert event.data["session_id"] == actor.session_id
+    assert event.data["message"] == "Review declined"
+    assert event.data["assessments"] == [
+        {
+            "criterion_id": "evidence-reviewed",
+            "satisfied": True,
+            "reasoning": "Evidence was inspected and confirmed complete",
+            "supporting_fields": ["verdict"],
+        }
+    ]
 
 
 def test_transition_commits_state_outputs_and_audit_snapshot(workflow_env):
