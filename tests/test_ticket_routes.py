@@ -11,7 +11,7 @@ from dataclasses import replace
 from flowgency.jobs.authority import JobStore
 from flowgency.jobs.store import read_job, write_job
 from flowgency.tickets.artifacts import RetainedArtifact
-from flowgency.tickets.models import TicketRef, TicketRecord
+from flowgency.tickets.models import TicketEvent, TicketRef, TicketRecord
 from flowgency.tickets.storages.local import LocalTicketStorage
 from flowgency.integrations.models import RuntimeCapabilities
 from flowgency.workflows.models import FieldUse, Precondition
@@ -659,9 +659,48 @@ def test_detail_snapshot_exposes_current_definition_fields_and_retained_audit_sn
         "kind": "id",
         "value": artifact.value,
     }
+    assert set(payload["history"][-1]) == {"id", "kind", "actor", "summary", "at", "data"}
     serialized = json.dumps(payload)
     assert str(env.root_a) not in serialized
     assert "receipts" not in serialized
+
+
+def test_compact_history_retains_originating_job_and_event_job_helper(workflow_web_env):
+    from flowgency.tickets.views import build_board_view, event_job_id
+
+    env = workflow_web_env
+    actor = env.agent("builder", "activity-view-run")
+    created = env.service.create(
+        actor,
+        env.workflow_id,
+        "Compact history",
+        "Body",
+        {"summary": "ready"},
+        env.operation("compact-create", actor_name=actor.agent_name),
+    )
+    board = build_board_view(env.service, env.user, env.workflow_id)
+    ticket = next(
+        ticket
+        for column in board.columns
+        for ticket in column.tickets
+        if ticket.ref == created.ticket.ref
+    )
+
+    assert ticket.history[-1].job_id == actor.job_id
+    assert event_job_id(TicketEvent(kind="reported", actor="builder", summary="old")) is None
+    assert event_job_id(TicketEvent(kind="reported", actor="builder", summary="old", data={})) is None
+
+
+@pytest.mark.parametrize(
+    "job_id",
+    [None, "", ["other-run"], {"job_id": "other-run"}, "../other-run"],
+)
+def test_event_job_helper_rejects_malformed_job_ids(job_id):
+    from flowgency.tickets.views import event_job_id
+
+    assert event_job_id(
+        TicketEvent(kind="reported", actor="builder", summary="old", data={"job_id": job_id})
+    ) is None
 
 
 def test_detail_snapshot_exposes_current_preconditions_without_overwriting_history(

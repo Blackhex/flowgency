@@ -5,10 +5,11 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
+from flowgency.jobs.authority import JobStore
 from flowgency.jobs.store import TERMINAL_STATUSES
 from flowgency.tickets.artifacts import iter_internal_artifact_refs
 from flowgency.tickets.errors import TicketStorageError, WorkflowUnavailable
-from flowgency.tickets.models import TicketRef, TicketVersion, TicketView, UserTicketContext
+from flowgency.tickets.models import TicketEvent, TicketRef, TicketVersion, TicketView, UserTicketContext
 from flowgency.tickets.service import TicketService
 from flowgency.workflows.configuration import WorkflowBinding
 
@@ -36,6 +37,7 @@ class TicketEventView(BaseModel):
     actor: str
     summary: str
     at: Any = None
+    job_id: str | None = None
 
 
 class TicketAuditEventView(BaseModel):
@@ -258,6 +260,16 @@ def _reservation_issue(code: str, message: str, *history: str) -> ViewIssue:
     return ViewIssue(code=code, message=message, history=tuple(item for item in history if item))
 
 
+def event_job_id(event: TicketEvent) -> str | None:
+    job_id = event.data.get("job_id")
+    if not isinstance(job_id, str) or not job_id:
+        return None
+    try:
+        return JobStore._job_id(job_id)
+    except ValueError:
+        return None
+
+
 def _reservation_rows(ticket_jobs, team_id: str) -> dict[tuple[str, str, str], tuple[Any, ...]]:
     if ticket_jobs is None:
         return {}
@@ -388,6 +400,7 @@ def _summary_view(view: TicketView, *, reservations: tuple[Any, ...] = (), ticke
                 actor=event.actor,
                 summary=event.summary,
                 at=event.at,
+                job_id=event_job_id(event),
             )
             for event in view.record.events
         ),

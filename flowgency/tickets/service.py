@@ -768,7 +768,8 @@ class TicketService:
         now,
     ) -> TicketEvent:
         actor_name = actor.actor_name if isinstance(actor, UserTicketContext) else actor.agent_name
-        return TicketEvent(id=event_id, kind=kind, actor=actor_name, summary=summary, at=now)
+        data = {"job_id": actor.job_id} if isinstance(actor, AgentTicketContext) else {}
+        return TicketEvent(id=event_id, kind=kind, actor=actor_name, summary=summary, data=data, at=now)
 
     def _stamp_field_provenance(
         self,

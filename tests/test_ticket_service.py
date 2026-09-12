@@ -94,6 +94,22 @@ def test_create_same_content_with_different_operation_ids_creates_distinct_ticke
     assert first.ticket.ref.ticket_id != second.ticket.ref.ticket_id
 
 
+def test_agent_created_event_records_originating_job(workflow_env):
+    env = workflow_env
+    actor = env.agent("builder", "activity-run")
+    created = env.service.create(
+        actor,
+        env.workflow_id,
+        "Activity provenance",
+        "Body",
+        {"summary": "ready"},
+        env.operation("activity-create", actor_name=actor.agent_name),
+    )
+    stored = env.provider.read(created.ticket.ref)
+    assert stored.events[-1].data["job_id"] == actor.job_id
+    assert stored.events[-1].actor == actor.agent_name
+
+
 def test_create_reused_operation_id_with_changed_digest_conflicts_without_extra_ticket(workflow_env):
     env = workflow_env
     first = TicketOperation(

@@ -101,6 +101,26 @@ def test_request_digest_is_not_agent_controlled(workflow_env):
     assert result["error"]["code"] == "invalid-request"
 
 
+def test_broker_rejects_forged_top_level_job_id_without_mutation(workflow_env):
+    env = workflow_env
+    ticket = env.create()
+    before = env.read(ticket.ref).record
+
+    with env.broker_for(env.running_job("builder", "run-a")) as client:
+        result = client.call(
+            "start_work",
+            {
+                "version": ticket.version.model_dump(mode="json"),
+                "operation_id": "start-one",
+                "job_id": "forged-run",
+            },
+        )
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "invalid-request"
+    assert env.read(ticket.ref).record == before
+
+
 def test_broker_rejects_missing_token(workflow_env):
     env = workflow_env
     authority = env.running_job("builder", "run-a")
