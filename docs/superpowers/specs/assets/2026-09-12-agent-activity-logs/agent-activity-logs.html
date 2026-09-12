@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Activity and Logs | Flowgency Preview</title>
+  <link rel="icon" href="../../../../../flowgency/static/icon-192.png" type="image/png">
+  <style>
+    @font-face { font-family: "DM Sans"; src: url("./dm-sans.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+    @font-face { font-family: "JetBrains Mono"; src: url("./jetbrains-mono.woff2") format("woff2"); font-weight: 100 800; font-display: swap; }
+    :root { color-scheme: dark; --page: #0f172a; --surface: #1e293b; --hover: #162034; --border: #334155; --text: #f1f5f9; --secondary: #cbd5e1; --muted: #94a3b8; --link: #a5b4fc; --rail: #334155; --success: #a7f3d0; --success-bg: #12362f; --error: #fecaca; --error-bg: #492830; --info: #bae6fd; --info-bg: #17394e; --badge: #293452; --badge-text: #c7d2fe; }
+    :root[data-theme="light"] { color-scheme: light; --page: #f9fafb; --surface: #fff; --hover: #f3f4f6; --border: #d1d5db; --text: #111827; --secondary: #374151; --muted: #4b5563; --link: #4338ca; --rail: #d1d5db; --success: #047857; --success-bg: #d1fae5; --error: #b91c1c; --error-bg: #fee2e2; --info: #0369a1; --info-bg: #e0f2fe; --badge: #eef2ff; --badge-text: #4338ca; }
+    * { box-sizing: border-box; letter-spacing: 0; }
+    body { margin: 0; background: var(--page); color: var(--text); font: 15px/1.5 "DM Sans", sans-serif; }
+    button, select { font: inherit; }
+    button, a, summary { -webkit-tap-highlight-color: transparent; }
+    a { color: var(--link); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    button { cursor: pointer; }
+    a:focus-visible, button:focus-visible, summary:focus-visible, select:focus-visible { outline: 2px solid #7c9afa; outline-offset: 4px; border-radius: 4px; }
+    [hidden] { display: none !important; }
+    h1, h2, h3, p { margin: 0; }
+    .fg-icon { width: 17px; height: 17px; flex: none; stroke-width: 1.8; }
+    .fg-mono { font-family: "JetBrains Mono", monospace; font-size: 12px; }
+    .fg-shell { display: grid; grid-template-columns: 216px minmax(0, 1fr); min-height: 100vh; }
+    .fg-sidebar { position: sticky; top: 0; height: 100vh; min-width: 0; padding: 20px 12px 14px; background: #141b3d; color: #cbd5e1; display: flex; flex-direction: column; overflow-y: auto; }
+    .fg-brand { display: flex; align-items: center; gap: 10px; padding: 0 4px 16px; font-size: 19px; font-weight: 700; color: #fff; }
+    .fg-brand img { width: 32px; height: 32px; }
+    .fg-team-label { font-size: 11px; color: #cbd5e1; padding: 0 4px 5px; }
+    .fg-team { border: 1px solid #46506b; border-radius: 8px; background: #202849; color: #e2e8f0; padding: 8px 10px; display: flex; justify-content: space-between; align-items: center; font-size: 13px; margin-bottom: 15px; }
+    .fg-nav-item { display: flex; align-items: center; gap: 9px; padding: 8px 12px; border-radius: 8px; min-height: 38px; font-size: 14px; color: #aab8cd; }
+    .fg-nav-item.fg-nav-active { color: #fff; background: #2a3050; }
+    .fg-nav-item .fg-icon { opacity: .7; }
+    .fg-nav-count { margin-left: auto; background: #2a3050; border-radius: 8px; padding: 0 6px; font-size: 12px; }
+    .fg-nav-heading { padding: 17px 12px 6px; font-size: 11px; text-transform: uppercase; color: #cbd5e1; }
+    .fg-sidebar-footer { margin-top: auto; padding-top: 24px; }
+    .fg-theme-toggle { width: 100%; border: 0; background: transparent; text-align: left; }
+    .fg-theme-toggle:hover { background: #2a3050; color: #fff; }
+    .fg-mobile-bar { display: none; }
+    .fg-menu-close { display: none; }
+    .fg-main { min-width: 0; }
+    .fg-content { max-width: 1280px; margin: 0 auto; padding: 24px 32px 40px; }
+    .fg-back { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; margin-bottom: 20px; }
+    .fg-agent-header { padding-bottom: 20px; margin-bottom: 24px; border-bottom: 1px solid var(--border); }
+    .fg-identity { display: flex; align-items: flex-start; gap: 12px; }
+    .fg-avatar { background: var(--surface); width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; font-size: 18px; flex: none; }
+    .fg-identity h1 { font-size: 24px; font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
+    .fg-role { color: var(--muted); font-size: 14px; margin-top: 3px; }
+    .fg-profile-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    .fg-profile-tag { font-size: 12px; border-radius: 14px; padding: 3px 10px; background: var(--badge); color: var(--badge-text); overflow-wrap: anywhere; }
+    .fg-profile-tag.fg-neutral-tag { color: var(--secondary); background: var(--surface); }
+    .fg-tabs { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 24px; border-bottom: 1px solid var(--border); }
+    .fg-tab { border: 1px solid transparent; border-bottom: 0; padding: 9px 14px; color: var(--muted); background: transparent; border-radius: 8px 8px 0 0; font-size: 14px; font-weight: 500; white-space: nowrap; min-height: 42px; }
+    button.fg-tab:hover { color: var(--text); background: var(--hover); }
+    .fg-tab[aria-selected="true"] { background: var(--surface); border-color: var(--border); color: var(--text); position: relative; }
+    .fg-tab[aria-selected="true"]::after { content: ""; position: absolute; height: 1px; background: var(--surface); bottom: -1px; left: 0; right: 0; }
+    .fg-section-heading { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; margin-bottom: 22px; }
+    .fg-section-heading h2 { font-size: 18px; font-weight: 600; }
+    .fg-section-heading .fg-mono { color: var(--muted); white-space: nowrap; }
+    .fg-date { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 10px; }
+    .fg-timeline { padding: 0; margin: 0 0 24px; list-style: none; }
+    .fg-event { display: grid; grid-template-columns: 47px 28px minmax(0, 1fr); column-gap: 12px; position: relative; }
+    .fg-time { color: var(--muted); padding-top: 6px; }
+    .fg-event-marker { position: relative; display: flex; justify-content: center; padding-top: 3px; }
+    .fg-event-marker::after { content: ""; position: absolute; width: 1px; top: 31px; bottom: -3px; background: var(--rail); }
+    .fg-event:last-child .fg-event-marker::after { display: none; }
+    .fg-event-symbol { width: 27px; height: 27px; display: grid; place-items: center; border-radius: 50%; background: var(--surface); border: 1px solid var(--border); color: var(--muted); }
+    .fg-event-symbol .fg-icon { width: 14px; height: 14px; }
+    .fg-event-symbol.fg-complete-symbol { color: var(--success); }
+    .fg-event-symbol.fg-failed-symbol { color: var(--error); }
+    .fg-event-symbol.fg-running-symbol { color: var(--info); }
+    .fg-event-content { min-width: 0; padding: 4px 0 19px; }
+    .fg-event-head { display: flex; flex-wrap: wrap; gap: 7px 10px; align-items: center; }
+    .fg-event-head h3 { font-size: 14px; line-height: 1.5; font-weight: 600; overflow-wrap: anywhere; }
+    .fg-run-badge { font-size: 11px; padding: 1px 7px; border-radius: 4px; white-space: nowrap; }
+    .fg-run-badge.fg-complete { background: var(--success-bg); color: var(--success); }
+    .fg-run-badge.fg-failed { background: var(--error-bg); color: var(--error); }
+    .fg-run-badge.fg-running { background: var(--info-bg); color: var(--info); }
+    .fg-event-meta { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 4px 0; }
+    .fg-ticket-link { font-size: 14px; display: inline; overflow-wrap: anywhere; }
+    .fg-summary { font-size: 14px; line-height: 1.6; color: var(--secondary); margin-top: 5px; max-width: 840px; overflow-wrap: anywhere; }
+    .fg-event-links { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; margin-top: 7px; }
+    .fg-file-link { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; min-height: 24px; }
+    .fg-file-link .fg-icon { width: 14px; height: 14px; }
+    .fg-log-unavailable { font-size: 12px; color: var(--muted); }
+    .fg-report { max-width: 840px; margin-top: 5px; color: var(--secondary); font-size: 14px; line-height: 1.6; }
+    .fg-report summary { list-style: none; cursor: pointer; }
+    .fg-report summary::-webkit-details-marker { display: none; }
+    .fg-report-excerpt { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+    .fg-report[open] .fg-report-excerpt { display: block; }
+    .fg-report-control { color: var(--link); display: inline-flex; align-items: center; gap: 3px; font-size: 12px; margin-top: 3px; }
+    .fg-report-control .fg-icon { width: 13px; height: 13px; }
+    .fg-less, .fg-report[open] .fg-more { display: none; }
+    .fg-report[open] .fg-less { display: inline; }
+    .fg-report[open] .fg-report-control .fg-icon { transform: rotate(180deg); }
+    .fg-report-body { margin-top: 8px; padding-left: 12px; border-left: 2px solid var(--border); }
+    .fg-report-body p + p { margin-top: 8px; }
+    .fg-report-body code { font-family: "JetBrains Mono", monospace; font-size: 12px; overflow-wrap: anywhere; }
+    .fg-log-day { margin-bottom: 26px; }
+    .fg-log-list { margin: 0; padding: 0; list-style: none; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); overflow: hidden; }
+    .fg-log-list li + li { border-top: 1px solid var(--border); }
+    .fg-log-row { display: grid; grid-template-columns: 48px 38px minmax(0, 1fr) 60px; align-items: center; gap: 12px; padding: 12px 16px; color: var(--text); min-width: 0; }
+    .fg-log-row:hover { background: var(--hover); text-decoration: none; }
+    .fg-log-time { color: var(--muted); }
+    .fg-log-type { font: 11px/1.5 "JetBrains Mono", monospace; border-radius: 4px; padding: 2px 5px; width: 34px; text-align: center; }
+    .fg-out { color: var(--secondary); background: var(--hover); }
+    .fg-err { color: #b91c1c; background: #fee2e2; }
+    .fg-log-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 13px/1.6 "JetBrains Mono", monospace; min-width: 0; }
+    .fg-log-size { color: var(--muted); font-size: 12px; text-align: right; white-space: nowrap; }
+    .fg-log-file { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 24px; }
+    .fg-log-file h1 { font: 600 16px/1.6 "JetBrains Mono", monospace; overflow-wrap: anywhere; }
+    .fg-log-file-meta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; color: var(--muted); margin-top: 10px; font-size: 12px; }
+    .fg-log-file pre { font: 13px/1.85 "JetBrains Mono", monospace; color: var(--secondary); white-space: pre-wrap; overflow-wrap: anywhere; padding-top: 20px; margin: 20px 0 0; border-top: 1px solid var(--border); }
+    .fg-overlay { display: none; }
+    @media (min-width: 1800px) { .fg-content { max-width: 1400px; } }
+    @media (max-width: 1060px) { .fg-content { padding-left: 24px; padding-right: 24px; } .fg-tab { padding: 9px 10px; } }
+    @media (max-width: 767px) {
+      .fg-shell { display: block; }
+      .fg-mobile-bar { display: flex; align-items: center; gap: 12px; height: 48px; padding: 0 12px; background: #141b3d; border-bottom: 1px solid #334155; color: #fff; }
+      .fg-icon-button { border: 0; background: transparent; color: inherit; width: 32px; height: 32px; display: grid; place-items: center; padding: 0; }
+      .fg-sidebar { position: fixed; z-index: 30; top: 0; left: 0; width: 216px; height: 100dvh; transform: translateX(-100%); }
+      body.fg-menu-open .fg-sidebar { transform: translateX(0); }
+      body.fg-menu-open .fg-overlay { display: block; position: fixed; inset: 0; z-index: 20; background: #0009; }
+      .fg-menu-close { display: grid; position: absolute; top: 17px; right: 9px; }
+      .fg-content { padding: 18px 16px 28px; }
+      .fg-back { margin-bottom: 15px; }
+      .fg-identity h1 { font-size: 20px; }
+      .fg-avatar { width: 40px; height: 40px; }
+      .fg-role { font-size: 13px; }
+      .fg-agent-header { margin-bottom: 18px; padding-bottom: 17px; }
+      .fg-tabs { gap: 2px; margin-bottom: 20px; }
+      .fg-tab { padding: 9px 10px; font-size: 13px; }
+      .fg-section-heading { margin-bottom: 18px; }
+      .fg-event { grid-template-columns: 39px 23px minmax(0, 1fr); column-gap: 8px; }
+      .fg-event-symbol { width: 23px; height: 23px; }
+      .fg-event-marker::after { top: 27px; }
+      .fg-time { font-size: 11px; }
+      .fg-event-content { padding-bottom: 19px; }
+      .fg-event-links { gap: 14px; margin-top: 6px; }
+      .fg-file-link { min-height: 32px; }
+      .fg-log-row { grid-template-columns: 36px 32px minmax(0, 1fr) 44px; gap: 7px; padding: 12px 10px; }
+      .fg-log-name { font-size: 11px; }
+      .fg-log-time, .fg-log-size { font-size: 10px; }
+      .fg-log-type { font-size: 10px; width: 30px; }
+      .fg-log-file { padding: 16px; }
+      .fg-log-file h1 { font-size: 13px; }
+      .fg-log-file pre { font-size: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="fg-mobile-bar"><button class="fg-icon-button" id="fg-menu-open" aria-label="Open navigation" aria-controls="fg-sidebar" aria-expanded="false"><i data-lucide="menu" class="fg-icon"></i></button><strong>Flowgency</strong></div>
+  <div class="fg-overlay" id="fg-overlay"></div>
+  <div class="fg-shell">
+    <aside class="fg-sidebar" id="fg-sidebar" aria-label="Primary navigation">
+      <div class="fg-brand"><img src="../../../../../flowgency/static/icon-192.png" width="32" height="32" alt=""><span>Flowgency</span></div>
+      <button class="fg-icon-button fg-menu-close" id="fg-menu-close" aria-label="Close navigation"><i data-lucide="x" class="fg-icon"></i></button>
+      <div class="fg-team-label">Current team</div>
+      <div class="fg-team">Flowgency Core<i data-lucide="chevron-down" class="fg-icon"></i></div>
+      <div class="fg-nav-item"><i data-lucide="inbox" class="fg-icon"></i>Inbox</div>
+      <div class="fg-nav-item fg-nav-active"><i data-lucide="users" class="fg-icon"></i>Agents<span class="fg-nav-count">4</span></div>
+      <div class="fg-nav-heading">Workflows</div>
+      <div class="fg-nav-item"><i data-lucide="rows-3" class="fg-icon"></i>Flowgency Delivery</div>
+      <div class="fg-nav-heading">Workspace</div>
+      <div class="fg-nav-item"><i data-lucide="scroll-text" class="fg-icon"></i>Logs</div>
+      <div class="fg-nav-item"><i data-lucide="chart-no-axes-column" class="fg-icon"></i>Jobs</div>
+      <div class="fg-nav-item"><i data-lucide="list-checks" class="fg-icon"></i>Workflow Library</div>
+      <div class="fg-nav-item"><i data-lucide="library" class="fg-icon"></i>Agent Library</div>
+      <div class="fg-nav-item"><i data-lucide="database" class="fg-icon"></i>Memory Channels</div>
+      <div class="fg-nav-item"><i data-lucide="panels-top-left" class="fg-icon"></i>Workspaces<span class="fg-nav-count">1</span></div>
+      <div class="fg-sidebar-footer">
+        <button class="fg-nav-item fg-theme-toggle" id="fg-theme-toggle"><i data-lucide="sun" class="fg-icon"></i><span id="fg-theme-label">Light mode</span></button>
+        <div class="fg-nav-item"><i data-lucide="settings" class="fg-icon"></i>Settings</div>
+      </div>
+    </aside>
+    <main class="fg-main">
+      <div class="fg-content">
+        <div id="fg-agent-view">
+          <span class="fg-back"><i data-lucide="arrow-left" class="fg-icon"></i>Back to agents</span>
+          <header class="fg-agent-header">
+            <div class="fg-identity"><div class="fg-avatar">F</div><div><h1>Flowgency Core Configurator</h1><p class="fg-role">Flowgency Core Control-Plane Lead</p></div></div>
+            <div class="fg-profile-tags"><span class="fg-profile-tag">Blueprint: control-plane-engineer</span><span class="fg-profile-tag fg-neutral-tag">GitHub Copilot</span></div>
+          </header>
+          <nav aria-label="Agent detail tabs" class="fg-tabs">
+            <span class="fg-tab">Profile</span><span class="fg-tab">Blueprint</span><span class="fg-tab">Runtime</span><span class="fg-tab">Permissions</span><span class="fg-tab">Prompts</span><span class="fg-tab">Routines</span><span class="fg-tab">Memory</span>
+            <button id="fg-tab-activity" class="fg-tab" role="tab" aria-selected="true" aria-controls="fg-panel-activity" data-tab="activity">Activity</button>
+            <button id="fg-tab-logs" class="fg-tab" role="tab" aria-selected="false" aria-controls="fg-panel-logs" data-tab="logs" tabindex="-1">Logs</button>
+          </nav>
+          <section id="fg-panel-activity" role="tabpanel" aria-labelledby="fg-tab-activity">
+            <div class="fg-section-heading"><h2>Activity</h2><span class="fg-mono">8 records</span></div>
+            <h3 class="fg-date">2026-09-11</h3>
+            <ol class="fg-timeline">
+              <li class="fg-event">
+                <time class="fg-time fg-mono" datetime="2026-09-11T23:38:00">23:38</time>
+                <div class="fg-event-marker"><span class="fg-event-symbol fg-running-symbol"><i data-lucide="loader-circle" class="fg-icon"></i></span></div>
+                <div class="fg-event-content"><div class="fg-event-head"><h3>Daily control-plane review</h3><span class="fg-run-badge fg-running">Running</span></div><div class="fg-event-meta"><span>Scheduled run</span><span class="fg-mono">b7a63204</span></div><p class="fg-summary">Reviewing current configuration and runtime changes.</p><div class="fg-event-links"><span class="fg-log-unavailable">No logs yet</span></div></div>
+              </li>
+              <li class="fg-event">
+                <time class="fg-time fg-mono" datetime="2026-09-11T23:13:42">23:13</time>
+                <div class="fg-event-marker"><span class="fg-event-symbol fg-complete-symbol"><i data-lucide="check" class="fg-icon"></i></span></div>
+                <div class="fg-event-content"><div class="fg-event-head"><h3>Daily control-plane triage</h3><span class="fg-run-badge fg-complete">Complete</span></div><div class="fg-event-meta"><span>Scheduled run</span><span>4m 12s</span><span class="fg-mono">d03107cc</span></div><p class="fg-summary">Recorded the path-validation finding and handed off implementation.</p><div class="fg-event-links"><a class="fg-file-link" href="#log=triage-output" data-log="triage-output"><i data-lucide="file-text" class="fg-icon"></i>Output</a><a class="fg-file-link" href="#log=triage-error" data-log="triage-error"><i data-lucide="terminal" class="fg-icon"></i>Error</a></div></div>
+              </li>
+              <li class="fg-event">
+                <time class="fg-time fg-mono" datetime="2026-09-11T23:13:29">23:13</time>
+                <div class="fg-event-marker"><span class="fg-event-symbol"><i data-lucide="square" class="fg-icon"></i></span></div>
+                <div class="fg-event-content"><div class="fg-event-head"><h3>Ended active work</h3></div><a class="fg-ticket-link" href="#ticket" data-ticket>Reject canonical paths crossing reparse ancestors</a><div class="fg-event-meta"><span>Flowgency Delivery</span><span class="fg-mono">#12</span></div><div class="fg-event-links"><a class="fg-file-link" href="#log=triage-output" data-log="triage-output"><i data-lucide="file-text" class="fg-icon"></i>Output</a><a class="fg-file-link" href="#log=triage-error" data-log="triage-error"><i data-lucide="terminal" class="fg-icon"></i>Error</a></div></div>
+              </li>
+              <li class="fg-event">
+                <time class="fg-time fg-mono" datetime="2026-09-11T23:12:58">23:12</time>
+                <div class="fg-event-marker"><span class="fg-event-symbol"><i data-lucide="message-square-text" class="fg-icon"></i></span></div>
+                <div class="fg-event-content"><div class="fg-event-head"><h3>Report added</h3></div><a class="fg-ticket-link" href="#ticket" data-ticket>Reject canonical paths crossing reparse ancestors</a><div class="fg-event-meta"><span>Flowgency Delivery</span><span class="fg-mono">#12</span></div>
+                  <details class="fg-report"><summary><span class="fg-report-excerpt">Triage identified and documented the violated invariant. Canonical path resolution runs before the reparse-ancestor check, so symlink and junction ancestors can become invisible to the validator. The proposed repair preserves lexical ancestry until safety validation is complete.</span><span class="fg-report-control"><span class="fg-more">Show more</span><span class="fg-less">Show less</span><i data-lucide="chevron-down" class="fg-icon"></i></span></summary><div class="fg-report-body"><p>Evidence: <code>configuration.models._path_from_config</code> resolves lexical paths before <code>configuration.paths.validate_resolved_paths</code>. The existing-directory validator also resolves before checking for reparse points.</p><p>Record the original path before resolution, reject unsafe ancestors, and retain the current canonical overlap checks. Cover directory symlinks, Windows junctions, missing safe descendants, and ordinary relative paths with focused regressions.</p><p>No implementation was made in this run. Keep the ticket in progress for the implementation handoff.</p></div></details>
+                  <div class="fg-event-links"><a class="fg-file-link" href="#log=triage-output" data-log="triage-output"><i data-lucide="file-text" class="fg-icon"></i>Output</a><a class="fg-file-link" href="#log=triage-error" data-log="triage-error"><i data-lucide="terminal" class="fg-icon"></i>Error</a></div>
+                </div>
+              </li>
+              <li class="fg-event">
+                <time class="fg-time fg-mono" datetime="2026-09-11T23:10:04">23:10</time>
+                <div class="fg-event-marker"><span class="fg-event-symbol"><i data-lucide="arrow-right" class="fg-icon"></i></span></div>
+                <div class="fg-event-content"><div class="fg-event-head"><h3>Backlog &rarr; In progress</h3></div><a class="fg-ticket-link" href="#ticket" data-ticket>Reject canonical paths crossing reparse ancestors</a><div class="fg-event-meta"><span>Flowgency Delivery</span><span>Start accepted</span><span class="fg-mono">#12</span></div><div class="fg-event-links"><a class="fg-file-link" href="#log=triage-output" data-log="triage-output"><i data-lucide="file-text" class="fg-icon"></i>Output</a><a class="fg-file-link" href="#log=triage-error" data-log="triage-error"><i data-lucide="terminal" class="fg-icon"></i>Error</a></div></div>
+              </li>
+              <li class="fg-event">
+                <time class="fg-time fg-mono" datetime="2026-09-11T23:10:00">23:10</time>
+                <div class="fg-event-marker"><span class="fg-event-symbol"><i data-lucide="play" class="fg-icon"></i></span></div>
+                <div class="fg-event-content"><div class="fg-event-head"><h3>Started work</h3></div><a class="fg-ticket-link" href="#ticket" data-ticket>Reject canonical paths crossing reparse ancestors</a><div class="fg-event-meta"><span>Flowgency Delivery</span><span class="fg-mono">#12</span></div><div class="fg-event-links"><a class="fg-file-link" href="#log=triage-output" data-log="triage-output"><i data-lucide="file-text" class="fg-icon"></i>Output</a><a class="fg-file-link" href="#log=triage-error" data-log="triage-error"><i data-lucide="terminal" class="fg-icon"></i>Error</a></div></div>
+              </li>
+              <li class="fg-event">
+                <time class="fg-time fg-mono" datetime="2026-09-11T23:09:38">23:09</time>
+                <div class="fg-event-marker"><span class="fg-event-symbol"><i data-lucide="plus" class="fg-icon"></i></span></div>
+                <div class="fg-event-content"><div class="fg-event-head"><h3>Ticket created</h3></div><a class="fg-ticket-link" href="#ticket" data-ticket>Reject canonical paths crossing reparse ancestors</a><div class="fg-event-meta"><span>Flowgency Delivery</span><span class="fg-mono">#12</span></div><div class="fg-event-links"><a class="fg-file-link" href="#log=triage-output" data-log="triage-output"><i data-lucide="file-text" class="fg-icon"></i>Output</a><a class="fg-file-link" href="#log=triage-error" data-log="triage-error"><i data-lucide="terminal" class="fg-icon"></i>Error</a></div></div>
+              </li>
+            </ol>
+            <h3 class="fg-date">2026-09-10</h3>
+            <ol class="fg-timeline">
+              <li class="fg-event"><time class="fg-time fg-mono" datetime="2026-09-10T18:26:00">18:26</time><div class="fg-event-marker"><span class="fg-event-symbol fg-failed-symbol"><i data-lucide="x" class="fg-icon"></i></span></div><div class="fg-event-content"><div class="fg-event-head"><h3>Daily control-plane triage</h3><span class="fg-run-badge fg-failed">Failed</span></div><div class="fg-event-meta"><span>Scheduled run</span><span>1s</span><span class="fg-mono">619ddf67</span></div><p class="fg-summary">Ticket server could not start. The agent was not invoked.</p><div class="fg-event-links"><span class="fg-log-unavailable">No logs available</span></div></div></li>
+            </ol>
+          </section>
+          <section id="fg-panel-logs" role="tabpanel" aria-labelledby="fg-tab-logs" hidden>
+            <div class="fg-section-heading"><h2>Execution Logs</h2><span class="fg-mono">2 files</span></div>
+            <section class="fg-log-day" aria-labelledby="fg-log-date"><h3 class="fg-date" id="fg-log-date">2026-09-11</h3><ul class="fg-log-list">
+              <li><a class="fg-log-row" href="#log=triage-output" data-log="triage-output"><time class="fg-log-time fg-mono" datetime="2026-09-11T23:13:42">23:13</time><span class="fg-log-type fg-out">OUT</span><span class="fg-log-name" title="control-plane-builder-scheduled_prompt-d03107cc5f8c4d12be2fc74fb462958b.out">control-plane-builder-scheduled_prompt-d03107cc5f8c4d12be2fc74fb462958b.out</span><span class="fg-log-size">2.0 KB</span></a></li>
+              <li><a class="fg-log-row" href="#log=triage-error" data-log="triage-error"><time class="fg-log-time fg-mono" datetime="2026-09-11T23:13:41">23:13</time><span class="fg-log-type fg-err">ERR</span><span class="fg-log-name" title="control-plane-builder-scheduled_prompt-d03107cc5f8c4d12be2fc74fb462958b.err">control-plane-builder-scheduled_prompt-d03107cc5f8c4d12be2fc74fb462958b.err</span><span class="fg-log-size">0.3 KB</span></a></li>
+            </ul></section>
+          </section>
+        </div>
+        <section id="fg-log-view" hidden>
+          <a class="fg-back" href="#activity" id="fg-log-back"><i data-lucide="arrow-left" class="fg-icon"></i><span>Back to Activity</span></a>
+          <div class="fg-log-file"><h1 id="fg-log-title"></h1><div class="fg-log-file-meta"><span class="fg-log-type" id="fg-log-stream"></span><span>2026-09-11 &middot; 23:13</span><span id="fg-log-size"></span></div><pre id="fg-log-content"></pre></div>
+        </section>
+      </div>
+    </main>
+  </div>
+  <script src="../../../../../flowgency/static/lucide.min.js"></script>
+  <script>
+    const previewLogs = {
+      'triage-output': {
+        name: 'control-plane-builder-scheduled_prompt-d03107cc5f8c4d12be2fc74fb462958b.out',
+        stream: 'OUT', size: '2.0 KB',
+        content: 'Daily control-plane triage\n\nInspected the configured workflow and claimed ticket #12.\n\nFinding: canonical path resolution can hide reparse ancestors from the subsequent validation step.\n\nEvidence\n  configuration.models._path_from_config\n  configuration.paths.validate_resolved_paths\n\nRecorded the findings, proposed a bounded repair, and published the implementation handoff to shared memory.\n\nNo implementation was made in this run. The ticket remains in progress.'
+      },
+      'triage-error': {
+        name: 'control-plane-builder-scheduled_prompt-d03107cc5f8c4d12be2fc74fb462958b.err',
+        stream: 'ERR', size: '0.3 KB',
+        content: 'Changes    +0 -0\nAI Credits 1\nTokens     56.2k input / 842 output\n\nSession completed.'
+      }
+    };
+    let selectedTab = 'activity';
+    let returnTab = 'activity';
+    let returnScroll = 0;
+    let returnLink = null;
+    function showTab(tabName, focusTab = false) {
+      selectedTab = tabName;
+      document.getElementById('fg-agent-view').hidden = false;
+      document.getElementById('fg-log-view').hidden = true;
+      for (const button of document.querySelectorAll('[data-tab]')) {
+        const selected = button.dataset.tab === tabName;
+        button.setAttribute('aria-selected', String(selected));
+        button.tabIndex = selected ? 0 : -1;
+        document.getElementById(button.getAttribute('aria-controls')).hidden = !selected;
+        if (selected && focusTab) button.focus();
+      }
+    }
+    for (const button of document.querySelectorAll('[data-tab]')) {
+      button.addEventListener('click', () => showTab(button.dataset.tab));
+      button.addEventListener('keydown', event => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+        event.preventDefault();
+        const tabName = event.key === 'Home' ? 'activity' : event.key === 'End' ? 'logs' : selectedTab === 'activity' ? 'logs' : 'activity';
+        showTab(tabName, true);
+      });
+    }
+    for (const link of document.querySelectorAll('[data-log]')) {
+      link.addEventListener('click', event => {
+        event.preventDefault();
+        const log = previewLogs[link.dataset.log];
+        returnTab = selectedTab;
+        returnScroll = window.scrollY;
+        returnLink = link;
+        document.getElementById('fg-agent-view').hidden = true;
+        document.getElementById('fg-log-view').hidden = false;
+        document.getElementById('fg-log-title').textContent = log.name;
+        const stream = document.getElementById('fg-log-stream');
+        stream.textContent = log.stream;
+        stream.className = 'fg-log-type ' + (log.stream === 'ERR' ? 'fg-err' : 'fg-out');
+        document.getElementById('fg-log-size').textContent = log.size;
+        document.getElementById('fg-log-content').textContent = log.content;
+        document.querySelector('#fg-log-back span').textContent = 'Back to ' + (returnTab === 'logs' ? 'Logs' : 'Activity');
+        window.scrollTo(0, 0);
+        document.getElementById('fg-log-back').focus({ preventScroll: true });
+      });
+    }
+    document.getElementById('fg-log-back').addEventListener('click', event => {
+      event.preventDefault();
+      showTab(returnTab);
+      window.scrollTo(0, returnScroll);
+      if (returnLink) returnLink.focus({ preventScroll: true });
+    });
+    for (const link of document.querySelectorAll('[data-ticket]')) link.addEventListener('click', event => event.preventDefault());
+    document.getElementById('fg-theme-toggle').addEventListener('click', () => {
+      const dark = document.documentElement.dataset.theme === 'dark';
+      document.documentElement.dataset.theme = dark ? 'light' : 'dark';
+      document.getElementById('fg-theme-label').textContent = dark ? 'Dark mode' : 'Light mode';
+    });
+    function closeMenu() {
+      document.body.classList.remove('fg-menu-open');
+      document.getElementById('fg-menu-open').setAttribute('aria-expanded', 'false');
+    }
+    document.getElementById('fg-menu-open').addEventListener('click', () => {
+      document.body.classList.add('fg-menu-open');
+      document.getElementById('fg-menu-open').setAttribute('aria-expanded', 'true');
+      document.getElementById('fg-menu-close').focus();
+    });
+    document.getElementById('fg-menu-close').addEventListener('click', closeMenu);
+    document.getElementById('fg-overlay').addEventListener('click', closeMenu);
+    document.addEventListener('keydown', event => { if (event.key === 'Escape') closeMenu(); });
+    lucide.createIcons({ attrs: { 'aria-hidden': 'true', focusable: 'false' } });
+  </script>
+</body>
+</html>
