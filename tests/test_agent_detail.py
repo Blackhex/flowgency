@@ -13,9 +13,11 @@ from fastapi.testclient import TestClient
 from flowgency import app as app_mod
 from flowgency.configuration import ConfigStore
 from flowgency.configuration.models import MemorySelector
+from flowgency.jobs.store import read_job, write_job
 from flowgency.memory import resolve_memory_selector
 from tests._lock_helpers import hold_exclusive_lock
 from tests.test_local_ticket_storage import _make_reparse
+from tests.test_job_routes import _seed_app as seed_job_app, _write_job_record
 
 
 def _write_yaml(path: Path, raw: dict) -> Path:
@@ -450,8 +452,25 @@ def test_activity_tab_is_read_only(monkeypatch, tmp_path, raw_config):
     response = client.get("/newsletter/agents/advisor/activity")
 
     assert response.status_code == 200
-    assert "Recent activity" in response.text
+    assert "Activity" in response.text
     assert '<form' not in response.text
+
+
+def test_activity_includes_completed_job(monkeypatch, tmp_path, raw_config):
+    client, config_path, team_root = seed_job_app(monkeypatch, tmp_path, raw_config)
+    job_path = _write_job_record(team_root, config_path, job_id="activity-complete")
+    record = read_job(job_path)
+    record.status = "complete"
+    record.completed_at = "2026-07-16T13:00:00+00:00"
+    record.execution_summary = "Retained completed run summary"
+    write_job(job_path, record)
+
+    response = client.get("/newsletter/agents/advisor/activity")
+
+    assert response.status_code == 200
+    assert "Retained completed run summary" in response.text
+    assert "Complete" in response.text
+    assert "1 record" in response.text
 
 
 def test_activity_links_use_ticket_events_not_retired_records(workflow_web_env):
@@ -488,6 +507,36 @@ def test_activity_links_use_ticket_events_not_retired_records(workflow_web_env):
     assert "Retired proposal" not in body
 
 
+def test_activity_report_event_renders_escaped_disclosure_markup(workflow_web_env):
+    env = workflow_web_env
+    created = env.create(title="Alpha review")
+    env.service.assign(env.user, created.version, "builder", env.operation("assign-alpha"))
+    builder = env.agent("builder", "run-alpha")
+    env.running_job("builder", "run-alpha")
+    env.service.start_work(
+        builder,
+        env.read(created.ref).version,
+        env.operation("start-alpha", actor_name=builder.agent_name),
+    )
+    env.service.report(
+        builder,
+        env.read(created.ref).version,
+        env.ticket_report("Line <strong>one</strong>\nLine two\nLine three"),
+        env.operation("report-alpha", actor_name=builder.agent_name),
+    )
+
+    response = env.client.get("/newsletter/agents/builder/activity")
+
+    assert response.status_code == 200
+    assert "Report added" in response.text
+    assert "data-activity-report" in response.text
+    assert "data-report-text" in response.text
+    assert "data-report-toggle" in response.text
+    assert re.search(r'aria-controls="[^"]+-report"', response.text)
+    assert "&lt;strong&gt;one&lt;/strong&gt;" in response.text
+    assert "<strong>one</strong>" not in response.text
+
+
 def test_activity_tab_uses_safe_agent_log_projection(monkeypatch, tmp_path, raw_config):
     client, config_path, safe_log = _seed_activity_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
@@ -513,17 +562,52 @@ def test_activity_tab_uses_safe_agent_log_projection(monkeypatch, tmp_path, raw_
     (log_day / "advisor-dir.out").mkdir()
 
     services = app_mod.build_services(config_path)
-    record = type(
+    advisor_record = type(
+        "Record",
+        (),
+        {
+            "spec": type(
+                "Spec",
+                (),
+                {
+                    "team_key": "newsletter-prod",
+                    "agent_name": "advisor",
+                    "job_id": "job-safe",
+                    "trigger": "scheduled_prompt",
+                    "routine_id": "daily-review",
+                    "prompt_source": {"title": "Daily review"},
+                },
+            )(),
+            "status": "running",
+            "duration_seconds": None,
+            "execution_summary": "Safe output only",
+            "completed_at": None,
+            "started_at": "2026-07-16T13:00:00+00:00",
+            "stdout_path": str(safe_log.resolve()),
+            "stderr_path": str(escaping),
+        },
+    )()
+    wrong_owner_record = type(
         "Record",
         (),
         {
             "spec": type("Spec", (), {"team_key": "newsletter-prod", "agent_name": "advisor-extra"})(),
+            "status": "running",
+            "duration_seconds": None,
+            "execution_summary": "Wrong owner",
+            "completed_at": None,
+            "started_at": "2026-07-16T13:00:00+00:00",
             "stdout_path": str(misleading_owner.resolve()),
             "stderr_path": None,
         },
     )()
-    from flowgency.web.routes import agent_detail as agent_detail_mod
-    monkeypatch.setattr(agent_detail_mod, "load_team_jobs", lambda job_store, team_id: ((record,), ()))
+    from flowgency.web import agent_activity as agent_activity_mod
+
+    monkeypatch.setattr(
+        agent_activity_mod,
+        "load_team_jobs",
+        lambda job_store, team_id: ((advisor_record, wrong_owner_record), ()),
+    )
     app_mod.refresh_services()
     app_mod.app.state.services = services
 
@@ -531,11 +615,18 @@ def test_activity_tab_uses_safe_agent_log_projection(monkeypatch, tmp_path, raw_
 
     assert response.status_code == 200
     body = response.text
-    assert safe_log.name in body
+    output_hrefs = _hrefs_for_label(body, "Output")
+    assert len(output_hrefs) == 1
+    params = parse_qs(urlparse(output_hrefs[0]).query)
+    assert params["agent"] == ["advisor"]
+    assert params["source"] == ["activity"]
+    assert Path(unquote(params["path"][0])) == safe_log.resolve()
+    assert "Safe output only" in body
     assert misleading_owner.name not in body
     assert overlapping.name not in body
     assert "advisor-dir.out" not in body
     assert "advisor-escape.out" not in body
+    assert "Error" not in body
 
 
 def test_activity_logs_and_viewer_gets_do_not_mutate_config_job_or_ticket_files(workflow_web_env):

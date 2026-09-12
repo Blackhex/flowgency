@@ -1,38 +1,82 @@
 <section class="space-y-6">
-  <div>
-    <h2 class="text-lg font-semibold text-gray-900">Recent activity</h2>
-    <p class="text-sm text-gray-500">Current jobs, logs, and ticket events associated with this agent.</p>
+  <div class="flex items-baseline justify-between gap-3">
+    <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Activity</h2>
+    <p class="text-sm font-mono text-gray-500 dark:text-gray-400">{{ activity_count }} record{{ '' if activity_count == 1 else 's' }}</p>
   </div>
-  <div class="grid gap-6 lg:grid-cols-2 text-sm text-gray-700">
-    <div>
-      <h3 class="font-semibold text-gray-900">Jobs</h3>
-      <ul class="mt-2 space-y-2">
-        {% for job in jobs %}
-        <li>{{ job.id }} <span class="text-gray-500">{{ job.status }} · {{ job.trigger }}</span></li>
-        {% else %}
-        <li class="text-gray-500">No active jobs.</li>
-        {% endfor %}
-      </ul>
-    </div>
-    <div>
-      <h3 class="font-semibold text-gray-900">Logs</h3>
-      <ul class="mt-2 space-y-2">
-        {% for log in logs %}
-        <li><a href="{{ log.href }}" class="text-indigo-600 hover:text-indigo-800">{{ log.name }}</a></li>
-        {% else %}
-        <li class="text-gray-500">No logs found.</li>
-        {% endfor %}
-      </ul>
-    </div>
-    <div>
-      <h3 class="font-semibold text-gray-900">Ticket events</h3>
-      <ul class="mt-2 space-y-2">
-        {% for item in ticket_activity %}
-        <li><a href="{{ item.href }}" class="text-indigo-600 hover:text-indigo-800">{{ item.title }}</a> <span class="text-gray-500">{{ item.meta }}</span></li>
-        {% else %}
-        <li class="text-gray-500">No ticket events.</li>
-        {% endfor %}
-      </ul>
-    </div>
+
+  {% if activity_warnings %}
+  <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100">
+    <ul class="space-y-1">
+      {% for warning in activity_warnings %}
+      <li>{{ warning }}</li>
+      {% endfor %}
+    </ul>
   </div>
+  {% endif %}
+
+  {% if activity_groups %}
+    {% for group in activity_groups %}
+    <section class="space-y-3" aria-labelledby="activity-group-{{ loop.index }}">
+      <h3 id="activity-group-{{ loop.index }}" class="text-sm font-semibold text-gray-500 dark:text-gray-400">{{ group.date_label }}</h3>
+      <ol class="space-y-0" role="list">
+        {% for entry in group.entries %}
+        <li class="grid grid-cols-[3rem_1.75rem_minmax(0,1fr)] gap-x-3 pb-6 last:pb-0">
+          <div class="pt-1 text-xs font-mono text-gray-400 dark:text-gray-500">{{ entry.time_label }}</div>
+          <div class="relative flex justify-center pt-0.5">
+            <span class="flex h-7 w-7 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
+              <i data-lucide="{{ entry.icon }}" aria-hidden="true" class="h-3.5 w-3.5"></i>
+            </span>
+            {% if not loop.last %}
+            <span aria-hidden="true" class="absolute top-8 bottom-0 w-px bg-gray-200 dark:bg-gray-700"></span>
+            {% endif %}
+          </div>
+          <div class="min-w-0 space-y-1">
+            <div class="flex flex-wrap items-center gap-2">
+              <h4 class="min-w-0 text-sm font-semibold text-gray-900 dark:text-gray-100">{{ entry.title }}</h4>
+              {% if entry.status_label %}
+              <span class="inline-flex rounded px-2 py-0.5 text-xs font-medium {{ entry.status_classes }}">{{ entry.status_label }}</span>
+              {% endif %}
+            </div>
+            {% if entry.href %}
+            <p class="min-w-0 text-sm"><a href="{{ entry.href }}" class="break-words text-indigo-600 hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-indigo-200">{{ entry.subject }}</a></p>
+            {% endif %}
+            {% if entry.metadata %}
+            <p class="flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+              {% for value in entry.metadata %}
+              <span{% if loop.last %} class="font-mono"{% endif %}>{{ value }}</span>
+              {% endfor %}
+            </p>
+            {% endif %}
+            {% if entry.summary %}
+            <div class="max-w-4xl" data-activity-report>
+              <div id="{{ entry.identity }}-report" data-report-text class="whitespace-pre-wrap break-words text-sm text-gray-700 dark:text-gray-200">{{ entry.summary }}</div>
+              <button type="button" data-report-toggle hidden aria-expanded="false" aria-controls="{{ entry.identity }}-report" class="mt-2 inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-indigo-200">
+                Show more
+              </button>
+            </div>
+            {% endif %}
+            {% if entry.log_links %}
+            <div class="flex flex-wrap items-center gap-4 text-xs">
+              {% for link in entry.log_links %}
+              <a href="{{ link.href }}" class="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-indigo-200">
+                <i data-lucide="{{ link.icon }}" aria-hidden="true" class="h-3.5 w-3.5"></i>
+                <span>{{ link.label }}</span>
+              </a>
+              {% endfor %}
+            </div>
+            {% elif entry.no_logs_label %}
+            <p class="text-xs text-gray-500 dark:text-gray-400">{{ entry.no_logs_label }}</p>
+            {% endif %}
+          </div>
+        </li>
+        {% endfor %}
+      </ol>
+    </section>
+    {% endfor %}
+  {% else %}
+  <div class="rounded-lg border border-gray-200 bg-white p-8 text-center text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">No recent activity</div>
+  {% endif %}
+
+  <script src="/static/lucide.min.js"></script>
+  <script src="/static/agent-activity.js"></script>
 </section>

@@ -11,7 +11,6 @@ import yaml
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from flowgency.clock import now as clock_now
 from flowgency.configuration import (
     AgentProfilePatch,
     AgentRuntimePatch,
@@ -39,12 +38,10 @@ from flowgency.health import (
 )
 from flowgency.integrations import get_integration
 from flowgency.integrations.models import RuntimeCapabilities
-from flowgency.jobs.authority import JobStore
 from flowgency.memory import MemoryConflictError, resolve_memory_selector
 from flowgency.prompts import PromptConflictError, PromptNotFoundError
 from flowgency.prompts.catalog import effective_prompt_catalog
-from flowgency.tickets.models import UserTicketContext
-from flowgency.tickets.views import build_board_view
+from flowgency.web.agent_activity import build_agent_activity
 from flowgency.web.dependencies import FlowgencyServices, get_services
 from flowgency.web.job_presentation import load_team_jobs
 from flowgency.web.logs import collect_agent_logs, with_log_links
@@ -64,14 +61,6 @@ _TAB_LABELS = {
     "activity": "Activity",
     "logs": "Logs",
 }
-
-
-@dataclass(frozen=True)
-class _ActivityItem:
-    kind: str
-    title: str
-    href: str | None
-    meta: str
 
 
 def _templates(request: Request):
@@ -169,88 +158,6 @@ def _resolve_tab_memory(snapshot, services: FlowgencyServices, team_id: str, age
 
 def _path_lines(paths: tuple[Path, ...]) -> list[str]:
     return [str(path.resolve(strict=False)).replace("\\", "/") for path in paths]
-
-
-def _recent_log_rows(
-    groups: dict[str, list[dict[str, Any]]],
-) -> list[dict[str, str]]:
-    rows = [entry for entries in groups.values() for entry in entries]
-    rows.sort(
-        key=lambda entry: (entry["timestamp"], entry["suffix"].lower() == ".out"),
-        reverse=True,
-    )
-    return [
-        {
-            "name": entry["name"],
-            "href": entry["href"],
-            "when": int(entry["timestamp"].timestamp() * 1_000_000_000),
-        }
-        for entry in rows[:8]
-    ]
-
-
-def _activity_items(
-    team_id: str,
-    paths: ResolvedTeamPaths,
-    agent_id: str,
-    records: tuple[Any, ...],
-    configured_agent_names: tuple[str, ...],
-    job_store: JobStore | None,
-    services: FlowgencyServices,
-) -> dict[str, Any]:
-    ticket_events: list[dict[str, Any]] = []
-    if services.tickets is not None:
-        actor = UserTicketContext(team_id=team_id)
-        snapshot = services.config_store.load()
-        workflow_names = snapshot.config.teams[team_id].workflows
-        for binding in services.tickets.list_workflows(actor):
-            board = build_board_view(
-                services.tickets,
-                actor,
-                binding.workflow_id,
-                ticket_jobs=services.ticket_jobs,
-            )
-            workflow_name = workflow_names[binding.workflow_id].name
-            for column in board.columns:
-                for ticket in column.tickets:
-                    for event in ticket.history:
-                        if event.actor != agent_id:
-                            continue
-                        ticket_events.append(
-                            {
-                                "kind": "Ticket",
-                                "title": ticket.title,
-                                "href": f"/{team_id}/workflows/{binding.workflow_id}?ticket={ticket.ref.ticket_id}",
-                                "meta": f"{workflow_name} · {event.summary}",
-                                "at": event.at,
-                            }
-                        )
-    ticket_events.sort(key=lambda item: item["at"] or clock_now(), reverse=True)
-    log_groups = with_log_links(
-        collect_agent_logs(
-            paths.logs,
-            team_id,
-            agent_id,
-            records,
-            configured_agent_names,
-        ),
-        team_id,
-        agent_id=agent_id,
-        source="activity",
-    )
-    jobs = [
-        {
-            "id": record.spec.job_id,
-            "status": record.status,
-            "trigger": record.spec.trigger,
-        }
-        for record in (job_store.active(team_id, agent_id) if job_store is not None else ())
-    ]
-    return {
-        "ticket_activity": ticket_events[:8],
-        "jobs": jobs[:8],
-        "logs": _recent_log_rows(log_groups),
-    }
 
 
 def _selected_file(snapshot) -> str:
@@ -577,15 +484,12 @@ def _detail_context(
     elif tab == "memory":
         context.update(_memory_context(snapshot, services, team_id, agent_id))
     elif tab == "activity":
-        records, _warnings = load_team_jobs(services.job_store, team_id)
         context.update(
-            _activity_items(
+            build_agent_activity(
+                snapshot,
                 team_id,
-                resolve_team_paths(team_cfg),
                 agent_id,
-                records,
-                tuple(team_cfg.agents.keys()),
-                services.job_store,
+                resolve_team_paths(team_cfg),
                 services,
             )
         )
