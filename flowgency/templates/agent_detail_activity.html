@@ -21,7 +21,11 @@
       <ol class="space-y-0" role="list">
         {% for entry in group.entries %}
         <li class="grid grid-cols-[3rem_1.75rem_minmax(0,1fr)] gap-x-3 pb-6 last:pb-0">
-          <div class="pt-1 text-xs font-mono text-gray-400 dark:text-gray-500">{{ entry.time_label }}</div>
+          {% if entry.time_datetime %}
+          <time class="pt-1 text-xs font-mono text-gray-400 dark:text-gray-500" datetime="{{ entry.time_datetime }}">{{ entry.time_label }}</time>
+          {% else %}
+          <span class="pt-1 text-xs font-mono text-gray-400 dark:text-gray-500">{{ entry.time_label }}</span>
+          {% endif %}
           <div class="relative flex justify-center pt-0.5">
             <span class="flex h-7 w-7 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
               <i data-lucide="{{ entry.icon }}" aria-hidden="true" class="h-3.5 w-3.5"></i>

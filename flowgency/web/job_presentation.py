@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import yaml
+
 from flowgency.jobs.authority import JobStore
 from flowgency.jobs.models import JobRecord
 from flowgency.jobs.store import read_job
@@ -79,7 +81,7 @@ def load_team_jobs(job_store: JobStore | None, team_id: str) -> tuple[tuple[JobR
             continue
         try:
             record = read_job(path)
-        except (OSError, TypeError, ValueError):
+        except (OSError, TypeError, ValueError, yaml.YAMLError):
             warnings.append(f"Skipped unreadable job record: {path.name}")
             continue
         if record.spec.team_key != team_id:

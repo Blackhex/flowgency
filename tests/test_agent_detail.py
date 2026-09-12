@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
+from datetime import datetime
 from html.parser import HTMLParser
+import math
 from multiprocessing import Event, Process
 from pathlib import Path
 import re
 from urllib.parse import parse_qs, unquote, urlparse
 
+import pytest
 import yaml
 from fastapi.testclient import TestClient
 
@@ -15,9 +19,16 @@ from flowgency.configuration import ConfigStore
 from flowgency.configuration.models import MemorySelector
 from flowgency.jobs.store import read_job, write_job
 from flowgency.memory import resolve_memory_selector
+from flowgency.tickets.models import TicketEvent
 from tests._lock_helpers import hold_exclusive_lock
 from tests.test_local_ticket_storage import _make_reparse
 from tests.test_job_routes import _seed_app as seed_job_app, _write_job_record
+
+
+_ACTIVITY_ROW_RE = re.compile(
+    r'<li class="grid grid-cols-\[3rem_1\.75rem_minmax\(0,1fr\)\] gap-x-3 pb-6 last:pb-0">(.*?)</li>',
+    re.S,
+)
 
 
 def _write_yaml(path: Path, raw: dict) -> Path:
@@ -197,6 +208,27 @@ def _hrefs_for_label(body: str, label: str) -> list[str]:
     parser = _HrefParser(label)
     parser.feed(body)
     return parser.hrefs
+
+
+def _activity_rows(body: str) -> list[str]:
+    return _ACTIVITY_ROW_RE.findall(body)
+
+
+def _activity_row(body: str, marker: str) -> str:
+    for row in _activity_rows(body):
+        if marker in row:
+            return row
+    raise AssertionError(f"No activity row contained marker {marker!r}")
+
+
+def _rewrite_job(path: Path, *, spec_updates: dict[str, object] | None = None, **changes) -> None:
+    record = read_job(path)
+    if spec_updates:
+        record.spec = replace(record.spec, **spec_updates)
+        record.authority_digest = record.spec.immutable_digest()
+    for field_name, value in changes.items():
+        setattr(record, field_name, value)
+    write_job(path, record)
 
 
 def test_agent_detail_base_redirects_to_profile(monkeypatch, tmp_path, raw_config):
@@ -473,6 +505,48 @@ def test_activity_includes_completed_job(monkeypatch, tmp_path, raw_config):
     assert "1 record" in response.text
 
 
+def test_activity_keeps_completed_job_with_nonfinite_duration(monkeypatch, tmp_path, raw_config):
+    client, config_path, team_root = seed_job_app(monkeypatch, tmp_path, raw_config)
+    job_path = _write_job_record(team_root, config_path, job_id="activity-nan-duration")
+    record = read_job(job_path)
+    record.status = "complete"
+    record.completed_at = "2026-07-16T13:00:00+00:00"
+    record.duration_seconds = math.nan
+    record.execution_summary = "Duration is malformed but row survives"
+    write_job(job_path, record)
+
+    response = client.get("/newsletter/agents/advisor/activity")
+
+    assert response.status_code == 200
+    assert "Duration is malformed but row survives" in response.text
+    assert "Complete" in response.text
+    assert "1 record" in response.text
+
+
+@pytest.mark.parametrize(
+    ("status", "status_label", "no_logs_label"),
+    [
+        ("queued", "Queued", "No logs yet"),
+        ("waiting_for_memory", "Waiting for memory", "No logs yet"),
+        ("running", "Running", "No logs yet"),
+        ("complete", "Complete", "No logs available"),
+        ("failed", "Failed", "No logs available"),
+        ("cancelled", "Cancelled", "No logs available"),
+    ],
+)
+def test_activity_job_status_labels_and_log_availability(monkeypatch, tmp_path, raw_config, status, status_label, no_logs_label):
+    client, config_path, team_root = seed_job_app(monkeypatch, tmp_path, raw_config)
+    job_path = _write_job_record(team_root, config_path, job_id=f"activity-{status}")
+    _rewrite_job(job_path, status=status, execution_summary=f"{status} status row")
+
+    response = client.get("/newsletter/agents/advisor/activity")
+
+    assert response.status_code == 200
+    row = _activity_row(response.text, f"{status} status row")
+    assert status_label in row
+    assert no_logs_label in row
+
+
 def test_activity_links_use_ticket_events_not_retired_records(workflow_web_env):
     env = workflow_web_env
     created = env.create(title="Alpha review")
@@ -535,6 +609,380 @@ def test_activity_report_event_renders_escaped_disclosure_markup(workflow_web_en
     assert re.search(r'aria-controls="[^"]+-report"', response.text)
     assert "&lt;strong&gt;one&lt;/strong&gt;" in response.text
     assert "<strong>one</strong>" not in response.text
+
+
+def test_activity_transition_keeps_historical_state_names_after_workflow_rename(workflow_web_env):
+    env = workflow_web_env
+    created = env.create(title="Alpha review", values={"verdict": True})
+    builder = env.agent("builder", "run-alpha")
+    env.running_job("builder", "run-alpha")
+    env.service.start_work(
+        builder,
+        env.read(created.ref).version,
+        env.operation("start-alpha", actor_name=builder.agent_name),
+    )
+    env.service.transition(
+        builder,
+        env.read(created.ref).version,
+        env.transition_request(outputs={"summary": "Verified existing work"}),
+        env.operation("complete-alpha", actor_name=builder.agent_name),
+    )
+
+    source = env.library.inspect(env.blueprint_id)
+    renamed_states = tuple(
+        state.model_copy(update={"name": "Backlog"})
+        if state.id == "review"
+        else state.model_copy(update={"name": "Closed"})
+        if state.id == "done"
+        else state
+        for state in source.definition.states
+    )
+    renamed_definition = source.definition.model_copy(update={"states": renamed_states})
+    env.configuration_service.save_blueprint(
+        env.store.load().revision,
+        env.blueprint_id,
+        source.digest,
+        renamed_definition,
+    )
+
+    response = env.client.get("/newsletter/agents/builder/activity")
+
+    assert response.status_code == 200
+    body = response.text
+    assert "Review -&gt; Done" in body
+    assert "Transition Complete accepted" in body
+    assert body.count("Transition Complete accepted") == 1
+    assert "Backlog -&gt; Closed" not in body
+
+
+def test_activity_uses_semantic_time_markup_for_known_and_unknown_times(monkeypatch, tmp_path, raw_config):
+    client, config_path, team_root = seed_job_app(monkeypatch, tmp_path, raw_config)
+    known_job_path = _write_job_record(team_root, config_path, job_id="activity-known-time")
+    known_record = read_job(known_job_path)
+    known_record.status = "running"
+    known_record.started_at = "2026-07-16T13:00:00"
+    known_record.execution_summary = "Known timestamp row"
+    write_job(known_job_path, known_record)
+
+    unknown_job_path = _write_job_record(team_root, config_path, job_id="activity-unknown-time")
+    unknown_record = read_job(unknown_job_path)
+    unknown_record.status = "complete"
+    unknown_record.completed_at = "not-a-time"
+    unknown_record.execution_summary = "Unknown timestamp row"
+    write_job(unknown_job_path, unknown_record)
+
+    response = client.get("/newsletter/agents/advisor/activity")
+
+    assert response.status_code == 200
+    assert re.search(
+        r'<time[^>]*datetime="2026-07-16T13:00:00"[^>]*>13:00</time>',
+        response.text,
+    )
+    assert "Unknown time" in response.text
+    assert not re.search(r'<time[^>]*datetime="[^"]*"[^>]*>Unknown time</time>', response.text)
+
+
+def test_activity_suppresses_duplicate_report_summary_when_equal_to_title(workflow_web_env):
+    env = workflow_web_env
+    created = env.create(title="Alpha review")
+    builder = env.agent("builder", "run-alpha")
+    env.running_job("builder", "run-alpha")
+    env.service.start_work(
+        builder,
+        env.read(created.ref).version,
+        env.operation("start-alpha", actor_name=builder.agent_name),
+    )
+    env.service.report(
+        builder,
+        env.read(created.ref).version,
+        env.ticket_report("Report added"),
+        env.operation("report-alpha", actor_name=builder.agent_name),
+    )
+
+    response = env.client.get("/newsletter/agents/builder/activity")
+
+    assert response.status_code == 200
+    assert response.text.count("Report added") == 1
+
+
+def test_activity_bounds_and_orders_mixed_history_with_unknowns_last(workflow_web_env):
+    env = workflow_web_env
+    shared_ticket = env.create(title="Shared mixed ticket")
+    shared_authority = env.running_job("builder", "shared-run")
+    _rewrite_job(
+        shared_authority.path,
+        status="running",
+        started_at="2026-09-08T00:00:00",
+        execution_summary="Shared job row",
+    )
+    builder = env.agent("builder", "shared-run")
+    env.service.start_work(
+        builder,
+        env.read(shared_ticket.ref).version,
+        env.operation("start-shared", actor_name=builder.agent_name),
+    )
+    env.service.report(
+        builder,
+        env.read(shared_ticket.ref).version,
+        env.ticket_report("Shared builder note"),
+        env.operation("report-shared", actor_name=builder.agent_name),
+    )
+
+    for index in range(40):
+        authority = env.running_job("builder", f"fill-{index:02d}")
+        _rewrite_job(
+            authority.path,
+            started_at=f"2026-09-09T10:{index:02d}:00",
+            execution_summary=f"Fill summary {index:02d}",
+        )
+
+    aware_authority = env.running_job("builder", "aware-time")
+    aware_time = "2026-09-08T01:30:00+00:00"
+    _rewrite_job(
+        aware_authority.path,
+        status="complete",
+        completed_at=aware_time,
+        started_at="2026-09-08T01:45:00",
+        execution_summary="Aware time summary",
+    )
+
+    complete_priority = env.running_job("builder", "priority-complete")
+    _rewrite_job(
+        complete_priority.path,
+        spec_updates={"created_at": "2026-09-08T23:59:00"},
+        status="complete",
+        started_at="2026-09-08T23:58:00",
+        completed_at="2026-09-08T00:10:00",
+        execution_summary="Complete priority summary",
+    )
+
+    start_priority = env.running_job("builder", "priority-start")
+    _rewrite_job(
+        start_priority.path,
+        spec_updates={"created_at": "2026-09-08T23:57:00"},
+        status="running",
+        started_at="2026-09-08T00:11:00",
+        completed_at=None,
+        execution_summary="Start priority summary",
+    )
+
+    created_priority = env.running_job("builder", "priority-created")
+    _rewrite_job(
+        created_priority.path,
+        spec_updates={"created_at": "2026-09-08T00:12:00"},
+        status="queued",
+        started_at=None,
+        completed_at=None,
+        execution_summary="Created priority summary",
+    )
+
+    tie_z = env.running_job("builder", "tie-z")
+    _rewrite_job(
+        tie_z.path,
+        started_at="2026-09-08T00:20:00",
+        execution_summary="Tie z summary",
+    )
+    tie_a = env.running_job("builder", "tie-a")
+    _rewrite_job(
+        tie_a.path,
+        started_at="2026-09-08T00:20:00",
+        execution_summary="Tie a summary",
+    )
+
+    unknown_z = env.running_job("builder", "unknown-z")
+    _rewrite_job(
+        unknown_z.path,
+        status="complete",
+        completed_at="not-a-time",
+        execution_summary="Unknown timestamp kept",
+    )
+    unknown_a = env.running_job("builder", "unknown-a")
+    _rewrite_job(
+        unknown_a.path,
+        status="complete",
+        completed_at="not-a-time",
+        execution_summary="Unknown timestamp dropped",
+    )
+
+    response = env.client.get("/newsletter/agents/builder/activity")
+
+    assert response.status_code == 200
+    body = response.text
+    assert "50 records" in body
+    assert len(_activity_rows(body)) == 50
+    assert "Shared builder note" in body
+    assert "Started work" in body
+    assert "Unknown date" in body
+    assert "Unknown timestamp kept" in body
+    assert "Unknown timestamp dropped" not in body
+    assert body.index("Tie z summary") < body.index("Tie a summary")
+    assert body.index("Shared builder note") < body.index("Unknown timestamp kept")
+
+    complete_row = _activity_row(body, "Complete priority summary")
+    assert 'datetime="2026-09-08T00:10:00"' in complete_row
+    assert ">00:10</time>" in complete_row
+
+    start_row = _activity_row(body, "Start priority summary")
+    assert 'datetime="2026-09-08T00:11:00"' in start_row
+    assert ">00:11</time>" in start_row
+
+    created_row = _activity_row(body, "Created priority summary")
+    assert 'datetime="2026-09-08T00:12:00"' in created_row
+    assert ">00:12</time>" in created_row
+
+    aware_row = _activity_row(body, "Aware time summary")
+    normalized_aware = datetime.fromisoformat(aware_time).astimezone().replace(tzinfo=None)
+    assert f'datetime="{normalized_aware.isoformat(timespec="seconds")}"' in aware_row
+    assert f">{normalized_aware.strftime('%H:%M')}</time>" in aware_row
+
+    unknown_row = _activity_row(body, "Unknown timestamp kept")
+    assert "Unknown time" in unknown_row
+    assert "<time" not in unknown_row
+
+
+def test_activity_event_log_links_use_exact_originating_job_and_never_guess(workflow_web_env):
+    env = workflow_web_env
+    created = env.create(title="Alpha review")
+    log_day = env.team_root / "logs" / "2026-09-08"
+    log_day.mkdir(parents=True, exist_ok=True)
+    shared_output = log_day / "builder-shared-run.out"
+    shared_output.write_text("shared output", encoding="utf-8")
+    shared_error = log_day / "builder-shared-run.err"
+    shared_error.write_text("", encoding="utf-8")
+    shared_authority = env.running_job("builder", "shared-run")
+    _rewrite_job(
+        shared_authority.path,
+        stdout_path=str(shared_output.resolve()),
+        stderr_path=str(shared_error.resolve()),
+        execution_summary="Shared builder run",
+    )
+
+    builder = env.agent("builder", "shared-run")
+    env.service.start_work(
+        builder,
+        env.read(created.ref).version,
+        env.operation("start-shared", actor_name=builder.agent_name),
+    )
+    env.service.report(
+        builder,
+        env.read(created.ref).version,
+        env.ticket_report("Shared builder note"),
+        env.operation("report-shared", actor_name=builder.agent_name),
+    )
+    env.service.end_work(
+        builder,
+        env.read(created.ref).version,
+        env.operation("end-shared", actor_name=builder.agent_name),
+    )
+    env.service.assign(
+        env.user,
+        env.read(created.ref).version,
+        "observer",
+        env.operation("assign-observer"),
+    )
+
+    latest_output = log_day / "builder-latest-run.out"
+    latest_output.write_text("latest output", encoding="utf-8")
+    latest_authority = env.running_job("builder", "latest-run")
+    _rewrite_job(
+        latest_authority.path,
+        stdout_path=str(latest_output.resolve()),
+        execution_summary="Latest builder run",
+    )
+
+    rogue_output = log_day / "observer-rogue-job.out"
+    rogue_output.write_text("rogue output", encoding="utf-8")
+    rogue_authority = env.running_job("observer", "rogue-job")
+    _rewrite_job(
+        rogue_authority.path,
+        stdout_path=str(rogue_output.resolve()),
+        execution_summary="Observer rogue run",
+    )
+
+    current_record = env.provider.read(created.ref)
+    current_record = current_record.model_copy(
+        update={
+            "events": current_record.events
+            + (
+                TicketEvent(
+                    id="legacy-builder-note",
+                    kind="reported",
+                    actor="builder",
+                    summary="Legacy builder note",
+                    data={},
+                    at=current_record.updated_at,
+                ),
+                TicketEvent(
+                    id="forged-builder-note",
+                    kind="reported",
+                    actor="builder",
+                    summary="Forged builder note",
+                    data={"job_id": "rogue-job"},
+                    at=current_record.updated_at,
+                ),
+            )
+        }
+    )
+    env.provider.write_record(current_record)
+
+    escaped_output = env.tmp_path / "escaped.out"
+    escaped_output.write_text("escape", encoding="utf-8")
+    escaped_authority = env.running_job("builder", "escaped-terminal")
+    _rewrite_job(
+        escaped_authority.path,
+        status="complete",
+        stdout_path=str(escaped_output.resolve()),
+        stderr_path=None,
+        execution_summary="Escaped terminal job",
+    )
+
+    response = env.client.get("/newsletter/agents/builder/activity")
+
+    assert response.status_code == 200
+    start_row = _activity_row(response.text, "Started work")
+    report_row = _activity_row(response.text, "Shared builder note")
+    legacy_row = _activity_row(response.text, "Legacy builder note")
+    forged_row = _activity_row(response.text, "Forged builder note")
+    escaped_row = _activity_row(response.text, "Escaped terminal job")
+
+    start_output_hrefs = _hrefs_for_label(start_row, "Output")
+    report_output_hrefs = _hrefs_for_label(report_row, "Output")
+    assert len(start_output_hrefs) == 1
+    assert report_output_hrefs == start_output_hrefs
+    shared_params = parse_qs(urlparse(report_output_hrefs[0]).query)
+    assert Path(unquote(shared_params["path"][0])) == shared_output.resolve()
+    assert Path(unquote(shared_params["path"][0])) != latest_output.resolve()
+    assert not _hrefs_for_label(start_row, "Error")
+    assert not _hrefs_for_label(report_row, "Error")
+    assert "No logs available" in legacy_row
+    assert not _hrefs_for_label(legacy_row, "Output")
+    assert "No logs available" in forged_row
+    assert not _hrefs_for_label(forged_row, "Output")
+    assert "No logs available" in escaped_row
+    assert not _hrefs_for_label(escaped_row, "Output")
+
+
+def test_activity_warnings_do_not_hide_readable_history(workflow_web_env):
+    env = workflow_web_env
+    readable_authority = env.running_job("builder", "readable-job")
+    _rewrite_job(
+        readable_authority.path,
+        status="complete",
+        completed_at="2026-09-08T12:00:00",
+        execution_summary="Readable job survives",
+    )
+    broken_job_path = env.job_store.path(env.team_id, "broken-activity")
+    broken_job_path.write_text("not: [valid", encoding="utf-8")
+    missing_root = env.root_a
+    backup_root = env.tmp_path / "tickets-root-backup"
+    missing_root.rename(backup_root)
+
+    response = env.client.get("/newsletter/agents/builder/activity")
+
+    assert response.status_code == 200
+    assert "Readable job survives" in response.text
+    assert "Skipped unreadable job record: broken-activity.yaml" in response.text
+    assert "Skipped unreadable workflow activity:" in response.text
 
 
 def test_activity_tab_uses_safe_agent_log_projection(monkeypatch, tmp_path, raw_config):

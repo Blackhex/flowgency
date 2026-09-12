@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import math
 from typing import Any
 
 from flowgency.configuration import ConfigSnapshot, ResolvedTeamPaths
@@ -46,7 +47,9 @@ def _preferred_activity_time(record: JobRecord) -> datetime | None:
 
 
 def _duration_label(value: float | int | None) -> str | None:
-    if not isinstance(value, (int, float)) or value < 0:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if not math.isfinite(value) or value < 0:
         return None
     total_seconds = int(value)
     minutes, seconds = divmod(total_seconds, 60)
@@ -95,7 +98,24 @@ def _job_entry(team_id: str, agent_id: str, record: JobRecord, paths: ResolvedTe
     }
 
 
+def _event_data_text(event: Any, key: str) -> str | None:
+    data = getattr(event, "data", None)
+    if not isinstance(data, dict):
+        return None
+    value = data.get(key)
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value or None
+
+
 def _ticket_event_title(event) -> str:
+    if event.kind == "transitioned":
+        source_state = _event_data_text(event, "source_state_name")
+        destination_state = _event_data_text(event, "destination_state_name")
+        if source_state and destination_state:
+            return f"{source_state} -> {destination_state}"
+        return event.summary
     return {
         "opened": "Ticket created",
         "started-work": "Started work",
@@ -109,12 +129,25 @@ def _ticket_icon(event) -> str:
         "opened": "plus",
         "started-work": "play",
         "ended-work": "square",
+        "transitioned": "arrow-right",
         "reported": "message-square-text",
     }.get(event.kind, "square")
 
 
+def _ticket_metadata(workflow_name: str, ticket_number: int, event: Any, title: str) -> tuple[str, ...]:
+    metadata = [workflow_name]
+    if event.kind == "transitioned":
+        factual_label = (event.summary or "").strip()
+        if factual_label and factual_label != title:
+            metadata.append(factual_label)
+    metadata.append(f"#{ticket_number}")
+    return tuple(metadata)
+
+
 def _event_summary(event, title: str) -> str:
     summary = (event.summary or "").strip()
+    if event.kind == "transitioned":
+        return ""
     return "" if summary == title else summary
 
 
@@ -130,7 +163,6 @@ def _ticket_entry(team_id: str, agent_id: str, workflow_name: str, ticket_record
             no_logs_label = "No logs available" if matching_job.status in {"complete", "failed", "cancelled"} else "No logs yet"
 
     title = _ticket_event_title(event)
-    metadata = [workflow_name, f"#{ticket_record.number}"]
     at = _normalize_activity_time(event.at)
     return {
         "identity": f"ticket:{ticket_record.ref.workflow_id}:{ticket_record.id}:{event.id}",
@@ -140,7 +172,7 @@ def _ticket_entry(team_id: str, agent_id: str, workflow_name: str, ticket_record
         "href": f"/{team_id}/workflows/{ticket_record.ref.workflow_id}?ticket={ticket_record.id}",
         "subject": ticket_record.title,
         "summary": _event_summary(event, title),
-        "metadata": tuple(metadata),
+        "metadata": _ticket_metadata(workflow_name, ticket_record.number, event, title),
         "status_label": "",
         "status_classes": "",
         "icon": _ticket_icon(event),
@@ -155,6 +187,7 @@ def _finalize_entry(entry: dict[str, Any]) -> dict[str, Any]:
         **entry,
         "time_label": at.strftime("%H:%M") if at is not None else "Unknown time",
         "date_label": at.date().isoformat() if at is not None else "Unknown date",
+        "time_datetime": at.isoformat(timespec="seconds") if at is not None else None,
     }
 
 
