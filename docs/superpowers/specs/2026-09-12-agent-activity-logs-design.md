@@ -11,10 +11,12 @@ Execution Logs page.
 The user selected a combined timeline instead of separate Jobs and Ticket Events
 sections, selected direct Output/Error file links instead of a filtered Logs tab
 or an intermediate job page, and approved the interactive mockup on 2026-09-12.
-This specification records that design for written review before implementation.
+The user approved this written specification on 2026-09-12 after returning from
+the completed launch-recovery work.
 
-This feature is independent of the pending pre-runtime launch-recovery fix. It
-does not change when agents run, their instructions, permissions, or schedules.
+This feature is independent of the completed pre-runtime launch-recovery fix
+(`034787c`). It does not change when agents run, their instructions, permissions,
+or schedules.
 
 ## Approved Visual Reference
 
@@ -259,7 +261,8 @@ Archive directory: `docs/superpowers/specs/assets/2026-09-12-agent-activity-logs
   preservation-aware fast-forward, verification, publication, and cleanup workflow.
 - Keep the specification and subsequent implementation plan in separate
   documentation-only commits before application edits. Preserve main's staged
-  task-file change, the other worktree, and all live configuration and runtime data.
+  task-file change, any unrelated worktrees, and all live configuration and runtime
+  data.
 
 ## Non-Goals
 
