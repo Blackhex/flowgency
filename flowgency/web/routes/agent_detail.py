@@ -47,7 +47,7 @@ from flowgency.tickets.models import UserTicketContext
 from flowgency.tickets.views import build_board_view
 from flowgency.web.dependencies import FlowgencyServices, get_services
 from flowgency.web.job_presentation import load_team_jobs
-from flowgency.web.logs import collect_agent_logs, log_href, with_log_links
+from flowgency.web.logs import collect_agent_logs, with_log_links
 from flowgency.web.team_navigation import build_team_context
 
 
@@ -172,41 +172,29 @@ def _path_lines(paths: tuple[Path, ...]) -> list[str]:
 
 
 def _recent_log_rows(
-    team_id: str,
-    paths: ResolvedTeamPaths,
-    agent_id: str,
+    groups: dict[str, list[dict[str, Any]]],
 ) -> list[dict[str, str]]:
-    logs_root = paths.logs
-    rows: list[dict[str, str]] = []
-    if not logs_root.exists():
-        return rows
-    for day_dir in sorted((path for path in logs_root.iterdir() if path.is_dir()), reverse=True):
-        for candidate in sorted(day_dir.iterdir(), reverse=True):
-            if not candidate.name.startswith(f"{agent_id}-"):
-                continue
-            if candidate.suffix not in {".out", ".err"}:
-                continue
-            rows.append(
-                {
-                    "name": candidate.name,
-                    "href": log_href(
-                        team_id,
-                        str(candidate.resolve()),
-                        agent_id=agent_id,
-                        source="activity",
-                    ),
-                    "when": candidate.stat().st_mtime_ns,
-                }
-            )
-            if len(rows) >= 8:
-                return rows
-    return rows
+    rows = [entry for entries in groups.values() for entry in entries]
+    rows.sort(
+        key=lambda entry: (entry["timestamp"], entry["suffix"].lower() == ".out"),
+        reverse=True,
+    )
+    return [
+        {
+            "name": entry["name"],
+            "href": entry["href"],
+            "when": int(entry["timestamp"].timestamp() * 1_000_000_000),
+        }
+        for entry in rows[:8]
+    ]
 
 
 def _activity_items(
     team_id: str,
     paths: ResolvedTeamPaths,
     agent_id: str,
+    records: tuple[Any, ...],
+    configured_agent_names: tuple[str, ...],
     job_store: JobStore | None,
     services: FlowgencyServices,
 ) -> dict[str, Any]:
@@ -238,6 +226,18 @@ def _activity_items(
                             }
                         )
     ticket_events.sort(key=lambda item: item["at"] or clock_now(), reverse=True)
+    log_groups = with_log_links(
+        collect_agent_logs(
+            paths.logs,
+            team_id,
+            agent_id,
+            records,
+            configured_agent_names,
+        ),
+        team_id,
+        agent_id=agent_id,
+        source="activity",
+    )
     jobs = [
         {
             "id": record.spec.job_id,
@@ -249,7 +249,7 @@ def _activity_items(
     return {
         "ticket_activity": ticket_events[:8],
         "jobs": jobs[:8],
-        "logs": _recent_log_rows(team_id, paths, agent_id),
+        "logs": _recent_log_rows(log_groups),
     }
 
 
@@ -577,11 +577,14 @@ def _detail_context(
     elif tab == "memory":
         context.update(_memory_context(snapshot, services, team_id, agent_id))
     elif tab == "activity":
+        records, _warnings = load_team_jobs(services.job_store, team_id)
         context.update(
             _activity_items(
                 team_id,
                 resolve_team_paths(team_cfg),
                 agent_id,
+                records,
+                tuple(team_cfg.agents.keys()),
                 services.job_store,
                 services,
             )

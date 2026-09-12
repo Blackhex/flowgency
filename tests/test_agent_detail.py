@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from html.parser import HTMLParser
 from multiprocessing import Event, Process
 from pathlib import Path
 import re
+from urllib.parse import parse_qs, unquote, urlparse
 
 import yaml
 from fastapi.testclient import TestClient
@@ -13,6 +15,7 @@ from flowgency.configuration import ConfigStore
 from flowgency.configuration.models import MemorySelector
 from flowgency.memory import resolve_memory_selector
 from tests._lock_helpers import hold_exclusive_lock
+from tests.test_local_ticket_storage import _make_reparse
 
 
 def _write_yaml(path: Path, raw: dict) -> Path:
@@ -164,6 +167,34 @@ def _seed_activity_app(monkeypatch, tmp_path, raw_config):
 
 def _revision(config_path: Path) -> str:
     return ConfigStore(config_path).load().revision
+
+
+class _HrefParser(HTMLParser):
+    def __init__(self, label: str):
+        super().__init__()
+        self._label = label
+        self._capture = False
+        self.hrefs: list[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "a":
+            self._capture = True
+            self._current_href = dict(attrs).get("href", "")
+
+    def handle_data(self, data):
+        if self._capture and data.strip() == self._label:
+            self.hrefs.append(self._current_href)
+
+    def handle_endtag(self, tag):
+        if tag == "a":
+            self._capture = False
+            self._current_href = ""
+
+
+def _hrefs_for_label(body: str, label: str) -> list[str]:
+    parser = _HrefParser(label)
+    parser.feed(body)
+    return parser.hrefs
 
 
 def test_agent_detail_base_redirects_to_profile(monkeypatch, tmp_path, raw_config):
@@ -455,6 +486,117 @@ def test_activity_links_use_ticket_events_not_retired_records(workflow_web_env):
     assert "/newsletter/proposals/" not in body
     assert "Retired observation" not in body
     assert "Retired proposal" not in body
+
+
+def test_activity_tab_uses_safe_agent_log_projection(monkeypatch, tmp_path, raw_config):
+    client, config_path, safe_log = _seed_activity_app(monkeypatch, tmp_path, raw_config)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["teams"]["newsletter-prod"]["agents"].append(
+        {
+            **raw["teams"]["newsletter-prod"]["agents"][0],
+            "name": "advisor-extra",
+        }
+    )
+    config_path.write_text(
+        yaml.safe_dump(raw, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    log_day = safe_log.parent
+    misleading_owner = log_day / "advisor-wrong-owner.out"
+    misleading_owner.write_text("other agent", encoding="utf-8")
+    overlapping = log_day / "advisor-extra-run.out"
+    overlapping.write_text("overlap", encoding="utf-8")
+    escaping_target = tmp_path / "escaped.out"
+    escaping_target.write_text("escape", encoding="utf-8")
+    escaping = log_day / "advisor-escape.out"
+    _make_reparse(escaping, escaping_target)
+    (log_day / "advisor-dir.out").mkdir()
+
+    services = app_mod.build_services(config_path)
+    record = type(
+        "Record",
+        (),
+        {
+            "spec": type("Spec", (), {"team_key": "newsletter-prod", "agent_name": "advisor-extra"})(),
+            "stdout_path": str(misleading_owner.resolve()),
+            "stderr_path": None,
+        },
+    )()
+    from flowgency.web.routes import agent_detail as agent_detail_mod
+    monkeypatch.setattr(agent_detail_mod, "load_team_jobs", lambda job_store, team_id: ((record,), ()))
+    app_mod.refresh_services()
+    app_mod.app.state.services = services
+
+    response = client.get("/newsletter-prod/agents/advisor/activity")
+
+    assert response.status_code == 200
+    body = response.text
+    assert safe_log.name in body
+    assert misleading_owner.name not in body
+    assert overlapping.name not in body
+    assert "advisor-dir.out" not in body
+    assert "advisor-escape.out" not in body
+
+
+def test_activity_logs_and_viewer_gets_do_not_mutate_config_job_or_ticket_files(workflow_web_env):
+    env = workflow_web_env
+    created = env.create(title="Alpha review")
+    authority = env.running_job("builder", "job-alpha")
+    builder = env.agent("builder", "run-alpha")
+    env.service.start_work(
+        builder,
+        env.read(created.ref).version,
+        env.operation("start-alpha", actor_name=builder.agent_name),
+    )
+    log_day = env.team_root / "logs" / "2026-09-12"
+    log_day.mkdir(parents=True, exist_ok=True)
+    log_file = log_day / "builder-run.out"
+    log_file.write_text("hello", encoding="utf-8")
+    ticket_path = env.provider._ticket_path(created.ref)
+    before_config = env.store.path.read_bytes()
+    before_job = authority.path.read_bytes()
+    before_ticket = ticket_path.read_bytes()
+    before_log = log_file.read_bytes()
+
+    activity_response = env.client.get(f"/{env.team_id}/agents/builder/activity")
+    logs_response = env.client.get(f"/{env.team_id}/agents/builder/logs")
+    hrefs = _hrefs_for_label(logs_response.text, log_file.name)
+    assert len(hrefs) == 1
+    view_response = env.client.get(hrefs[0])
+
+    assert activity_response.status_code == 200
+    assert logs_response.status_code == 200
+    assert view_response.status_code == 200
+    assert env.store.path.read_bytes() == before_config
+    assert authority.path.read_bytes() == before_job
+    assert ticket_path.read_bytes() == before_ticket
+    assert log_file.read_bytes() == before_log
+
+
+def test_agent_logs_rendered_href_round_trips_windows_path(monkeypatch, tmp_path, raw_config):
+    client, _config_path, _log_file = _seed_activity_app(monkeypatch, tmp_path, raw_config)
+    special = tmp_path / "groups" / "newsletter-workspace" / "logs" / "2026-07-16" / "advisor-demo & łog.out"
+    special.write_text("special", encoding="utf-8")
+
+    page = client.get("/newsletter-prod/agents/advisor/logs")
+
+    assert page.status_code == 200
+    hrefs = _hrefs_for_label(page.text, special.name)
+    assert len(hrefs) == 1
+    parsed = urlparse(hrefs[0])
+    params = parse_qs(parsed.query)
+    assert params["agent"] == ["advisor"]
+    assert params["source"] == ["logs"]
+    rendered_path = unquote(params["path"][0])
+    assert "\\" in rendered_path
+    assert Path(rendered_path) == special.resolve()
+
+    response = client.get(hrefs[0])
+
+    assert response.status_code == 200
+    assert "special" in response.text
+    assert "Back to Logs" in response.text
+    assert "/newsletter-prod/agents/advisor/logs" in response.text
 
 
 def test_profile_post_updates_config_revision_owned_fields(monkeypatch, tmp_path, raw_config):
