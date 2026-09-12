@@ -10,13 +10,13 @@
 
 <div class="bg-white rounded-lg border border-gray-200 p-6">
   <div class="flex items-center justify-between mb-4 pb-4 border-b border-gray-100 min-w-0">
-    <h1 class="text-lg font-bold text-gray-900 font-mono [overflow-wrap:anywhere]">{{ filename }}</h1>
+    <h1 class="min-w-0 flex-1 text-lg font-bold text-gray-900 font-mono break-words" style="overflow-wrap:anywhere;word-break:break-word;">{{ filename }}</h1>
   </div>
 
   {% if truncated %}
   <p role="status" class="mb-3 text-sm text-amber-700 dark:text-amber-300">Preview truncated</p>
   {% endif %}
-  <div data-log-content class="prose max-w-none min-w-0 [overflow-wrap:anywhere] [&_pre]:overflow-x-auto">
+  <div data-log-content class="prose max-w-none min-w-0 [&_pre]:overflow-x-auto" style="overflow-wrap:anywhere;word-break:break-word;">
     {% if content_html is not none %}
     {{ content_html | safe }}
     {% else %}

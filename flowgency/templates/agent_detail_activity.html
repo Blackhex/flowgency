@@ -52,14 +52,11 @@
             </p>
             {% endif %}
             {% if entry.summary %}
-            {% set summary_can_expand = ('\n' in entry.summary) or (entry.summary|length > 160) %}
             <div class="max-w-4xl" data-activity-report>
               <div id="{{ entry.identity }}-report" data-report-text class="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm text-gray-700 dark:text-gray-200">{{ entry.summary }}</div>
-              {% if summary_can_expand %}
               <button type="button" data-report-toggle hidden aria-expanded="false" aria-controls="{{ entry.identity }}-report" class="mt-2 text-xs text-indigo-600 hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-indigo-200">
                 Show more
               </button>
-              {% endif %}
             </div>
             {% endif %}
             {% if entry.log_links %}
