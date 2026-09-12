@@ -47,13 +47,46 @@ def _occurrence_of(record) -> datetime | None:
         return None
 
 
-def _never_ran(record) -> bool:
-    """Whether this job was recorded as failed without ever reaching a worker."""
-    return record.status == "failed" and not _is_launched(record)
+def _is_settled_ticket_cleanup(cleanup) -> bool:
+    if not isinstance(cleanup, dict):
+        return False
+    if cleanup.get("confirmed") is not True:
+        return False
+    if cleanup.get("requires_retry") is not False:
+        return False
+    if cleanup.get("error") is not None:
+        return False
+    status = cleanup.get("status")
+    if not isinstance(status, str) or status not in {"idle", "cleared"}:
+        return False
+    pending_cleanup = cleanup.get("pending_cleanup")
+    if not isinstance(pending_cleanup, list):
+        return False
+    return len(pending_cleanup) == 0
+
+
+def _recoverable_pre_runtime_failure(record) -> bool:
+    """Whether this failed job is confirmed to have stopped before runtime execution."""
+    if record.status != "failed":
+        return False
+    if not _is_launched(record):
+        return True
+    metadata = record.result_metadata
+    if not isinstance(metadata, dict):
+        return False
+    execution_failure = metadata.get("execution_failure")
+    if not isinstance(execution_failure, dict):
+        return False
+    if execution_failure.get("phase") != "before_runtime":
+        return False
+    if "ticket_cleanup" not in metadata:
+        return True
+    ticket_cleanup = metadata.get("ticket_cleanup")
+    return _is_settled_ticket_cleanup(ticket_cleanup)
 
 
 def lost_occurrences(records) -> dict[tuple[str, str], datetime]:
-    """The occurrence each routine still owes because its job never started.
+    """The occurrence each routine still owes because its job never reached runtime.
 
     A marker records that an occurrence was *submitted*, not that it ran, and
     a job queued behind a full pool is launched by a later drain. When that
@@ -74,7 +107,7 @@ def lost_occurrences(records) -> dict[tuple[str, str], datetime]:
         if occurrence is None:
             continue
         key = (spec.agent_name, spec.routine_id)
-        target = lost if _never_ran(record) else served
+        target = lost if _recoverable_pre_runtime_failure(record) else served
         newest = target.get(key)
         if newest is None or occurrence > newest:
             target[key] = occurrence

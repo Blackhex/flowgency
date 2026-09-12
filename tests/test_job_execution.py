@@ -320,6 +320,7 @@ def test_execute_job_cancellation_while_waiting_terminalizes_without_run(tmp_pat
     record = read_job(fixture.job_path)
     assert record.status == "cancelled"
     assert record.started_at is None
+    assert record.result_metadata is None or "execution_failure" not in record.result_metadata
     assert called["run"] == 0
 
 
@@ -1548,6 +1549,200 @@ def test_execute_job_workflow_team_runtime_exception_keeps_pending_cleanup_visib
     stored = read_job(authority.path)
     assert stored.result_metadata["ticket_cleanup"]["status"] == "pending"
     assert stored.result_metadata["ticket_cleanup"]["confirmed"] is False
+
+
+def test_execute_job_workflow_team_marks_confirmed_before_runtime_failure(
+    tmp_path,
+    raw_config,
+    monkeypatch,
+):
+    import flowgency.jobs.execution as execution_module
+
+    env = make_ticket_job_environment(tmp_path, raw_config, monkeypatch)
+
+    class Integration(TicketRuntimeIntegration):
+        def run(self, request: IntegrationRunRequest):
+            raise AssertionError("integration.run should not be called")
+
+    integration = Integration()
+    authority, record = _workflow_team_manual_authority(env, integration)
+    _patch_workflow_execution_context(monkeypatch, record.spec, integration)
+
+    def broken_start(self):
+        raise ImportError("ticket broker import failed")
+
+    monkeypatch.setattr(execution_module.TicketBroker, "start", broken_start)
+
+    result = execute_job(authority)
+    stored = read_job(authority.path)
+
+    assert result.status == "failed"
+    assert stored.worker_pid is not None
+    assert stored.result_metadata["execution_failure"] == {
+        "phase": "before_runtime"
+    }
+    assert stored.authority_digest == authority.immutable_digest
+
+
+def test_execute_job_preserves_existing_result_metadata_when_marking_before_runtime_failure(
+    tmp_path,
+    raw_config,
+    monkeypatch,
+):
+    import flowgency.jobs.execution as execution_module
+
+    env = make_ticket_job_environment(tmp_path, raw_config, monkeypatch)
+
+    class Integration(TicketRuntimeIntegration):
+        def run(self, request: IntegrationRunRequest):
+            raise AssertionError("integration.run should not be called")
+
+    integration = Integration()
+    authority, record = _workflow_team_manual_authority(env, integration)
+    seeded = dc_replace(
+        record,
+        result_metadata={"write_attempts": [{"path": "notes.md", "tool": "write"}]},
+    )
+    write_job(authority.path, seeded)
+    _patch_workflow_execution_context(monkeypatch, record.spec, integration)
+
+    monkeypatch.setattr(
+        execution_module.TicketBroker,
+        "start",
+        lambda self: (_ for _ in ()).throw(ImportError("ticket broker import failed")),
+    )
+
+    result = execute_job(authority)
+    stored = read_job(authority.path)
+
+    assert result.status == "failed"
+    assert stored.result_metadata == {
+        "write_attempts": [{"path": "notes.md", "tool": "write"}],
+        "execution_failure": {"phase": "before_runtime"},
+    }
+
+
+def test_execute_job_runtime_exception_does_not_mark_before_runtime_failure(
+    tmp_path,
+    raw_config,
+    monkeypatch,
+):
+    from flowgency.tickets.broker import TicketToolClient
+
+    env = make_ticket_job_environment(tmp_path, raw_config, monkeypatch)
+    ticket = env.create_assigned("builder")
+
+    class Integration(TicketRuntimeIntegration):
+        def run(self, request: IntegrationRunRequest):
+            client = TicketToolClient(
+                request.ticket_tools.url.removesuffix("/mcp"),
+                request.ticket_tools.headers["Authorization"].removeprefix("Bearer "),
+            )
+            started = client.call(
+                "start_work",
+                {
+                    "version": env.read(ticket.ref).version.model_dump(mode="json"),
+                    "operation_id": "start-then-crash-no-before-runtime-tag",
+                },
+            )
+            assert started["ok"] is True
+            raise RuntimeError("boom after runtime start")
+
+    integration = Integration()
+    authority, record = _workflow_team_manual_authority(env, integration)
+    _patch_workflow_execution_context(monkeypatch, record.spec, integration)
+
+    result = execute_job(authority)
+    stored = read_job(authority.path)
+
+    assert result.status == "failed"
+    assert stored.result_metadata is not None
+    assert "execution_failure" not in stored.result_metadata
+
+
+def test_execute_job_nonzero_exit_does_not_mark_before_runtime_failure(
+    tmp_path,
+    monkeypatch,
+):
+    fixture = MemoryJobFixture(tmp_path)
+
+    class Integration:
+        supports_execution = True
+        name = "fake"
+
+        def run(self, request: IntegrationRunRequest):
+            return RunResult(1, "done", "", 0.1)
+
+    context = SimpleNamespace(
+        workspace_root=fixture.team_root,
+        integration=Integration(),
+        timeout=30,
+        sandbox_root=None,
+        team_root=fixture.team_root,
+        runtime_policy=EffectiveRuntimePolicy(timeout=30),
+    )
+    monkeypatch.setattr(
+        "flowgency.jobs.execution.resolve_job_context", lambda ignored: context
+    )
+
+    result = execute_job(fixture.authority)
+
+    assert result.status == "failed"
+    assert read_job(fixture.job_path).result_metadata is None
+
+
+def test_execute_job_memory_publication_failure_does_not_mark_before_runtime_failure(
+    tmp_path,
+    monkeypatch,
+):
+    fixture = MemoryJobFixture(tmp_path)
+
+    class Integration:
+        supports_execution = True
+        name = "fake"
+
+        def run(self, request: IntegrationRunRequest):
+            Path(request.memory_working_dir, "memory.md").write_text(
+                "new",
+                encoding="utf-8",
+            )
+            return RunResult(0, "done", "", 0.1)
+
+    context = SimpleNamespace(
+        workspace_root=fixture.team_root,
+        integration=Integration(),
+        timeout=30,
+        sandbox_root=None,
+        team_root=fixture.team_root,
+        runtime_policy=EffectiveRuntimePolicy(timeout=30),
+    )
+    monkeypatch.setattr(
+        "flowgency.jobs.execution.resolve_job_context", lambda ignored: context
+    )
+
+    from flowgency.memory.publication import MemoryPublicationError
+
+    monkeypatch.setattr(
+        "flowgency.jobs.execution.apply_publication",
+        lambda prepared, **kwargs: (_ for _ in ()).throw(MemoryPublicationError("simulated")),
+    )
+
+    result = execute_job(fixture.authority)
+
+    assert result.status == "failed"
+    metadata = read_job(fixture.job_path).result_metadata or {}
+    assert "execution_failure" not in metadata
+
+
+def test_execute_job_authority_failure_does_not_mark_before_runtime_failure(tmp_path):
+    path, spec = queued_job(tmp_path)
+    authority = _authority(spec)
+    bad_authority = dc_replace(authority, immutable_digest="0" * 64)
+
+    with pytest.raises(Exception, match="immutable job authority failed integrity validation"):
+        execute_job(bad_authority)
+
+    assert read_job(path).result_metadata is None
 
 
 def test_execute_job_workflow_team_cleanup_exception_persists_sanitized_cleanup_metadata(

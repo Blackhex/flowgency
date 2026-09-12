@@ -13,6 +13,7 @@ from flowgency.jobs import JobRequest, submit_job_request
 from flowgency.jobs.authority import JobStore
 from flowgency.jobs.launcher import LaunchResult
 from flowgency.jobs.store import cancel_job, read_job
+from flowgency.jobs.execution import execute_job
 
 
 class _FlakyLauncher:
@@ -134,7 +135,6 @@ class _Bench:
             if record.spec.trigger == "scheduled_prompt"
         ]
 
-
 @pytest.fixture
 def at_bench(tmp_path):
     return _Bench(tmp_path, "            schedule:\n              at: '08:00'\n")
@@ -147,6 +147,27 @@ def _queue_the_occurrence(bench, monkeypatch):
     bench.cycle()
     assert bench.launcher.launched == []
     assert [record.status for record in bench.scheduled()] == ["queued"]
+
+
+def _fail_scheduled_job_before_runtime(bench):
+    import flowgency.jobs.execution as execution_module
+
+    [record] = bench.scheduled()
+    authority = JobStore(bench.memory_store).reference(
+        "newsletter",
+        record.spec.job_id,
+        record.authority_digest,
+    )
+    original_create_launch_view = execution_module.create_launch_view
+    try:
+        execution_module.create_launch_view = (
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                ImportError("launch view import failed")
+            )
+        )
+        return execute_job(authority)
+    finally:
+        execution_module.create_launch_view = original_create_launch_view
 
 
 def test_a_failed_deferred_launch_leaves_the_occurrence_recoverable(
@@ -169,6 +190,95 @@ def test_a_failed_deferred_launch_leaves_the_occurrence_recoverable(
     ]
     assert len(launched) == 1
     assert at_bench.launcher.launched == [launched[0].spec.job_id]
+
+
+@pytest.mark.parametrize(
+    "bench_name",
+    ["at_bench", "every_bench"],
+)
+def test_a_confirmed_before_runtime_failure_is_recovered_once(
+    request,
+    bench_name,
+    monkeypatch,
+):
+    bench = request.getfixturevalue(bench_name)
+    _queue_the_occurrence(bench, monkeypatch)
+
+    bench.free_the_pool()
+    failed = _fail_scheduled_job_before_runtime(bench)
+
+    first_pass = bench.scheduled()
+    assert len(first_pass) == 1
+    assert first_pass[0].spec.job_id == failed.spec.job_id
+    assert first_pass[0].status == "failed"
+    assert first_pass[0].result_metadata == {
+        "execution_failure": {"phase": "before_runtime"}
+    }
+    failed_due_at = first_pass[0].due_at
+
+    bench.cycle()
+
+    again = sorted(bench.scheduled(), key=lambda item: item.spec.job_id)
+    assert len(again) == 2
+    assert sorted(record.status for record in again) == ["failed", "queued"]
+    assert {record.due_at for record in again} == {failed_due_at}
+    recovered = [record for record in again if record.status == "queued"]
+    assert len(recovered) == 1
+    assert recovered[0].launched_at is not None
+    assert bench.launcher.launched == [recovered[0].spec.job_id]
+
+    bench.cycle()
+
+    final_records = sorted(bench.scheduled(), key=lambda item: item.spec.job_id)
+    assert len(final_records) == 2
+    assert sorted(record.status for record in final_records) == ["failed", "queued"]
+
+
+@pytest.mark.parametrize(
+    "bench_name",
+    ["at_bench", "every_bench"],
+)
+def test_repeated_before_runtime_failures_remain_recoverable(
+    request,
+    bench_name,
+    monkeypatch,
+):
+    bench = request.getfixturevalue(bench_name)
+    _queue_the_occurrence(bench, monkeypatch)
+
+    bench.free_the_pool()
+    first_failed = _fail_scheduled_job_before_runtime(bench)
+
+    class _RepeatFailureLauncher:
+        def launch(self, reference):
+            import flowgency.jobs.execution as execution_module
+
+            original_create_launch_view = execution_module.create_launch_view
+            try:
+                execution_module.create_launch_view = (
+                    lambda *args, **kwargs: (_ for _ in ()).throw(
+                        ImportError("launch view import failed")
+                    )
+                )
+                execute_job(reference)
+            finally:
+                execution_module.create_launch_view = original_create_launch_view
+            return LaunchResult(worker_pid=os.getpid())
+
+    bench.launcher = _RepeatFailureLauncher()
+    bench.cycle()
+
+    records = sorted(bench.scheduled(), key=lambda item: item.spec.job_id)
+    assert len(records) == 2
+    assert [record.status for record in records] == ["failed", "failed"]
+    assert all(
+        record.result_metadata == {"execution_failure": {"phase": "before_runtime"}}
+        for record in records
+    )
+    assert {record.due_at for record in records} == {first_failed.due_at}
+    assert lost_occurrences(records) == {
+        ("builder", "daily-review"): datetime.fromisoformat(first_failed.due_at)
+    }
 
 
 def test_a_recovered_occurrence_is_not_fired_a_third_time(at_bench, monkeypatch):
@@ -223,7 +333,15 @@ def test_a_failed_deferred_launch_of_an_every_occurrence_is_offered_again(
     assert len(every_bench.launcher.launched) == 1
 
 
-def _record(routine, due_at, status, launched_at=None, worker_pid=None, trigger="scheduled_prompt"):
+def _record(
+    routine,
+    due_at,
+    status,
+    launched_at=None,
+    worker_pid=None,
+    trigger="scheduled_prompt",
+    result_metadata=None,
+):
     return SimpleNamespace(
         spec=SimpleNamespace(
             trigger=trigger, agent_name="builder", routine_id=routine
@@ -232,6 +350,7 @@ def _record(routine, due_at, status, launched_at=None, worker_pid=None, trigger=
         status=status,
         launched_at=launched_at,
         worker_pid=worker_pid,
+        result_metadata=result_metadata,
     )
 
 
@@ -247,6 +366,147 @@ def test_only_a_job_that_never_reached_a_worker_reopens_its_occurrence():
 
     assert lost_occurrences(records) == {
         ("builder", "a"): datetime(2026, 7, 29, 8, 0)
+    }
+
+
+def test_a_launched_before_runtime_failure_reopens_its_occurrence():
+    record = _record(
+        "audit",
+        "2026-07-29T08:00:00",
+        "failed",
+        launched_at="2026-07-29T08:00:01",
+        worker_pid=12345,
+        result_metadata={"execution_failure": {"phase": "before_runtime"}},
+    )
+
+    assert lost_occurrences([record]) == {
+        ("builder", "audit"): datetime(2026, 7, 29, 8, 0)
+    }
+
+
+@pytest.mark.parametrize(
+    "result_metadata",
+    [
+        None,
+        "not-a-dict",
+        {},
+        {"execution_failure": "not-a-dict"},
+        {"execution_failure": {"phase": "after_runtime"}},
+        {
+            "execution_failure": {"phase": "before_runtime"},
+            "ticket_cleanup": "not-a-dict",
+        },
+        {
+            "execution_failure": {"phase": "before_runtime"},
+            "ticket_cleanup": None,
+        },
+        {
+            "execution_failure": {"phase": "before_runtime"},
+            "ticket_cleanup": {"confirmed": False, "requires_retry": False, "status": "idle", "pending_cleanup": []},
+        },
+        {
+            "execution_failure": {"phase": "before_runtime"},
+            "ticket_cleanup": {"confirmed": True, "requires_retry": True, "status": "idle", "pending_cleanup": []},
+        },
+        {
+            "execution_failure": {"phase": "before_runtime"},
+            "ticket_cleanup": {"confirmed": True, "requires_retry": False, "status": "pending", "pending_cleanup": []},
+        },
+        {
+            "execution_failure": {"phase": "before_runtime"},
+            "ticket_cleanup": {"confirmed": True, "requires_retry": False, "status": "error", "pending_cleanup": []},
+        },
+        {
+            "execution_failure": {"phase": "before_runtime"},
+            "ticket_cleanup": {
+                "confirmed": True,
+                "requires_retry": False,
+                "status": "cleared",
+                "pending_cleanup": [],
+                "error": {"message": "broker close failed"},
+            },
+        },
+        {
+            "execution_failure": {"phase": "before_runtime"},
+            "ticket_cleanup": {"confirmed": True, "requires_retry": False, "status": "cleared", "pending_cleanup": ["still-pending"]},
+        },
+        {
+            "execution_failure": {"phase": "before_runtime"},
+            "ticket_cleanup": {"confirmed": True, "requires_retry": False, "status": "cleared", "pending_cleanup": "not-a-list"},
+        },
+        {
+            "execution_failure": {"phase": "before_runtime"},
+            "ticket_cleanup": {"confirmed": True, "requires_retry": False, "status": ["cleared"], "pending_cleanup": []},
+        },
+        {
+            "execution_failure": {"phase": "before_runtime"},
+            "ticket_cleanup": {
+                "confirmed": True,
+                "requires_retry": False,
+                "status": {"state": "cleared"},
+                "pending_cleanup": [],
+            },
+        },
+    ],
+)
+def test_launched_failures_without_settled_before_runtime_evidence_do_not_reopen(
+    result_metadata,
+):
+    record = _record(
+        "audit",
+        "2026-07-29T08:00:00",
+        "failed",
+        launched_at="2026-07-29T08:00:01",
+        worker_pid=12345,
+        result_metadata=result_metadata,
+    )
+
+    assert lost_occurrences([record]) == {}
+
+
+def test_a_launched_before_runtime_failure_with_settled_idle_cleanup_reopens():
+    record = _record(
+        "audit",
+        "2026-07-29T08:00:00",
+        "failed",
+        launched_at="2026-07-29T08:00:01",
+        worker_pid=12345,
+        result_metadata={
+            "execution_failure": {"phase": "before_runtime"},
+            "ticket_cleanup": {
+                "confirmed": True,
+                "requires_retry": False,
+                "status": "idle",
+                "pending_cleanup": [],
+            },
+        },
+    )
+
+    assert lost_occurrences([record]) == {
+        ("builder", "audit"): datetime(2026, 7, 29, 8, 0)
+    }
+
+
+def test_a_launched_before_runtime_failure_with_settled_cleared_cleanup_reopens():
+    record = _record(
+        "audit",
+        "2026-07-29T08:00:00",
+        "failed",
+        launched_at="2026-07-29T08:00:01",
+        worker_pid=12345,
+        result_metadata={
+            "execution_failure": {"phase": "before_runtime"},
+            "ticket_cleanup": {
+                "confirmed": True,
+                "requires_retry": False,
+                "status": "cleared",
+                "pending_cleanup": [],
+            },
+        },
+    )
+
+    assert lost_occurrences([record]) == {
+        ("builder", "audit"): datetime(2026, 7, 29, 8, 0)
     }
 
 

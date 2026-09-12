@@ -475,6 +475,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
     started = None
     launch_view = None
     final = record
+    runtime_invoked = False
     try:
         store.read(authority)
         spec = record.spec
@@ -598,6 +599,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                             ),
                         )
                     try:
+                        runtime_invoked = True
                         result = integration.run(request)
                     except Exception as error:
                         runtime_error = error
@@ -790,6 +792,11 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
             started_at=None if started is None else started.isoformat(),
             base_sha=base_sha,
         )
+        if not runtime_invoked and final.status == "failed":
+            final = _merge_result_metadata(
+                job_path,
+                {"execution_failure": {"phase": "before_runtime"}},
+            )
     finally:
         try:
             release_pin(
