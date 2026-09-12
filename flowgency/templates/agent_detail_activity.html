@@ -22,9 +22,9 @@
         {% for entry in group.entries %}
         <li class="grid grid-cols-[3rem_1.75rem_minmax(0,1fr)] gap-x-3 pb-6 last:pb-0">
           {% if entry.time_datetime %}
-          <time class="pt-1 text-xs font-mono text-gray-400 dark:text-gray-500" datetime="{{ entry.time_datetime }}">{{ entry.time_label }}</time>
+          <time class="pt-1 text-xs font-mono text-gray-500 dark:text-gray-400" datetime="{{ entry.time_datetime }}">{{ entry.time_label }}</time>
           {% else %}
-          <span class="pt-1 text-xs font-mono text-gray-400 dark:text-gray-500">{{ entry.time_label }}</span>
+          <span class="pt-1 text-xs font-mono text-gray-500 dark:text-gray-400">{{ entry.time_label }}</span>
           {% endif %}
           <div class="relative flex justify-center pt-0.5">
             <span class="flex h-7 w-7 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
@@ -42,7 +42,7 @@
               {% endif %}
             </div>
             {% if entry.href %}
-            <p class="min-w-0 text-sm"><a href="{{ entry.href }}" class="break-words text-indigo-600 hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-indigo-200">{{ entry.subject }}</a></p>
+              <p class="min-w-0 text-sm"><a href="{{ entry.href }}" class="break-words [overflow-wrap:anywhere] text-indigo-600 hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-indigo-200">{{ entry.subject }}</a></p>
             {% endif %}
             {% if entry.metadata %}
             <p class="flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
@@ -52,11 +52,14 @@
             </p>
             {% endif %}
             {% if entry.summary %}
+            {% set summary_can_expand = ('\n' in entry.summary) or (entry.summary|length > 160) %}
             <div class="max-w-4xl" data-activity-report>
-              <div id="{{ entry.identity }}-report" data-report-text class="whitespace-pre-wrap break-words text-sm text-gray-700 dark:text-gray-200">{{ entry.summary }}</div>
-              <button type="button" data-report-toggle hidden aria-expanded="false" aria-controls="{{ entry.identity }}-report" class="mt-2 inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-indigo-200">
+              <div id="{{ entry.identity }}-report" data-report-text class="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm text-gray-700 dark:text-gray-200">{{ entry.summary }}</div>
+              {% if summary_can_expand %}
+              <button type="button" data-report-toggle hidden aria-expanded="false" aria-controls="{{ entry.identity }}-report" class="mt-2 text-xs text-indigo-600 hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-indigo-200">
                 Show more
               </button>
+              {% endif %}
             </div>
             {% endif %}
             {% if entry.log_links %}
