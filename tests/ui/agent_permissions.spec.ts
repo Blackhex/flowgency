@@ -93,7 +93,7 @@ async function withPortablePermissionRuntimePaths<T>(
   const changes = await page.evaluate(({ marker, prefix }) => {
     const records: PortableRuntimeSnapshotChange[] = [];
     const seen = new Set<Element>();
-    const selectors = ['#permission-summary p', '[data-rule-path]', '[data-portable-runtime-display]'];
+    const selectors = ['#permission-summary p', '[data-rule-path]'];
 
     for (const selector of selectors) {
       for (const element of document.querySelectorAll<HTMLElement>(selector)) {
@@ -190,82 +190,109 @@ test.beforeEach(async ({ page }, testInfo) => {
 test('portable runtime path normalization preserves suffixes, geometry, and restoration', async ({ page }) => {
   await page.goto(advisorPath);
 
-  const mainSummaryPath = 'C:/Projekty/Flowgency/tests/ui/.runtime/current/teams/newsletter/editorial';
-  const worktreeSummaryPath = 'C:/Projekty/Flowgency/.worktrees/agent-activity-logs/tests/ui/.runtime/current/teams/newsletter/editorial';
-  const mainRulePath = 'C:/Projekty/Flowgency/tests/ui/.runtime/current/workspaces/newsletter';
-  const worktreeRulePath = 'C:/Projekty/Flowgency/.worktrees/agent-activity-logs/tests/ui/.runtime/current/workspaces/newsletter';
+  const summaryPath = page.locator('#permission-summary .permission-summary-scope > p').filter({ hasText: '.runtime/current/' }).first();
+  const rulePathInput = page.locator('[data-rule-path]').first();
 
-  await page.evaluate(({ mainSummaryPath: mainSummary, worktreeSummaryPath: worktreeSummary, mainRulePath: mainRule, worktreeRulePath: worktreeRule }) => {
-    const fixture = document.createElement('section');
-    fixture.setAttribute('data-portable-runtime-fixture', '');
-    fixture.style.width = '13rem';
-    fixture.style.font = 'inherit';
-    fixture.style.position = 'absolute';
-    fixture.style.left = '0';
-    fixture.style.top = '0';
-    fixture.style.pointerEvents = 'none';
-    fixture.style.opacity = '0';
-    fixture.innerHTML = `
-      <div>
-        <p data-portable-runtime-display="main-summary">${mainSummary}</p>
-        <p data-portable-runtime-display="worktree-summary">${worktreeSummary}</p>
-        <input data-rule-path data-portable-runtime-input="main-rule" value="${mainRule}">
-        <input data-rule-path data-portable-runtime-input="worktree-rule" value="${worktreeRule}">
-      </div>
-    `;
-    document.body.appendChild(fixture);
-  }, {
-    mainSummaryPath,
-    worktreeSummaryPath,
-    mainRulePath,
-    worktreeRulePath,
-  });
+  const originalSummaryText = await summaryPath.textContent();
+  const originalRulePath = await rulePathInput.inputValue();
+  expect(originalSummaryText).not.toBeNull();
 
-  const summaryTexts = page.locator('[data-portable-runtime-display]');
-  await expect(summaryTexts).toHaveCount(2);
+  const summaryChange = normalizePortableRuntimePath(originalSummaryText ?? '');
+  const ruleChange = normalizePortableRuntimePath(originalRulePath);
+  expect(summaryChange).not.toBeNull();
+  expect(ruleChange).not.toBeNull();
 
-  await withPortablePermissionRuntimePaths(page, async (changes) => {
-    expect(changes.some((change) => change.original === mainSummaryPath && change.suffix === 'tests/ui/.runtime/current/teams/newsletter/editorial')).toBe(true);
-    expect(changes.some((change) => change.original === worktreeSummaryPath && change.suffix === 'tests/ui/.runtime/current/teams/newsletter/editorial')).toBe(true);
-    expect(changes.some((change) => change.original === mainRulePath && change.suffix === 'tests/ui/.runtime/current/workspaces/newsletter')).toBe(true);
-    expect(changes.some((change) => change.original === worktreeRulePath && change.suffix === 'tests/ui/.runtime/current/workspaces/newsletter')).toBe(true);
+  async function runPortableRuntimeVariant(checkoutPrefix: string) {
+    try {
+      await page.evaluate(({ summarySelector, ruleSelector, marker, checkoutPrefix: prefix }) => {
+        const summary = document.querySelector<HTMLElement>(summarySelector);
+        const ruleInput = document.querySelector<HTMLInputElement>(ruleSelector);
 
-    await expect(summaryTexts.nth(0)).toHaveText('C:/portable-checkout/tests/ui/.runtime/current/teams/newsletter/editorial');
-    await expect(summaryTexts.nth(1)).toHaveText('C:/portable-checkout/tests/ui/.runtime/current/teams/newsletter/editorial');
+        if (!summary || !ruleInput) {
+          throw new Error('live permissions runtime path targets not found');
+        }
 
-    const normalizedMetrics = await page.evaluate(() => {
-      const summaries = Array.from(document.querySelectorAll<HTMLElement>('[data-portable-runtime-display]')).map((element) => {
-        const rect = element.getBoundingClientRect();
-        return {
-          text: element.textContent ?? '',
-          width: rect.width,
-          height: rect.height,
+        const rewrite = (value: string) => {
+          const markerIndex = value.indexOf(marker);
+          if (markerIndex === -1) {
+            return value;
+          }
+          return `${prefix}${value.slice(markerIndex)}`;
         };
+
+        summary.textContent = rewrite(summary.textContent ?? '');
+        ruleInput.value = rewrite(ruleInput.value);
+      }, {
+        summarySelector: '#permission-summary .permission-summary-scope > p',
+        ruleSelector: '[data-rule-path]',
+        marker: runtimePathMarker,
+        checkoutPrefix,
       });
-      const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('[data-portable-runtime-input]')).map((element) => ({
-        value: element.value,
-      }));
-      return { summaries, inputs };
-    });
 
-    expect(normalizedMetrics.summaries).toHaveLength(2);
-    expect(normalizedMetrics.inputs).toHaveLength(2);
-    expect(normalizedMetrics.summaries[0]?.text).toBe(normalizedMetrics.summaries[1]?.text);
-    expect(normalizedMetrics.summaries[0]?.width).toBe(normalizedMetrics.summaries[1]?.width);
-    expect(normalizedMetrics.summaries[0]?.height).toBe(normalizedMetrics.summaries[1]?.height);
-    expect(normalizedMetrics.inputs[0]?.value).toBe('C:/portable-checkout/tests/ui/.runtime/current/workspaces/newsletter');
-    expect(normalizedMetrics.inputs[1]?.value).toBe('C:/portable-checkout/tests/ui/.runtime/current/workspaces/newsletter');
-  });
+      const variedSummaryText = await summaryPath.textContent();
+      const variedRulePath = await rulePathInput.inputValue();
 
-  const restoredMetrics = await page.evaluate(() => ({
-    summaries: Array.from(document.querySelectorAll<HTMLElement>('[data-portable-runtime-display]')).map((element) => element.textContent ?? ''),
-    inputs: Array.from(document.querySelectorAll<HTMLInputElement>('[data-portable-runtime-input]')).map((element) => element.value),
-  }));
+      expect(variedSummaryText).toBe(`${checkoutPrefix}${summaryChange?.suffix}`);
+      expect(variedRulePath).toBe(`${checkoutPrefix}${ruleChange?.suffix}`);
 
-  expect(restoredMetrics.summaries).toEqual([mainSummaryPath, worktreeSummaryPath]);
-  expect(restoredMetrics.inputs).toEqual([mainRulePath, worktreeRulePath]);
+      return await withPortablePermissionRuntimePaths(page, async (changes) => {
+        expect(changes).toContainEqual({
+          original: variedSummaryText ?? '',
+          normalized: `${portableCheckoutPrefix}${summaryChange?.suffix}`,
+          suffix: summaryChange?.suffix ?? '',
+        });
+        expect(changes).toContainEqual({
+          original: variedRulePath,
+          normalized: `${portableCheckoutPrefix}${ruleChange?.suffix}`,
+          suffix: ruleChange?.suffix ?? '',
+        });
 
-  await page.locator('[data-portable-runtime-fixture]').evaluate((element) => element.remove());
+        await expect(summaryPath).toHaveText(`${portableCheckoutPrefix}${summaryChange?.suffix}`);
+        await expect(rulePathInput).toHaveValue(`${portableCheckoutPrefix}${ruleChange?.suffix}`);
+
+        return await page.evaluate(({ summarySelector, ruleSelector }) => {
+          const summary = document.querySelector<HTMLElement>(summarySelector);
+          const ruleInput = document.querySelector<HTMLInputElement>(ruleSelector);
+          if (!summary || !ruleInput) {
+            throw new Error('live permissions runtime path targets not found after normalization');
+          }
+          const rect = summary.getBoundingClientRect();
+          return {
+            summaryText: summary.textContent ?? '',
+            ruleValue: ruleInput.value,
+            summaryWidth: rect.width,
+            summaryHeight: rect.height,
+          };
+        }, {
+          summarySelector: '#permission-summary .permission-summary-scope > p',
+          ruleSelector: '[data-rule-path]',
+        });
+      });
+    } finally {
+      await page.evaluate(({ summarySelector, ruleSelector, originalSummary, originalRule }) => {
+        const summary = document.querySelector<HTMLElement>(summarySelector);
+        const ruleInput = document.querySelector<HTMLInputElement>(ruleSelector);
+        if (!summary || !ruleInput) {
+          throw new Error('live permissions runtime path targets not found during restoration');
+        }
+        summary.textContent = originalSummary;
+        ruleInput.value = originalRule;
+      }, {
+        summarySelector: '#permission-summary .permission-summary-scope > p',
+        ruleSelector: '[data-rule-path]',
+        originalSummary: originalSummaryText ?? '',
+        originalRule: originalRulePath,
+      });
+
+      await expect(summaryPath).toHaveText(originalSummaryText ?? '');
+      await expect(rulePathInput).toHaveValue(originalRulePath);
+    }
+  }
+
+  const mainMetrics = await runPortableRuntimeVariant('C:/Projekty/Flowgency/');
+  const worktreeMetrics = await runPortableRuntimeVariant('C:/Projekty/Flowgency/.worktrees/agent-activity-logs/');
+
+  expect(mainMetrics).toEqual(worktreeMetrics);
   await assertNoConsoleErrors(page);
 });
 
