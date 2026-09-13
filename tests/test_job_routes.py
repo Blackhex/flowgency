@@ -3,6 +3,8 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
+import subprocess
+import sys
 from urllib.parse import quote, urlencode
 
 import yaml
@@ -530,6 +532,53 @@ def test_resume_unknown_job_is_not_found(monkeypatch, tmp_path, raw_config):
     response = client.post("/newsletter/jobs/job-missing/resume", follow_redirects=False)
 
     assert response.status_code == 404
+
+
+def test_ui_reset_rejects_unknown_fixture_before_mutating_runtime(tmp_path):
+    repo_root = Path(__file__).resolve().parents[1]
+    runtime_parent = (tmp_path / "ui-runtime").as_posix()
+    child = "\n".join(
+        (
+            "from pathlib import Path",
+            "import os",
+            "import sys",
+            "from fastapi.testclient import TestClient",
+            "import flowgency.app as app_mod",
+            "from tests.ui import server as ui_server",
+            "runtime_parent = Path(sys.argv[1])",
+            "ui_server.RUNTIME_PARENT = runtime_parent",
+            "ui_server.RUNTIME_ROOT = runtime_parent / 'current'",
+            "runtime, config_path = ui_server._prepare_runtime()",
+            "try:",
+            "    os.environ['FLOWGENCY_CONFIG'] = str(config_path)",
+            "    os.environ['FLOWGENCY_UI_RUNTIME'] = str(runtime)",
+            "    app_mod.CONFIG_PATH = config_path",
+            "    ui_server._install_ui_test_runtime()",
+            "    app_mod.refresh_services()",
+            "    preserved = runtime / 'teams' / 'newsletter' / 'logs' / 'fixture-preserved.out'",
+            "    preserved.write_text('keep me', encoding='utf-8')",
+            "    before_config = config_path.read_bytes()",
+            "    before_preserved = preserved.read_bytes()",
+            "    with TestClient(app_mod.app) as client:",
+            "        response = client.post(ui_server.UI_RESET_PATH, json={'fixture': 'missing-fixture'})",
+            "    assert response.status_code == 400",
+            "    assert response.json() == {'detail': 'Unsupported fixture'}",
+            "    assert config_path.read_bytes() == before_config",
+            "    assert preserved.read_bytes() == before_preserved",
+            "finally:",
+            "    ui_server._safe_remove_runtime(runtime)",
+        )
+    )
+
+    completed = subprocess.run(
+        [sys.executable, "-c", child, runtime_parent],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
 
 
 def test_resume_spawns_terminal_carries_copilot_home(monkeypatch, tmp_path, raw_config):

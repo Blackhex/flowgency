@@ -52,7 +52,7 @@ async function pinToSingleLine(locator: Locator) {
   });
 }
 
-const tabs = ['Profile', 'Blueprint', 'Runtime', 'Permissions', 'Routines', 'Prompts', 'Memory', 'Activity'];
+const tabs = ['Profile', 'Blueprint', 'Runtime', 'Permissions', 'Prompts', 'Routines', 'Memory', 'Activity', 'Logs'];
 
 test.beforeEach(async ({ page, request }, testInfo) => {
   await resetUiRuntime(request);
@@ -123,6 +123,11 @@ test('team settings leads to the sole roster and inherited runtime', async ({ pa
 });
 
 test('all agent detail tabs have stable selected semantics and keyboard focus', async ({ page }) => {
+  await page.goto('/newsletter/agents/advisor/profile');
+  const tabNav = page.locator('nav[aria-label="Agent detail tabs"]');
+  await expect(tabNav).toBeVisible();
+  await expect(tabNav.getByRole('tab')).toHaveText(tabs);
+
   for (const tab of tabs) {
     await page.goto('/newsletter/agents/advisor/profile');
     await expectBodyFocus(page);

@@ -14,6 +14,7 @@ const pages = [
   { name: 'Agent Prompts', path: '/newsletter/agents/advisor/prompts', identity: ['tab', 'Prompts'] },
   { name: 'Agent Memory', path: '/newsletter/agents/advisor/memory', identity: ['tab', 'Memory'] },
   { name: 'Agent Activity', path: '/newsletter/agents/advisor/activity', identity: ['tab', 'Activity'] },
+  { name: 'Agent Logs', path: '/newsletter/agents/advisor/logs', identity: ['tab', 'Logs'] },
   { name: 'Dashboard', path: '/newsletter/', identity: ['text', 'Ticket workflows'] },
   { name: 'Agent Library', path: '/admin/agent-library', identity: ['heading', 'Agent Library'] },
   { name: 'Prompt Library', path: '/admin/agent-library/blueprints/advisor/prompts', identity: ['heading', 'Shared prompt source editor'] },

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import dataclasses
+import json
 import os
 from pathlib import Path
 import shutil
@@ -14,6 +15,7 @@ import time
 from urllib.request import urlopen
 
 import yaml
+from fastapi import HTTPException, Request, Response
 
 from flowgency.configuration.models import MemorySelector
 from flowgency.configuration.store import ConfigStore
@@ -37,6 +39,8 @@ RUNTIME_ROOT = RUNTIME_PARENT / "current"
 FIXTURE_CONFIG = Path(__file__).resolve().parent / "fixtures" / "config.yaml"
 FIXED_NOW = "2026-07-16T12:00:00+00:00"
 UI_RESET_PATH = "/__ui/reset"
+ACTIVITY_LOGS_FIXTURE = "agent-activity-logs"
+SUPPORTED_UI_FIXTURES = frozenset({"default", ACTIVITY_LOGS_FIXTURE})
 
 
 def _ui_sitecustomize(runtime: Path) -> Path:
@@ -153,7 +157,6 @@ def _ui_submit_job_request(request, launcher=None) -> JobHandle:
 def _install_ui_test_runtime() -> None:
     import flowgency.jobs.submission as submission_module
     import flowgency.web.dependencies as web_dependencies
-    from fastapi import Response
     from flowgency.app import app
     from tests._ticket_helpers import TicketRuntimeIntegration
 
@@ -169,9 +172,25 @@ def _install_ui_test_runtime() -> None:
         return
 
     @app.post(UI_RESET_PATH, include_in_schema=False)
-    async def reset_ui_runtime() -> Response:
+    async def reset_ui_runtime(request: Request) -> Response:
         runtime_root = Path(os.environ["FLOWGENCY_UI_RUNTIME"])
-        _reset_runtime_state(runtime_root)
+        fixture = "default"
+        content_type = request.headers.get("content-type", "")
+        if content_type.startswith("application/json"):
+            try:
+                payload = await request.json()
+            except json.JSONDecodeError as exc:
+                raise HTTPException(status_code=400, detail="Reset payload must be valid JSON") from exc
+            if payload is not None and not isinstance(payload, dict):
+                raise HTTPException(status_code=400, detail="Reset payload must be an object")
+            if isinstance(payload, dict):
+                raw_fixture = payload.get("fixture")
+                if raw_fixture is not None and not isinstance(raw_fixture, str):
+                    raise HTTPException(status_code=400, detail="fixture must be a string")
+                fixture = str(raw_fixture or "default").strip() or "default"
+        if fixture not in SUPPORTED_UI_FIXTURES:
+            raise HTTPException(status_code=400, detail="Unsupported fixture")
+        _reset_runtime_state(runtime_root, fixture=fixture)
         return Response(status_code=204)
 
     app.state.ui_reset_route_installed = True
@@ -194,6 +213,11 @@ def _clear_directory(path: Path) -> None:
 def _set_mtime(path: Path, value: str) -> None:
     timestamp = datetime.fromisoformat(value).astimezone(timezone.utc).timestamp()
     os.utime(path, (timestamp, timestamp))
+
+
+def _write_log(path: Path, content: str, *, mtime: str) -> None:
+    _write(path, content)
+    _set_mtime(path, mtime)
 
 
 def _replace_runtime(value: object, runtime: Path) -> object:
@@ -518,6 +542,209 @@ def _seed_jobs(runtime: Path, config_path: Path) -> None:
     write_job(active_path, active)
 
 
+def _seed_activity_jobs(runtime: Path, config_path: Path) -> None:
+    authority = JobStore(runtime / "memory-store")
+    authority.team_root("newsletter").mkdir(parents=True, exist_ok=True)
+    logs_day = runtime / "teams" / "newsletter" / "logs" / "2026-09-11"
+    logs_day.mkdir(parents=True, exist_ok=True)
+
+    triage_output = logs_day / "advisor-scheduled_prompt-d03107cc5f8c4d12be2fc74fb462958b.out"
+    triage_error = logs_day / "advisor-scheduled_prompt-d03107cc5f8c4d12be2fc74fb462958b.err"
+    _write_log(
+        triage_output,
+        "Daily control-plane triage\n\nInspected the configured workflow and claimed ticket #12.\n\nFinding: canonical path resolution can hide reparse ancestors from the subsequent validation step.\n\nEvidence\n  configuration.models._path_from_config\n  configuration.paths.validate_resolved_paths\n\nRecorded the findings, proposed a bounded repair, and published the implementation handoff to shared memory.\n",
+        mtime="2026-09-11T23:13:42+00:00",
+    )
+    _write_log(
+        triage_error,
+        "Changes    +0 -0\nAI Credits 1\nTokens     56.2k input / 842 output\n\nSession completed.\n",
+        mtime="2026-09-11T23:13:41+00:00",
+    )
+
+    encoded_output = logs_day / "advisor-demo & łog.out"
+    empty_output = logs_day / "advisor-empty.out"
+    long_output = logs_day / (
+        "advisor-"
+        "ultralongunbrokenlogbasenamefornarrowlayoutverification"
+        "1234567890abcdefghijklmnopqrstuvwxyz"
+        "-artifact.out"
+    )
+    omitted_error = logs_day / "advisor-zero.err"
+    unrelated_output = logs_day / "reviewer-unrelated.out"
+    _write_log(encoded_output, "special encoded filename\n", mtime="2026-09-11T23:08:00+00:00")
+    _write_log(empty_output, "", mtime="2026-09-11T23:07:00+00:00")
+    _write_log(
+        long_output,
+        "UNBROKENCONTENT_" + "X" * 900 + "\nwrapped tail\n",
+        mtime="2026-09-11T23:06:00+00:00",
+    )
+    _write_log(omitted_error, "", mtime="2026-09-11T23:05:00+00:00")
+    _write_log(unrelated_output, "ignore me\n", mtime="2026-09-11T23:04:00+00:00")
+
+    running = JobRecord.from_spec(
+        dataclasses.replace(
+            _job_spec(runtime, config_path, "advisor-running-job"),
+            created_at="2026-09-11T23:38:00+00:00",
+        )
+    )
+    running.status = "running"
+    running.started_at = "2026-09-11T23:38:00+00:00"
+    running.launched_at = "2026-09-11T23:38:00+00:00"
+    running.session_id = "advisor-running-session"
+    running.execution_summary = "Reviewing current configuration and runtime changes."
+    write_job(authority.path("newsletter", "advisor-running-job"), running)
+
+    complete = JobRecord.from_spec(
+        dataclasses.replace(
+            _job_spec(runtime, config_path, "advisor-triage-job"),
+            created_at="2026-09-11T23:09:38+00:00",
+        )
+    )
+    complete.status = "complete"
+    complete.started_at = "2026-09-11T23:09:30+00:00"
+    complete.completed_at = "2026-09-11T23:13:42+00:00"
+    complete.duration_seconds = 252
+    complete.execution_summary = "Recorded the path-validation finding and handed off implementation."
+    complete.stdout_path = str(triage_output.resolve())
+    complete.stderr_path = str(triage_error.resolve())
+    write_job(authority.path("newsletter", "advisor-triage-job"), complete)
+
+    failed = JobRecord.from_spec(
+        dataclasses.replace(
+            _job_spec(runtime, config_path, "advisor-failed-job"),
+            created_at="2026-09-10T18:25:59+00:00",
+        )
+    )
+    failed.status = "failed"
+    failed.started_at = "2026-09-10T18:25:59+00:00"
+    failed.completed_at = "2026-09-10T18:26:00+00:00"
+    failed.duration_seconds = 1
+    failed.execution_summary = "Ticket server could not start. The agent was not invoked."
+    failed.stdout_path = None
+    failed.stderr_path = None
+    write_job(authority.path("newsletter", "advisor-failed-job"), failed)
+
+
+def _seed_activity_ticket_history(runtime: Path) -> None:
+    delivery_root = runtime / "tickets" / "delivery"
+    delivery_provider = LocalTicketStorage(delivery_root, clock=lambda: datetime.fromisoformat(FIXED_NOW))
+    binding = StorageBinding(
+        integration="local",
+        config={"root": str(delivery_root)},
+        team_id="newsletter",
+        workflow_id="delivery",
+    )
+    ticket = _ticket_record(
+        binding,
+        ticket_id="fixture-advisor-history",
+        number=109,
+        title=(
+            "Reject canonical paths crossing reparse ancestors "
+            "with_long_unbroken_identifier_1234567890abcdefghijklmnopqrstuvwxyz"
+        ),
+        description="Agent activity fixture ticket.",
+        state_id="in-progress",
+        assignee="advisor",
+        active_run=ActiveTicketRun(
+            job_id="advisor-running-job",
+            session_id="advisor-running-session",
+            started_at=datetime.fromisoformat("2026-09-11T23:38:00+00:00"),
+        ),
+        events=(
+            TicketEvent(
+                id="fixture-opened",
+                kind="opened",
+                actor="local-user",
+                summary="Ticket created",
+                at=datetime.fromisoformat("2026-09-11T23:09:38+00:00"),
+                data={"job_id": "advisor-triage-job"},
+            ),
+            TicketEvent(
+                id="fixture-started",
+                kind="started-work",
+                actor="advisor",
+                summary="Started work",
+                at=datetime.fromisoformat("2026-09-11T23:10:00+00:00"),
+                data={"job_id": "advisor-triage-job"},
+            ),
+            TicketEvent(
+                id="fixture-transitioned",
+                kind="transitioned",
+                actor="advisor",
+                summary="Start accepted",
+                at=datetime.fromisoformat("2026-09-11T23:10:04+00:00"),
+                data={
+                    "job_id": "advisor-triage-job",
+                    "source_state_name": "Backlog",
+                    "destination_state_name": "In progress",
+                },
+            ),
+            TicketEvent(
+                id="fixture-long-report",
+                kind="reported",
+                actor="advisor",
+                summary=(
+                    "Triage identified and documented the violated invariant. Canonical path resolution runs before the reparse-ancestor check, so symlink and junction ancestors can become invisible to the validator. The proposed repair preserves lexical ancestry until safety validation is complete.\n\n"
+                    "Evidence: configuration.models._path_from_config resolves lexical paths before configuration.paths.validate_resolved_paths. The existing-directory validator also resolves before checking for reparse points.\n\n"
+                    "Record the original path before resolution, reject unsafe ancestors, and retain the current canonical overlap checks. Cover directory symlinks, Windows junctions, missing safe descendants, and ordinary relative paths with focused regressions.\n\n"
+                    "No implementation was made in this run. Keep the ticket in progress for the implementation handoff."
+                ),
+                at=datetime.fromisoformat("2026-09-11T23:12:58+00:00"),
+                data={"job_id": "advisor-triage-job"},
+            ),
+            TicketEvent(
+                id="fixture-short-overflow-report",
+                kind="reported",
+                actor="advisor",
+                summary=(
+                    "Lexical ancestry validation keeps junction visibility across "
+                    "nested workspace recovery boundaries while preserving ordinary "
+                    "relative path checks."
+                ),
+                at=datetime.fromisoformat("2026-09-11T23:12:20+00:00"),
+                data={"job_id": "advisor-triage-job"},
+            ),
+            TicketEvent(
+                id="fixture-ended",
+                kind="ended-work",
+                actor="advisor",
+                summary="Ended active work",
+                at=datetime.fromisoformat("2026-09-11T23:13:29+00:00"),
+                data={"job_id": "advisor-triage-job"},
+            ),
+            TicketEvent(
+                id="fixture-historic-report",
+                kind="reported",
+                actor="advisor",
+                summary="Historical note without provenance remains visible.",
+                at=datetime.fromisoformat("2026-09-11T23:08:30+00:00"),
+                data={},
+            ),
+        ),
+    )
+    delivery_provider.create(ticket, _ticket_operation(ticket.id))
+
+
+def _apply_activity_logs_fixture(runtime: Path, config_path: Path) -> None:
+    memory_root = runtime / "memory-store"
+    _clear_directory(memory_root / ".jobs" / "newsletter")
+    _clear_directory(runtime / "teams" / "newsletter" / "logs")
+
+    ticket_root = runtime / "tickets" / "delivery" / "newsletter" / "delivery" / "tickets"
+    if ticket_root.exists():
+        for child in ticket_root.iterdir():
+            if child.name == ".sequence":
+                continue
+            if child.is_dir():
+                shutil.rmtree(child, ignore_errors=True)
+            else:
+                child.unlink(missing_ok=True)
+        _write(ticket_root / ".sequence", "108")
+
+    _seed_activity_jobs(runtime, config_path)
+    _seed_activity_ticket_history(runtime)
+
+
 def _seed_private_prompts(runtime: Path) -> None:
     PromptStore(runtime / "prompts").create(
         "newsletter",
@@ -556,7 +783,7 @@ def _safe_remove_runtime(runtime: Path) -> None:
     shutil.rmtree(candidate, ignore_errors=True)
 
 
-def _reset_runtime_state(runtime: Path) -> None:
+def _reset_runtime_state(runtime: Path, *, fixture: str = "default") -> None:
     raw = yaml.safe_load(FIXTURE_CONFIG.read_text(encoding="utf-8"))
     config = _replace_runtime(raw, runtime)
     _write_runtime_config(runtime / "config.yaml", config)
@@ -570,14 +797,18 @@ def _reset_runtime_state(runtime: Path) -> None:
     _clear_directory(memory_root / ".jobs" / "research")
 
     for path in (
-        runtime / "teams" / "newsletter" / "logs" / "2026-07-16",
-        runtime / "teams" / "research" / "logs" / "2026-07-16",
+        runtime / "teams" / "newsletter" / "logs",
+        runtime / "teams" / "research" / "logs",
     ):
         _clear_directory(path)
 
     _seed_memory(runtime, config)
     _seed_ticket_workflows(runtime, config)
     _seed_jobs(runtime, runtime / "config.yaml")
+    if fixture == ACTIVITY_LOGS_FIXTURE:
+        _apply_activity_logs_fixture(runtime, runtime / "config.yaml")
+    elif fixture != "default":
+        raise ValueError(f"Unknown UI fixture: {fixture}")
 
 
 def _prepare_runtime() -> tuple[Path, Path]:
