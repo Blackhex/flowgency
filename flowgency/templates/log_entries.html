@@ -1,7 +1,7 @@
 {% for date, entries in logs.items() %}
 <div class="mb-6">
   <h2 class="mb-2 text-sm font-semibold uppercase tracking-wider text-gray-500">{{ date }}</h2>
-  <ul class="divide-y divide-gray-100 rounded-lg border border-gray-200 bg-white" role="list">
+  <ul class="divide-y divide-gray-100 rounded-lg border border-gray-200 bg-white dark:divide-slate-700" role="list">
     {% for e in entries %}
     <li>
     <a href="{{ e.href }}" aria-label="{{ e.name }}" class="block px-4 py-2.5 transition-colors hover:bg-gray-50">

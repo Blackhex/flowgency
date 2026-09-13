@@ -273,6 +273,20 @@ def test_agent_logs_tab_uses_execution_logs(monkeypatch, tmp_path, raw_config):
     assert config_path.read_bytes() == before
 
 
+def test_agent_logs_tab_uses_exact_empty_copy(monkeypatch, tmp_path, raw_config):
+    client, config_path, log_file = _seed_activity_app(monkeypatch, tmp_path, raw_config)
+    before = config_path.read_bytes()
+    log_file.unlink()
+
+    response = client.get("/newsletter-prod/agents/advisor/logs")
+
+    assert response.status_code == 200
+    assert "Execution Logs" in response.text
+    assert "No logs found." in response.text
+    assert "No logs yet" not in response.text
+    assert config_path.read_bytes() == before
+
+
 def test_agent_logs_tab_is_not_truncated_to_eight_files(monkeypatch, tmp_path, raw_config):
     client, _config_path, log_file = _seed_activity_app(monkeypatch, tmp_path, raw_config)
     day = log_file.parent
