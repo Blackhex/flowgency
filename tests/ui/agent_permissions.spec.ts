@@ -4,6 +4,8 @@ import { assertNoConsoleErrors, assertNoLayoutIssues, installBasePageSetup } fro
 
 const advisorPath = '/newsletter/agents/advisor/permissions';
 const fixturePath = '/research/agents/permissions-editor/permissions';
+const portableCheckoutPrefix = 'C:/portable-checkout/';
+const runtimePathMarker = 'tests/ui/.runtime/current/';
 const runtimeWorkspaceText = 'tests/ui/.runtime/current/workspaces/newsletter';
 const runtimeEditorialSuffix = /tests\/ui\/\.runtime\/current\/teams\/newsletter\/editorial$/;
 const longRulePath = 'workspace/teams/newsletter/' + [
@@ -40,6 +42,12 @@ function permissionFooter(page: Page) {
   return page.locator('.permission-footer-copy');
 }
 
+type PortableRuntimeSnapshotChange = {
+  original: string;
+  normalized: string;
+  suffix: string;
+};
+
 async function pinMaskedTextWidth(locator: Locator, width: string) {
   await locator.evaluateAll((elements, maskWidth) => {
     for (const element of elements as HTMLElement[]) {
@@ -63,6 +71,79 @@ function permissionVariableTextMasks(
     masks.push(page.locator('[data-rule-path]'));
   }
   return masks;
+}
+
+function normalizePortableRuntimePath(path: string): PortableRuntimeSnapshotChange | null {
+  const markerIndex = path.indexOf(runtimePathMarker);
+  if (markerIndex === -1) {
+    return null;
+  }
+  const suffix = path.slice(markerIndex);
+  return {
+    original: path,
+    normalized: `${portableCheckoutPrefix}${suffix}`,
+    suffix,
+  };
+}
+
+async function withPortablePermissionRuntimePaths<T>(
+  page: Page,
+  action: (changes: PortableRuntimeSnapshotChange[]) => Promise<T>,
+): Promise<T> {
+  const changes = await page.evaluate(({ marker, prefix }) => {
+    const records: PortableRuntimeSnapshotChange[] = [];
+    const seen = new Set<Element>();
+    const selectors = ['#permission-summary p', '[data-rule-path]', '[data-portable-runtime-display]'];
+
+    for (const selector of selectors) {
+      for (const element of document.querySelectorAll<HTMLElement>(selector)) {
+        if (seen.has(element)) {
+          continue;
+        }
+        seen.add(element);
+
+        const isField = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement;
+        const original = isField ? element.value : element.textContent ?? '';
+        const markerIndex = original.indexOf(marker);
+        if (markerIndex === -1) {
+          continue;
+        }
+
+        const suffix = original.slice(markerIndex);
+        const normalized = `${prefix}${suffix}`;
+
+        if (!element.hasAttribute('data-portable-runtime-original')) {
+          element.setAttribute('data-portable-runtime-original', original);
+        }
+
+        if (isField) {
+          element.value = normalized;
+        } else {
+          element.textContent = normalized;
+        }
+
+        records.push({ original, normalized, suffix });
+      }
+    }
+
+    return records;
+  }, { marker: runtimePathMarker, prefix: portableCheckoutPrefix });
+
+  try {
+    return await action(changes);
+  } finally {
+    await page.evaluate(() => {
+      for (const element of document.querySelectorAll<HTMLElement>('[data-portable-runtime-original]')) {
+        const original = element.getAttribute('data-portable-runtime-original') ?? '';
+        if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+          element.value = original;
+        } else {
+          element.textContent = original;
+        }
+        element.removeAttribute('data-portable-runtime-original');
+      }
+    });
+  }
 }
 
 function parseInitialPayload(html: string): InitialPayload {
@@ -106,6 +187,88 @@ test.beforeEach(async ({ page }, testInfo) => {
   await page.addStyleTag({ content: '* { animation: none !important; transition: none !important; caret-color: transparent !important; }' });
 });
 
+test('portable runtime path normalization preserves suffixes, geometry, and restoration', async ({ page }) => {
+  await page.goto(advisorPath);
+
+  const mainSummaryPath = 'C:/Projekty/Flowgency/tests/ui/.runtime/current/teams/newsletter/editorial';
+  const worktreeSummaryPath = 'C:/Projekty/Flowgency/.worktrees/agent-activity-logs/tests/ui/.runtime/current/teams/newsletter/editorial';
+  const mainRulePath = 'C:/Projekty/Flowgency/tests/ui/.runtime/current/workspaces/newsletter';
+  const worktreeRulePath = 'C:/Projekty/Flowgency/.worktrees/agent-activity-logs/tests/ui/.runtime/current/workspaces/newsletter';
+
+  await page.evaluate(({ mainSummaryPath: mainSummary, worktreeSummaryPath: worktreeSummary, mainRulePath: mainRule, worktreeRulePath: worktreeRule }) => {
+    const fixture = document.createElement('section');
+    fixture.setAttribute('data-portable-runtime-fixture', '');
+    fixture.style.width = '13rem';
+    fixture.style.font = 'inherit';
+    fixture.style.position = 'absolute';
+    fixture.style.left = '0';
+    fixture.style.top = '0';
+    fixture.style.pointerEvents = 'none';
+    fixture.style.opacity = '0';
+    fixture.innerHTML = `
+      <div>
+        <p data-portable-runtime-display="main-summary">${mainSummary}</p>
+        <p data-portable-runtime-display="worktree-summary">${worktreeSummary}</p>
+        <input data-rule-path data-portable-runtime-input="main-rule" value="${mainRule}">
+        <input data-rule-path data-portable-runtime-input="worktree-rule" value="${worktreeRule}">
+      </div>
+    `;
+    document.body.appendChild(fixture);
+  }, {
+    mainSummaryPath,
+    worktreeSummaryPath,
+    mainRulePath,
+    worktreeRulePath,
+  });
+
+  const summaryTexts = page.locator('[data-portable-runtime-display]');
+  await expect(summaryTexts).toHaveCount(2);
+
+  await withPortablePermissionRuntimePaths(page, async (changes) => {
+    expect(changes.some((change) => change.original === mainSummaryPath && change.suffix === 'tests/ui/.runtime/current/teams/newsletter/editorial')).toBe(true);
+    expect(changes.some((change) => change.original === worktreeSummaryPath && change.suffix === 'tests/ui/.runtime/current/teams/newsletter/editorial')).toBe(true);
+    expect(changes.some((change) => change.original === mainRulePath && change.suffix === 'tests/ui/.runtime/current/workspaces/newsletter')).toBe(true);
+    expect(changes.some((change) => change.original === worktreeRulePath && change.suffix === 'tests/ui/.runtime/current/workspaces/newsletter')).toBe(true);
+
+    await expect(summaryTexts.nth(0)).toHaveText('C:/portable-checkout/tests/ui/.runtime/current/teams/newsletter/editorial');
+    await expect(summaryTexts.nth(1)).toHaveText('C:/portable-checkout/tests/ui/.runtime/current/teams/newsletter/editorial');
+
+    const normalizedMetrics = await page.evaluate(() => {
+      const summaries = Array.from(document.querySelectorAll<HTMLElement>('[data-portable-runtime-display]')).map((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          text: element.textContent ?? '',
+          width: rect.width,
+          height: rect.height,
+        };
+      });
+      const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('[data-portable-runtime-input]')).map((element) => ({
+        value: element.value,
+      }));
+      return { summaries, inputs };
+    });
+
+    expect(normalizedMetrics.summaries).toHaveLength(2);
+    expect(normalizedMetrics.inputs).toHaveLength(2);
+    expect(normalizedMetrics.summaries[0]?.text).toBe(normalizedMetrics.summaries[1]?.text);
+    expect(normalizedMetrics.summaries[0]?.width).toBe(normalizedMetrics.summaries[1]?.width);
+    expect(normalizedMetrics.summaries[0]?.height).toBe(normalizedMetrics.summaries[1]?.height);
+    expect(normalizedMetrics.inputs[0]?.value).toBe('C:/portable-checkout/tests/ui/.runtime/current/workspaces/newsletter');
+    expect(normalizedMetrics.inputs[1]?.value).toBe('C:/portable-checkout/tests/ui/.runtime/current/workspaces/newsletter');
+  });
+
+  const restoredMetrics = await page.evaluate(() => ({
+    summaries: Array.from(document.querySelectorAll<HTMLElement>('[data-portable-runtime-display]')).map((element) => element.textContent ?? ''),
+    inputs: Array.from(document.querySelectorAll<HTMLInputElement>('[data-portable-runtime-input]')).map((element) => element.value),
+  }));
+
+  expect(restoredMetrics.summaries).toEqual([mainSummaryPath, worktreeSummaryPath]);
+  expect(restoredMetrics.inputs).toEqual([mainRulePath, worktreeRulePath]);
+
+  await page.locator('[data-portable-runtime-fixture]').evaluate((element) => element.remove());
+  await assertNoConsoleErrors(page);
+});
+
 test('permissions editor layout remains stable', async ({ page }) => {
   await page.goto(advisorPath);
   await expect(page.getByRole('heading', { name: 'Permissions', exact: true })).toBeVisible();
@@ -115,9 +278,11 @@ test('permissions editor layout remains stable', async ({ page }) => {
   await expect(permissionFooter(page)).toHaveText(/Config revision: [0-9a-f]{64}/);
   await pinMaskedTextWidth(permissionFooter(page), '44rem');
   await assertNoLayoutIssues(page);
-  await expect(page).toHaveScreenshot('agent-permissions.png', {
-    fullPage: true,
-    mask: permissionVariableTextMasks(page),
+  await withPortablePermissionRuntimePaths(page, async () => {
+    await expect(page).toHaveScreenshot('agent-permissions.png', {
+      fullPage: true,
+      mask: permissionVariableTextMasks(page),
+    });
   });
   await assertNoConsoleErrors(page);
 });
@@ -134,9 +299,11 @@ test('empty permissions state remains stable', async ({ page }) => {
   await expect(permissionFooter(page)).toHaveText(/Config revision: [0-9a-f]{64}/);
   await pinMaskedTextWidth(permissionFooter(page), '44rem');
   await assertNoLayoutIssues(page);
-  await expect(page).toHaveScreenshot('agent-permissions-empty.png', {
-    fullPage: true,
-    mask: permissionVariableTextMasks(page, { includeRulePathInputs: false }),
+  await withPortablePermissionRuntimePaths(page, async () => {
+    await expect(page).toHaveScreenshot('agent-permissions-empty.png', {
+      fullPage: true,
+      mask: permissionVariableTextMasks(page, { includeRulePathInputs: false }),
+    });
   });
   await assertNoConsoleErrors(page);
 });
@@ -312,9 +479,11 @@ test('long path permissions state remains stable', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Save permissions', exact: true })).toBeEnabled();
   await pinMaskedTextWidth(permissionFooter(page), '44rem');
   await assertNoLayoutIssues(page);
-  await expect(page).toHaveScreenshot('agent-permissions-long-path.png', {
-    fullPage: true,
-    mask: permissionVariableTextMasks(page, { includeRulePathInputs: false }),
+  await withPortablePermissionRuntimePaths(page, async () => {
+    await expect(page).toHaveScreenshot('agent-permissions-long-path.png', {
+      fullPage: true,
+      mask: permissionVariableTextMasks(page, { includeRulePathInputs: false }),
+    });
   });
   await assertNoConsoleErrors(page);
 });
