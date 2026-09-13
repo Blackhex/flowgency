@@ -68,7 +68,7 @@ from flowgency.web import FlowgencyServices, build_services, get_services
 from flowgency.web.job_presentation import load_team_jobs
 from flowgency.web.logs import collect_agent_logs
 from flowgency.web.logs import collect_logs as _collect_logs
-from flowgency.web.logs import with_log_links
+from flowgency.web.logs import describe_log_file, log_belongs_to_agent, with_log_links
 from flowgency.web.log_preview import read_log_preview
 from flowgency.web.state import flowgency_settings, runtime_team
 from flowgency.web.team_navigation import build_team_context
@@ -1844,10 +1844,12 @@ def _log_view_context(
     file_path = Path(path)
     logs_dir = Path(group["logs"]).resolve()
     validate_file_access(file_path, logs_dir)
-    try:
-        preview = read_log_preview(file_path)
-    except FileNotFoundError:
+    status, safe_file = describe_log_file(file_path, logs_dir)
+    if status == "missing":
         raise HTTPException(404, "Log not found")
+    if safe_file is None:
+        raise HTTPException(403, "Access denied")
+    file_path = Path(safe_file["path"])
     return_label = "Back to logs"
     return_href = f"/{quote(team, safe='')}/logs"
     if agent is not None or source is not None:
@@ -1863,22 +1865,21 @@ def _log_view_context(
             raise HTTPException(404, "Unknown agent")
         services = _services()
         records, _warnings = load_team_jobs(services.job_store, team)
-        available = collect_agent_logs(
+        if not log_belongs_to_agent(
+            file_path,
             resolve_team_paths(team_cfg).logs,
             team,
             agent,
             records,
             tuple(team_cfg.agents.keys()),
-        )
-        allowed_paths = {
-            entry["path"]
-            for entries in available.values()
-            for entry in entries
-        }
-        if str(file_path.resolve(strict=False)) not in allowed_paths:
+        ):
             raise HTTPException(403, "Access denied")
         return_label = "Back to Activity" if source == "activity" else "Back to Logs"
         return_href = f"/{quote(team, safe='')}/agents/{quote(agent, safe='')}/{source}"
+    try:
+        preview = read_log_preview(file_path)
+    except FileNotFoundError:
+        raise HTTPException(404, "Log not found")
     return {
         **team_context(group),
         "filename": file_path.name,

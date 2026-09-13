@@ -352,6 +352,48 @@ def test_log_route_missing_file_is_404(preview_team):
     assert response.status_code == 404
 
 
+def test_log_route_forbids_non_log_file_inside_root_before_preview(preview_team, monkeypatch):
+    path = preview_team / "secrets.md"
+    path.write_text("top secret", encoding="utf-8")
+    before = path.read_bytes()
+
+    def fail_preview(_path: Path):
+        raise AssertionError("read_log_preview must not run for unsupported files")
+
+    monkeypatch.setattr(app_mod, "read_log_preview", fail_preview)
+
+    response = TestClient(app_mod.app).get("/test/logs/view", params={"path": str(path)})
+
+    assert response.status_code == 403
+    assert path.read_bytes() == before
+
+
+def test_log_route_forbids_hidden_and_reparse_ancestor_paths_before_preview(preview_team, monkeypatch, tmp_path):
+    hidden_dir = preview_team / ".hidden"
+    hidden_dir.mkdir()
+    hidden_path = hidden_dir / "agent-run.out"
+    hidden_path.write_text("hidden", encoding="utf-8")
+
+    real_dir = preview_team / "real"
+    real_dir.mkdir()
+    safe_target = real_dir / "agent-run.out"
+    safe_target.write_text("linked", encoding="utf-8")
+    linked_dir = preview_team / "linked"
+    _make_reparse(linked_dir, real_dir)
+    linked_path = linked_dir / "agent-run.out"
+
+    def fail_preview(_path: Path):
+        raise AssertionError("read_log_preview must not run for unsafe files")
+
+    monkeypatch.setattr(app_mod, "read_log_preview", fail_preview)
+
+    hidden_response = TestClient(app_mod.app).get("/test/logs/view", params={"path": str(hidden_path)})
+    linked_response = TestClient(app_mod.app).get("/test/logs/view", params={"path": str(linked_path)})
+
+    assert hidden_response.status_code == 403
+    assert linked_response.status_code == 403
+
+
 def test_log_view_returns_to_agent_logs_with_valid_context(monkeypatch, tmp_path, raw_config):
     client, _config_path, log_file = _seed_activity_app(monkeypatch, tmp_path, raw_config)
 
@@ -390,6 +432,11 @@ def test_log_view_returns_to_agent_activity_with_valid_context(monkeypatch, tmp_
 def test_log_view_rejects_invalid_agent_context_without_redirect(monkeypatch, tmp_path, raw_config, params, expected_status):
     client, _config_path, log_file = _seed_activity_app(monkeypatch, tmp_path, raw_config)
 
+    def fail_preview(_path: Path):
+        raise AssertionError("read_log_preview must not run for invalid agent context")
+
+    monkeypatch.setattr(app_mod, "read_log_preview", fail_preview)
+
     response = client.get(
         "/newsletter-prod/logs/view",
         params={"path": str(log_file), **params},
@@ -418,6 +465,11 @@ def test_log_view_forbids_agent_context_for_unscoped_file(monkeypatch, tmp_path,
     app_mod.refresh_services()
     app_mod.app.state.services = app_mod.build_services(config_path)
 
+    def fail_preview(_path: Path):
+        raise AssertionError("read_log_preview must not run for unscoped agent logs")
+
+    monkeypatch.setattr(app_mod, "read_log_preview", fail_preview)
+
     response = client.get(
         "/newsletter-prod/logs/view",
         params={"path": str(other_log), "agent": "advisor", "source": "logs"},
@@ -426,6 +478,20 @@ def test_log_view_forbids_agent_context_for_unscoped_file(monkeypatch, tmp_path,
 
     assert response.status_code == 403
     assert "location" not in response.headers
+
+
+def test_log_view_accepts_top_level_output_with_valid_agent_context(monkeypatch, tmp_path, raw_config):
+    client, _config_path, _log_file = _seed_activity_app(monkeypatch, tmp_path, raw_config)
+    top_level = tmp_path / "groups" / "newsletter-workspace" / "logs" / "advisor-top-level.out"
+    top_level.write_text("top-level", encoding="utf-8")
+
+    response = client.get(
+        "/newsletter-prod/logs/view",
+        params={"path": str(top_level), "agent": "advisor", "source": "logs"},
+    )
+
+    assert response.status_code == 200
+    assert "top-level" in response.text
 
 
 def test_log_view_accepts_special_characters_in_valid_agent_context(monkeypatch, tmp_path, raw_config):

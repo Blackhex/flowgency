@@ -494,7 +494,7 @@ def _detail_context(
             )
         )
     elif tab == "logs":
-        records, _warnings = load_team_jobs(services.job_store, team_id)
+        records, warnings = load_team_jobs(services.job_store, team_id)
         groups = collect_agent_logs(
             resolve_team_paths(team_cfg).logs,
             team_id,
@@ -507,6 +507,7 @@ def _detail_context(
             {
                 "logs": with_log_links(groups, team_id, agent_id=agent_id, source="logs"),
                 "log_count": log_count,
+                "log_warnings": warnings,
             }
         )
     # Merge handler-supplied issues with any tab-supplied issues, dedup on (code, field, message).

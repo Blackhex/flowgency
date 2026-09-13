@@ -287,6 +287,60 @@ def test_agent_logs_tab_uses_exact_empty_copy(monkeypatch, tmp_path, raw_config)
     assert config_path.read_bytes() == before
 
 
+def test_agent_logs_tab_surfaces_job_warnings_without_hiding_readable_logs(monkeypatch, tmp_path, raw_config):
+    client, config_path, log_file = _seed_activity_app(monkeypatch, tmp_path, raw_config)
+    team_root = tmp_path / "groups" / "newsletter-workspace"
+    broken_path = (tmp_path / "memory-store" / ".jobs" / "newsletter-prod" / "broken-logs.yaml")
+    broken_path.parent.mkdir(parents=True, exist_ok=True)
+    broken_path.write_text("not: [valid", encoding="utf-8")
+    misplaced_source = _write_job_record(
+        team_root,
+        config_path,
+        team_id="newsletter-prod",
+        job_id="job-misplaced",
+        status="queued",
+    )
+    misplaced_path = misplaced_source.with_name("misplaced.yaml")
+    misplaced_path.write_bytes(misplaced_source.read_bytes())
+    misplaced_source.unlink()
+    before_config = config_path.read_bytes()
+    before_log = log_file.read_bytes()
+    before_broken = broken_path.read_bytes()
+    before_misplaced = misplaced_path.read_bytes()
+
+    response = client.get("/newsletter-prod/agents/advisor/logs")
+
+    assert response.status_code == 200
+    assert log_file.name in response.text
+    assert "1 file" in response.text
+    assert "Skipped unreadable job record: broken-logs.yaml" in response.text
+    assert "Skipped misplaced job record: misplaced.yaml" in response.text
+    assert config_path.read_bytes() == before_config
+    assert log_file.read_bytes() == before_log
+    assert broken_path.read_bytes() == before_broken
+    assert misplaced_path.read_bytes() == before_misplaced
+
+
+def test_agent_logs_tab_keeps_warnings_visible_when_no_logs_remain(monkeypatch, tmp_path, raw_config):
+    client, config_path, log_file = _seed_activity_app(monkeypatch, tmp_path, raw_config)
+    broken_path = tmp_path / "memory-store" / ".jobs" / "newsletter-prod" / "broken-logs.yaml"
+    broken_path.parent.mkdir(parents=True, exist_ok=True)
+    broken_path.write_text("not: [valid", encoding="utf-8")
+    before_config = config_path.read_bytes()
+    before_broken = broken_path.read_bytes()
+    before_log = log_file.read_bytes()
+    log_file.unlink()
+
+    response = client.get("/newsletter-prod/agents/advisor/logs")
+
+    assert response.status_code == 200
+    assert "No logs found." in response.text
+    assert "Skipped unreadable job record: broken-logs.yaml" in response.text
+    assert config_path.read_bytes() == before_config
+    assert broken_path.read_bytes() == before_broken
+    assert before_log.strip() == b"# log"
+
+
 def test_agent_logs_tab_is_not_truncated_to_eight_files(monkeypatch, tmp_path, raw_config):
     client, _config_path, log_file = _seed_activity_app(monkeypatch, tmp_path, raw_config)
     day = log_file.parent
@@ -919,10 +973,10 @@ def test_activity_event_log_links_use_exact_originating_job_and_never_guess(work
             "events": current_record.events
             + (
                 TicketEvent(
-                    id="legacy-builder-note",
+                    id="historic-builder-note",
                     kind="reported",
                     actor="builder",
-                    summary="Legacy builder note",
+                    summary="Historic builder note",
                     data={},
                     at=current_record.updated_at,
                 ),
@@ -955,7 +1009,7 @@ def test_activity_event_log_links_use_exact_originating_job_and_never_guess(work
     assert response.status_code == 200
     start_row = _activity_row(response.text, "Started work")
     report_row = _activity_row(response.text, "Shared builder note")
-    legacy_row = _activity_row(response.text, "Legacy builder note")
+    historic_row = _activity_row(response.text, "Historic builder note")
     forged_row = _activity_row(response.text, "Forged builder note")
     escaped_row = _activity_row(response.text, "Escaped terminal job")
 
@@ -968,8 +1022,8 @@ def test_activity_event_log_links_use_exact_originating_job_and_never_guess(work
     assert Path(unquote(shared_params["path"][0])) != latest_output.resolve()
     assert not _hrefs_for_label(start_row, "Error")
     assert not _hrefs_for_label(report_row, "Error")
-    assert "No logs available" in legacy_row
-    assert not _hrefs_for_label(legacy_row, "Output")
+    assert "No logs available" in historic_row
+    assert not _hrefs_for_label(historic_row, "Output")
     assert "No logs available" in forged_row
     assert not _hrefs_for_label(forged_row, "Output")
     assert "No logs available" in escaped_row

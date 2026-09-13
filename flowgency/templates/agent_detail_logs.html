@@ -4,6 +4,16 @@
     <p class="text-sm font-mono text-gray-500 dark:text-gray-400">{{ log_count }} file{{ '' if log_count == 1 else 's' }}</p>
   </div>
 
+  {% if log_warnings %}
+  <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100">
+    <ul class="space-y-1">
+      {% for warning in log_warnings %}
+      <li>{{ warning }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
   {% if logs %}
   {% include "log_entries.html" %}
   {% else %}

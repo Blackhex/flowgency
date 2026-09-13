@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import os
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode
@@ -30,27 +31,64 @@ def _is_confined(path: Path, root: Path) -> bool:
     return True
 
 
-def _safe_file_entry(path: Path, root: Path) -> dict[str, Any] | None:
-    if path.name.startswith(".") or path.suffix.lower() not in _SUPPORTED_SUFFIXES:
-        return None
-    if is_symlink_or_reparse(path) or not _is_confined(path, root):
-        return None
+def _lexical_path(path: Path) -> Path:
+    return Path(os.path.abspath(os.fspath(path)))
+
+
+def _has_hidden_or_reparse_ancestor(path: Path, root: Path) -> bool:
+    lexical_root = _lexical_path(root)
+    lexical_path = _lexical_path(path)
     try:
-        if not path.is_file():
-            return None
-        file_stat = path.stat()
+        relative = lexical_path.relative_to(lexical_root)
+    except ValueError:
+        return True
+    current = lexical_root
+    for part in relative.parts:
+        current = current / part
+        if current.name.startswith("."):
+            return True
+        if is_symlink_or_reparse(current):
+            return True
+    return False
+
+
+def describe_log_file(path: Path, root: Path) -> tuple[str, dict[str, Any] | None]:
+    candidate = Path(path)
+    trusted_root = Path(root).resolve(strict=False)
+    if candidate.name.startswith(".") or candidate.suffix.lower() not in _SUPPORTED_SUFFIXES:
+        return "denied", None
+    if _has_hidden_or_reparse_ancestor(candidate, trusted_root):
+        return "denied", None
+    if not _is_confined(candidate, trusted_root):
+        return "denied", None
+    try:
+        if not candidate.exists():
+            return "missing", None
+        if not candidate.is_file() or is_symlink_or_reparse(candidate):
+            return "denied", None
+        if not os.access(candidate, os.R_OK):
+            return "denied", None
+        file_stat = candidate.stat()
     except OSError:
-        return None
+        return "denied", None
     size = file_stat.st_size
-    if _is_empty_error_log(path, size):
-        return None
-    return {
-        "name": path.name,
-        "path": str(path.resolve(strict=False)),
-        "suffix": path.suffix,
+    if _is_empty_error_log(candidate, size):
+        return "denied", None
+    resolved = candidate.resolve(strict=False)
+    return "ok", {
+        "name": candidate.name,
+        "path": str(resolved),
+        "suffix": candidate.suffix,
         "size": size,
         "timestamp": datetime.fromtimestamp(file_stat.st_mtime),
     }
+
+
+def _safe_file_entry(path: Path, root: Path) -> dict[str, Any] | None:
+    status, entry = describe_log_file(path, root)
+    if status != "ok":
+        return None
+    return entry
 
 
 def _iter_date_entries(logs_root: Path):
@@ -98,6 +136,58 @@ def _fallback_agent_owner(filename: str, agent_names: tuple[str, ...]) -> str | 
     return longest_matches[0]
 
 
+def _known_agent_names(
+    records: tuple[JobRecord, ...], configured_agent_names: tuple[str, ...]
+) -> tuple[str, ...]:
+    recorded_owners = {record.spec.agent_name for record in records}
+    return tuple(
+        sorted(
+            set(configured_agent_names) | recorded_owners,
+            key=lambda value: (-len(value), value),
+        )
+    )
+
+
+def _exact_log_owners(
+    records: tuple[JobRecord, ...], root: Path
+) -> dict[str, tuple[str, str]]:
+    exact_owners: dict[str, tuple[str, str]] = {}
+    for record in records:
+        for candidate_path in (record.stdout_path, record.stderr_path):
+            if not candidate_path:
+                continue
+            candidate = _safe_file_entry(Path(candidate_path), root)
+            if candidate is None:
+                continue
+            exact_owners[_path_key(Path(candidate["path"]))] = (
+                record.spec.team_key,
+                record.spec.agent_name,
+            )
+    return exact_owners
+
+
+def log_belongs_to_agent(
+    path: Path,
+    logs_root: Path,
+    team_id: str,
+    agent_id: str,
+    records: tuple[JobRecord, ...],
+    configured_agent_names: tuple[str, ...],
+) -> bool:
+    status, entry = describe_log_file(path, logs_root)
+    if status != "ok" or entry is None:
+        return False
+    root = Path(logs_root).resolve(strict=False)
+    owner = _exact_log_owners(records, root).get(_path_key(Path(entry["path"])))
+    if owner is not None:
+        return owner == (team_id, agent_id)
+    fallback_owner = _fallback_agent_owner(
+        entry["name"],
+        _known_agent_names(records, configured_agent_names),
+    )
+    return fallback_owner == agent_id
+
+
 def collect_logs(group: dict) -> dict[str, list[dict]]:
     logs_root = Path(group["logs"])
     result: dict[str, list[dict]] = {}
@@ -121,26 +211,15 @@ def collect_agent_logs(
     configured_agent_names: tuple[str, ...],
 ) -> dict[str, list[dict]]:
     root = Path(logs_root)
-    recorded_owners = {record.spec.agent_name for record in records}
-    agent_names = tuple(sorted(set(configured_agent_names) | recorded_owners, key=lambda value: (-len(value), value)))
-    exact_owners: dict[str, tuple[str, str]] = {}
-    for record in records:
-        for candidate_path in (record.stdout_path, record.stderr_path):
-            if not candidate_path:
-                continue
-            candidate = _safe_file_entry(Path(candidate_path), root.resolve(strict=False))
-            if candidate is None:
-                continue
-            exact_owners[_path_key(Path(candidate["path"]))] = (
-                record.spec.team_key,
-                record.spec.agent_name,
-            )
+    trusted_root = root.resolve(strict=False)
+    agent_names = _known_agent_names(records, configured_agent_names)
+    exact_owners = _exact_log_owners(records, trusted_root)
 
     result: dict[str, list[dict]] = {}
     for date_key, children in _iter_date_entries(root):
         entries = []
         for child in children:
-            entry = _safe_file_entry(child, root.resolve(strict=False))
+            entry = _safe_file_entry(child, trusted_root)
             if entry is None:
                 continue
             owner = exact_owners.get(_path_key(Path(entry["path"])))
@@ -223,7 +302,9 @@ def with_log_links(
 __all__ = [
     "collect_agent_logs",
     "collect_logs",
+    "describe_log_file",
     "job_log_links",
+    "log_belongs_to_agent",
     "log_href",
     "with_log_links",
 ]
