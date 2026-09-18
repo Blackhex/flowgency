@@ -10,8 +10,8 @@ from flowgency.jobs.store import TERMINAL_STATUSES
 from flowgency.tickets.artifacts import iter_internal_artifact_refs
 from flowgency.tickets.errors import TicketStorageError, WorkflowUnavailable
 from flowgency.tickets.git_evidence import (
-    GIT_EVIDENCE_EVENT_KIND,
     GitEvidenceManifest,
+    captured_artifact_ids,
     validate_git_artifact,
 )
 from flowgency.tickets.models import TicketEvent, TicketRecord, TicketRef, TicketVersion, TicketView, UserTicketContext
@@ -515,7 +515,7 @@ class TicketGitEvidence:
         self._record = record
         self._provider = provider
         self._ref = ref
-        self._trusted = _captured_artifact_ids(record)
+        self._trusted = captured_artifact_ids(record)
         self._cache: dict[
             str, tuple[GitEvidenceSummaryView | None, ViewIssue | None]
         ] = {}
@@ -538,20 +538,6 @@ class TicketGitEvidence:
         except TicketStorageError as error:
             return None, ViewIssue(code=error.code, message=error.message)
         return git_evidence_summary(artifact_id, manifest), None
-
-
-def _captured_artifact_ids(record: TicketRecord) -> frozenset[str]:
-    ids: set[str] = set()
-    for event in record.events:
-        if event.kind != GIT_EVIDENCE_EVENT_KIND or not isinstance(event.data, dict):
-            continue
-        payload = event.data.get("capture")
-        if not isinstance(payload, dict):
-            continue
-        artifact_id = payload.get("artifact_id")
-        if isinstance(artifact_id, str) and artifact_id:
-            ids.add(artifact_id)
-    return frozenset(ids)
 
 
 def _artifact_id_of(value: Any) -> str | None:

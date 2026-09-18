@@ -263,7 +263,10 @@ async def job_detail(request: Request, team: str, job_id: str, artifact: str = "
     if not path.exists():
         raise HTTPException(status_code=404, detail="Job not found")
     record = read_job(path)
-    context = _job_detail_context(snapshot, team, record, services.tickets)
+    # The context build scans the team's tickets and reads retained artifacts.
+    context = await run_in_threadpool(
+        _job_detail_context, snapshot, team, record, services.tickets
+    )
     return _templates(request).TemplateResponse(
         request,
         "job_detail.html",

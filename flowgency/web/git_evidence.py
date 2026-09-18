@@ -9,8 +9,9 @@ readable after the project's configuration moves on.
 
 from __future__ import annotations
 
+from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Literal
 
 from unidiff import PatchSet
 from unidiff.errors import UnidiffParseError
@@ -20,8 +21,8 @@ from flowgency.jobs.models import JobRecord
 from flowgency.tickets.artifacts import RetainedArtifact
 from flowgency.tickets.errors import TicketStorageError
 from flowgency.tickets.git_evidence import (
-    GIT_EVIDENCE_EVENT_KIND,
     GitEvidenceManifest,
+    captured_artifact_ids as _captured_artifact_ids,
     validate_git_artifact,
 )
 from flowgency.tickets.models import TicketRecord, TicketRef, UserTicketContext
@@ -46,6 +47,23 @@ PREVIEW_UNAVAILABLE_FORMAT = (
 _PARSE_FAILURES = (UnidiffParseError, AttributeError, IndexError, KeyError, ValueError)
 
 _LINE_KINDS: dict[str, str] = {"+": "added", "-": "removed", " ": "context"}
+
+_C_ESCAPES: dict[str, int] = {
+    "a": 0x07,
+    "b": 0x08,
+    "t": 0x09,
+    "n": 0x0A,
+    "v": 0x0B,
+    "f": 0x0C,
+    "r": 0x0D,
+    '"': 0x22,
+    "\\": 0x5C,
+}
+_OCTAL_DIGITS = frozenset("01234567")
+
+# A NUL can never appear in a Git path, so an undecodable header name matches
+# no manifest entry instead of being attributed to the wrong file.
+_UNDECODABLE = "\0"
 
 
 @dataclass(frozen=True)
@@ -86,12 +104,80 @@ def _change(entry) -> GitFileChange:
     )
 
 
-def _strip_prefix(name: str | None) -> str | None:
-    if not name or name == "/dev/null":
-        return None
+def _strip_prefix(name: str) -> str:
     if name.startswith("a/") or name.startswith("b/"):
         return name[2:]
     return name
+
+
+def _unquote_c_style(name: str) -> str | None:
+    """Decode Git's C-quoted header path; ``None`` when it cannot be decoded.
+
+    Git quotes a header path whose bytes are non-ASCII or awkward, escaping
+    control bytes by name and every other byte as three octal digits, so the
+    real path is only recoverable byte by byte.
+    """
+    if len(name) < 2 or not name.endswith('"'):
+        return None
+    raw = bytearray()
+    index = 1
+    end = len(name) - 1
+    while index < end:
+        character = name[index]
+        index += 1
+        if character != "\\":
+            raw.extend(character.encode("utf-8"))
+            continue
+        if index >= end:
+            return None
+        escape = name[index]
+        index += 1
+        if escape in _C_ESCAPES:
+            raw.append(_C_ESCAPES[escape])
+            continue
+        if escape not in _OCTAL_DIGITS:
+            return None
+        digits = escape
+        while len(digits) < 3 and index < end and name[index] in _OCTAL_DIGITS:
+            digits += name[index]
+            index += 1
+        value = int(digits, 8)
+        if value > 0xFF:
+            return None
+        raw.append(value)
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+def _header_path(name: str | None) -> str | None:
+    """The real path a patch header names, or ``None`` for an absent side."""
+    if name is None:
+        return None
+    if name.startswith('"'):
+        decoded = _unquote_c_style(name)
+        if decoded is None:
+            return _UNDECODABLE
+        name = decoded
+    if name == "/dev/null":
+        return None
+    return _strip_prefix(name)
+
+
+def _parsed_pair(patched_file) -> tuple[str | None, str | None]:
+    return (
+        _header_path(patched_file.source_file),
+        _header_path(patched_file.target_file),
+    )
+
+
+def _expected_pair(change: GitFileChange) -> tuple[str | None, str | None]:
+    if change.status == "added":
+        return (None, change.path)
+    if change.status == "deleted":
+        return (change.path, None)
+    return (change.old_path or change.path, change.path)
 
 
 def _file_rows(patched_file) -> tuple[tuple[GitDiffLine, ...], ...]:
@@ -112,17 +198,33 @@ def _file_rows(patched_file) -> tuple[tuple[GitDiffLine, ...], ...]:
     return tuple(groups)
 
 
-def _parsed_index(parsed: PatchSet) -> dict[str, Any]:
-    index: dict[str, Any] = {}
+def _pending_hunks(parsed: PatchSet) -> dict[tuple[str | None, str | None], deque]:
+    """Parsed hunk groups keyed by the exact old/new path pair they describe."""
+    pending: dict[tuple[str | None, str | None], deque] = defaultdict(deque)
     for patched_file in parsed:
-        for candidate in (
-            patched_file.path,
-            _strip_prefix(patched_file.target_file),
-            _strip_prefix(patched_file.source_file),
-        ):
-            if candidate and candidate not in index:
-                index[candidate] = patched_file
-    return index
+        pending[_parsed_pair(patched_file)].append(_file_rows(patched_file))
+    return pending
+
+
+def _claim(pending, key) -> tuple[tuple[GitDiffLine, ...], ...] | None:
+    """Take one parsed entry for this key, so no entry is ever shown twice."""
+    queue = pending.get(key)
+    if not queue:
+        return None
+    return queue.popleft()
+
+
+def _hunks_for(change: GitFileChange, pending) -> tuple[tuple[GitDiffLine, ...], ...] | None:
+    claimed = _claim(pending, _expected_pair(change))
+    if claimed is not None or change.status != "type-changed":
+        return claimed
+    # Git writes a type change as a delete of the old blob followed by an add
+    # of the new one, both naming the same path.
+    removed = _claim(pending, (change.path, None))
+    added = _claim(pending, (None, change.path))
+    if removed is None and added is None:
+        return None
+    return (removed or ()) + (added or ())
 
 
 def parse_git_diff(
@@ -155,8 +257,7 @@ def parse_git_diff(
         )
     try:
         parsed = PatchSet(patch_text.splitlines(keepends=True))
-        index = _parsed_index(parsed)
-        groups = {path: _file_rows(patched) for path, patched in index.items()}
+        pending = _pending_hunks(parsed)
     except _PARSE_FAILURES:
         return GitDiffPreview(
             files=(), omitted=False, unavailable_reason=PREVIEW_UNAVAILABLE_FORMAT
@@ -166,9 +267,11 @@ def parse_git_diff(
     omitted = False
     files: list[GitDiffFile] = []
     for position, change in enumerate(changes):
-        hunks = groups.get(change.path)
-        if hunks is None and change.old_path is not None:
-            hunks = groups.get(change.old_path)
+        hunks = _hunks_for(change, pending)
+        if hunks is None and (change.lines_added or change.lines_removed):
+            # The patch describes rows for this file that could not be matched
+            # to it; report that rather than imply an empty change.
+            omitted = True
         shown: list[GitDiffLine] = []
         for rows in hunks or ():
             cost = sum(len(row.text.encode("utf-8")) for row in rows)
@@ -183,7 +286,12 @@ def parse_git_diff(
                 anchor=f"change-{position}", change=change, lines=tuple(shown)
             )
         )
-    return GitDiffPreview(files=tuple(files), omitted=omitted, unavailable_reason=None)
+    unclaimed = any(
+        any(rows) for queue in pending.values() for groups in queue for rows in groups
+    )
+    return GitDiffPreview(
+        files=tuple(files), omitted=omitted or unclaimed, unavailable_reason=None
+    )
 
 
 def load_ticket_git_evidence(
@@ -207,18 +315,8 @@ def load_ticket_git_evidence(
 
 
 def captured_artifact_ids(record: TicketRecord) -> frozenset[str]:
-    """Artifact IDs this ticket's own capture events vouch for."""
-    ids: set[str] = set()
-    for event in record.events:
-        if event.kind != GIT_EVIDENCE_EVENT_KIND:
-            continue
-        payload = event.data.get("capture")
-        if not isinstance(payload, dict):
-            continue
-        artifact_id = payload.get("artifact_id")
-        if isinstance(artifact_id, str) and artifact_id:
-            ids.add(artifact_id)
-    return frozenset(ids)
+    """Re-exported so viewer callers read the owning domain's one definition."""
+    return _captured_artifact_ids(record)
 
 
 def accepted_output_artifact_ids(record: TicketRecord) -> tuple[str, ...]:

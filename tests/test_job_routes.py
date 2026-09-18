@@ -800,6 +800,115 @@ def test_an_unknown_job_has_no_evidence_page(workflow_web_env):
     assert response.status_code == 404
 
 
+def _add_reopen_transition(env) -> None:
+    """Let the fixture workflow be completed a second time by a later job."""
+    source = env.library.inspect(env.blueprint_id)
+    complete = next(
+        transition
+        for transition in source.definition.transitions
+        if transition.id == "complete"
+    )
+    reopen = complete.model_copy(
+        update={
+            "id": "reopen",
+            "name": "Reopen",
+            "from_state": "done",
+            "to_state": "review",
+            "inputs": (),
+            "outputs": (),
+            "preconditions": (),
+            "criteria": (),
+        }
+    )
+    env.configuration_service.save_blueprint(
+        env.store.load().revision,
+        env.blueprint_id,
+        source.digest,
+        source.definition.model_copy(
+            update={"transitions": source.definition.transitions + (reopen,)}
+        ),
+    )
+
+
+@requires_git
+def test_job_detail_git_evidence_scan_never_runs_on_the_event_loop(workflow_web_env):
+    """The scan reads every ticket and artifact, so it must not block the loop."""
+    import asyncio
+
+    from flowgency.web.routes import jobs as jobs_routes
+
+    env = workflow_web_env
+    _accepted_git_evidence(env)
+    original = jobs_routes.job_git_evidence_links
+    observed: dict[str, bool] = {}
+
+    def probe(service, actor, record):
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            observed["on_event_loop"] = False
+        else:
+            observed["on_event_loop"] = True
+        return original(service, actor, record)
+
+    jobs_routes.job_git_evidence_links = probe
+    try:
+        response = env.client.get(f"/{env.team_id}/jobs/git-evidence-run")
+    finally:
+        jobs_routes.job_git_evidence_links = original
+
+    assert response.status_code == 200
+    assert observed == {"on_event_loop": False}
+
+
+@requires_git
+def test_a_later_reviewer_reusing_the_evidence_never_becomes_its_producer(
+    workflow_web_env,
+):
+    from flowgency.tickets.access import TicketAccessRegistry
+
+    env = workflow_web_env
+    _, builder, ticket, captured = _accepted_git_evidence(env)
+    _add_reopen_transition(env)
+    env.service.transition(
+        builder,
+        env.read(ticket.ref).version,
+        env.transition_request(transition_id="reopen"),
+        env.operation("reopen", actor_name="builder"),
+    )
+    env.service.end_work(
+        builder, env.read(ticket.ref).version, env.operation("end", actor_name="builder")
+    )
+    authority = env.running_job("builder", "later-review-run")
+    reviewer = TicketAccessRegistry(env.job_store).open(authority).context
+    env.service.start_work(
+        reviewer,
+        env.read(ticket.ref).version,
+        env.operation("review-start", actor_name="builder"),
+    )
+    # The reviewer accepts the original agent's artifact as its own output.
+    env.service.transition(
+        reviewer,
+        env.read(ticket.ref).version,
+        env.transition_request(
+            outputs={"summary": "Reviewed result", "evidence": captured.artifact}
+        ),
+        env.operation("review-complete", actor_name="builder"),
+    )
+    diff_path = (
+        f"/{env.team_id}/workflows/{env.workflow_id}/tickets/{ticket.ref.ticket_id}"
+        f"/artifacts/{captured.artifact.value}/diff?source=job"
+    )
+
+    producer = env.client.get(f"/{env.team_id}/jobs/git-evidence-run")
+    reviewer_page = env.client.get(f"/{env.team_id}/jobs/later-review-run")
+
+    assert producer.status_code == 200
+    assert producer.text.count(diff_path) == 1
+    assert reviewer_page.status_code == 200
+    assert captured.artifact.value not in reviewer_page.text
+
+
 
 
 

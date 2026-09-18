@@ -1708,3 +1708,144 @@ def test_binary_metadata_comes_from_the_manifest_not_the_parser(tmp_path):
     assert preview.files[0].change.lines_added == 0
     assert preview.files[0].lines == ()
 
+
+def _tree_without(root: Path, commit: str, name: bytes) -> bytes:
+    rows = [row for row in read_tree_entries(root, commit).split(b"\0") if row]
+    return b"".join(row + b"\0" for row in rows if not row.endswith(b"\t" + name))
+
+
+@requires_git
+def test_quoted_header_paths_still_show_their_own_rows(tmp_path):
+    """Git C-quotes Unicode and tab names in patch headers; rows must survive."""
+    from flowgency.web.git_evidence import parse_git_diff
+
+    fixture = create_git_repository(tmp_path / "quoted")
+    blob = write_blob(fixture.root, b"exotic content\n")
+    entries = read_tree_entries(fixture.root, fixture.end_commit)
+    entries += tree_entry("100644", "blob", blob, "žluť.txt".encode())
+    entries += tree_entry("100644", "blob", blob, b"with\ttab.txt")
+    end = commit_tree(fixture.root, entries, parent=fixture.end_commit)
+    manifest = _retained_manifest(
+        _capture(fixture.root, fixture.end_commit, end, tmp_path / "scratch-quoted")
+    )
+    # Positive control: the fixture really does carry quoted header paths.
+    assert b'"b/' in manifest.patch
+
+    preview = parse_git_diff(manifest)
+
+    rows = {
+        entry.change.path: [line.text for line in entry.lines] for entry in preview.files
+    }
+    assert preview.unavailable_reason is None
+    assert preview.omitted is False
+    assert rows["žluť.txt"] == ["exotic content\n"]
+    assert rows["with\ttab.txt"] == ["exotic content\n"]
+
+
+@requires_git
+def test_a_type_change_shows_both_halves_it_really_contains(tmp_path):
+    """Git writes a type change as a /dev/null delete plus a /dev/null add."""
+    from flowgency.web.git_evidence import parse_git_diff
+
+    fixture = create_git_repository(tmp_path / "typechange")
+    link = write_blob(fixture.root, b"../../outside-target")
+    entries = _tree_without(fixture.root, fixture.end_commit, b"result.txt")
+    entries += tree_entry("120000", "blob", link, b"result.txt")
+    end = commit_tree(fixture.root, entries, parent=fixture.end_commit)
+    manifest = _retained_manifest(
+        _capture(fixture.root, fixture.end_commit, end, tmp_path / "scratch-type")
+    )
+    assert [entry.status for entry in manifest.files] == ["type-changed"]
+
+    preview = parse_git_diff(manifest)
+
+    text = "".join(line.text for line in preview.files[0].lines)
+    assert "after" in text
+    assert "../../outside-target" in text
+    assert preview.omitted is False
+    assert preview.unavailable_reason is None
+
+
+@requires_git
+def test_a_rename_beside_an_added_file_keeps_each_files_own_rows(tmp_path):
+    """A renamed path and an unrelated added path never borrow each other's rows."""
+    from flowgency.web.git_evidence import parse_git_diff
+
+    root = tmp_path / "rename"
+    init_git_repository(root)
+    shared = b"".join(b"shared line %d\n" % index for index in range(10))
+    (root / "notes.txt").write_bytes(shared)
+    git_command(root, "add", "--", "notes.txt")
+    git_command(root, "commit", "-m", "test: seed notes")
+    base = git_command(root, "rev-parse", "HEAD").decode().strip()
+    (root / "notes.txt").unlink()
+    (root / "archive.txt").write_bytes(b"archived heading\n" + shared)
+    (root / "fresh.txt").write_bytes(b"fresh replacement\n")
+    git_command(root, "add", "--all", "--", "notes.txt", "archive.txt", "fresh.txt")
+    git_command(root, "commit", "-m", "test: rename and add")
+    end = git_command(root, "rev-parse", "HEAD").decode().strip()
+    manifest = _retained_manifest(_capture(root, base, end, tmp_path / "scratch-rename"))
+    assert {entry.path: entry.status for entry in manifest.files} == {
+        "archive.txt": "renamed",
+        "fresh.txt": "added",
+    }
+
+    preview = parse_git_diff(manifest)
+
+    rows = {
+        entry.change.path: "".join(line.text for line in entry.lines)
+        for entry in preview.files
+    }
+    assert "fresh replacement" in rows["fresh.txt"]
+    assert "archived heading" not in rows["fresh.txt"]
+    assert "archived heading" in rows["archive.txt"]
+    assert preview.unavailable_reason is None
+
+
+@requires_git
+def test_unparseable_patch_content_is_never_shown_as_an_empty_diff(tmp_path):
+    from flowgency.web.git_evidence import PREVIEW_UNAVAILABLE_FORMAT, parse_git_diff
+
+    capture = _capture(
+        *_seeded_range(tmp_path, "unparseable"), tmp_path / "scratch-unparseable"
+    )
+    hostile = b"@@ -1 +1 @@\n-before\n+after\n"
+    manifest = _retained_manifest(dataclasses.replace(capture, patch=hostile))
+
+    preview = parse_git_diff(manifest)
+
+    assert preview.unavailable_reason == PREVIEW_UNAVAILABLE_FORMAT
+    assert preview.files == ()
+    # The exact retained bytes stay available for download.
+    assert manifest.patch == hostile
+
+
+@requires_git
+def test_rows_that_belong_to_no_manifest_file_are_reported_as_omitted(tmp_path):
+    from flowgency.web.git_evidence import parse_git_diff
+
+    capture = _capture(
+        *_seeded_range(tmp_path, "unattributed"), tmp_path / "scratch-unattributed"
+    )
+    stranger = (
+        b"diff --git a/stranger.txt b/stranger.txt\n"
+        b"--- a/stranger.txt\n"
+        b"+++ b/stranger.txt\n"
+        b"@@ -1 +1 @@\n"
+        b"-before\n"
+        b"+after\n"
+    )
+    manifest = _retained_manifest(dataclasses.replace(capture, patch=stranger))
+
+    preview = parse_git_diff(manifest)
+
+    assert [entry.change.path for entry in preview.files] == ["result.txt"]
+    assert preview.files[0].lines == ()
+    # A file the patch never described must not read as a clean, empty change.
+    assert preview.omitted is True
+
+
+def _seeded_range(tmp_path, name: str):
+    fixture = create_git_repository(tmp_path / name)
+    return fixture.root, fixture.base_commit, fixture.end_commit
+

@@ -378,6 +378,25 @@ def _capture_receipts(
     return receipts
 
 
+def captured_artifact_ids(record: TicketRecord) -> frozenset[str]:
+    """Artifact IDs this ticket's own capture events vouch for.
+
+    A cheap prefilter for readers: an artifact this ticket never captured can
+    never become trusted evidence, so it is never read or verified at all.
+    """
+    ids: set[str] = set()
+    for event in record.events:
+        if event.kind != GIT_EVIDENCE_EVENT_KIND or not isinstance(event.data, dict):
+            continue
+        payload: Any = event.data.get("capture")
+        if not isinstance(payload, dict):
+            continue
+        artifact_id = payload.get("artifact_id")
+        if isinstance(artifact_id, str) and artifact_id:
+            ids.add(artifact_id)
+    return frozenset(ids)
+
+
 def validate_git_artifact(
     record: TicketRecord,
     artifact: RetainedArtifact,

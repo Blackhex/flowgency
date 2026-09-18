@@ -1788,6 +1788,134 @@ def test_verified_evidence_links_from_current_fields_and_history(workflow_web_en
     assert "Download retained file" not in page.text
 
 
+def _add_reopen_transition(env) -> None:
+    """Let the fixture workflow be completed a second time on the same ticket."""
+    source = env.library.inspect(env.blueprint_id)
+    complete = next(
+        transition
+        for transition in source.definition.transitions
+        if transition.id == "complete"
+    )
+    reopen = complete.model_copy(
+        update={
+            "id": "reopen",
+            "name": "Reopen",
+            "from_state": "done",
+            "to_state": "review",
+            "inputs": (),
+            "outputs": (),
+            "preconditions": (),
+            "criteria": (),
+        }
+    )
+    env.configuration_service.save_blueprint(
+        env.store.load().revision,
+        env.blueprint_id,
+        source.digest,
+        source.definition.model_copy(
+            update={"transitions": source.definition.transitions + (reopen,)}
+        ),
+    )
+
+
+@requires_git
+def test_one_damaged_evidence_artifact_never_erases_the_rest_of_the_ticket(
+    workflow_web_env,
+):
+    from flowgency.tickets.git_evidence import GitCaptureRequest
+    from tests._git_evidence_helpers import git_command
+
+    env = workflow_web_env
+    fixture, actor, ticket = _git_evidence_ticket(env)
+    _add_reopen_transition(env)
+    first = _capture_evidence(env, fixture, actor, ticket)
+    (fixture.root / "later.txt").write_bytes(b"later work\n")
+    git_command(fixture.root, "add", "--", "later.txt")
+    git_command(fixture.root, "commit", "-m", "test: later work")
+    later_end = git_command(fixture.root, "rev-parse", "HEAD").decode().strip()
+    second = env.service.capture_git_evidence(
+        actor,
+        env.read(ticket.ref).version,
+        GitCaptureRequest(
+            transition_id="complete",
+            field_id="evidence",
+            base_commit=fixture.base_commit,
+            end_commit=later_end,
+        ),
+        env.operation("capture-later", actor_name="builder"),
+    )
+    for transition, operation in (
+        (
+            env.transition_request(
+                outputs={"summary": "First result", "evidence": first.artifact}
+            ),
+            "finish-a",
+        ),
+        (env.transition_request(transition_id="reopen"), "reopen"),
+        (
+            env.transition_request(
+                outputs={"summary": "Second result", "evidence": second.artifact}
+            ),
+            "finish-b",
+        ),
+    ):
+        env.service.transition(
+            actor,
+            env.read(ticket.ref).version,
+            transition,
+            env.operation(operation, actor_name="builder"),
+        )
+    # Only the current output's artifact is damaged.
+    _artifact_file(env, second).write_bytes(b"not an artifact envelope")
+
+    page = env.client.get(f"{env.base_path}/tickets/{ticket.ref.ticket_id}")
+    payload = env.client.get(
+        f"{env.base_path}/tickets/{ticket.ref.ticket_id}/snapshot"
+    ).json()
+
+    rows = {row["id"]: row for row in payload["fields"]}
+    assert page.status_code == 200
+    assert rows["summary"]["value"] == "Second result"
+    assert rows["evidence"]["git_evidence"] is None
+    assert rows["evidence"]["evidence_issue"]["message"]
+    assert str(env.root_a) not in json_module.dumps(payload)
+    assert str(env.root_a) not in page.text
+    healthy = [event for event in payload["history"] if event["git_outputs"]]
+    damaged = [event for event in payload["history"] if event["evidence_issues"]]
+    assert len(healthy) == 1
+    assert healthy[0]["git_outputs"]["evidence"]["artifact_id"] == first.artifact.value
+    assert len(damaged) == 1
+    # The audited payload of the damaged event is left exactly as it was written.
+    assert damaged[0]["data"]["effective_outputs"]["evidence"] == {
+        "kind": "id",
+        "value": second.artifact.value,
+    }
+
+
+@requires_git
+def test_an_oversized_retained_envelope_is_refused_by_both_endpoints(workflow_web_env):
+    from flowgency.tickets.artifacts import MAX_RETAINED_ARTIFACT_ENVELOPE_BYTES
+
+    env = workflow_web_env
+    fixture, actor, ticket = _git_evidence_ticket(env)
+    captured = _capture_evidence(env, fixture, actor, ticket)
+    _accept_evidence(env, actor, captured)
+    stored = _artifact_file(env, captured)
+    padding = MAX_RETAINED_ARTIFACT_ENVELOPE_BYTES - stored.stat().st_size + 1
+    stored.write_bytes(stored.read_bytes() + b" " * padding)
+    base_url = _evidence_base(env, ticket, captured)
+
+    viewer = env.client.get(f"{base_url}/diff")
+    download = env.client.get(f"{base_url}/patch")
+
+    assert viewer.status_code == 413
+    assert download.status_code == 413
+    assert "exceeds the maximum size" in viewer.json()["detail"]
+    assert viewer.json()["detail"] == download.json()["detail"]
+    assert str(env.root_a) not in viewer.text
+    assert str(env.root_a) not in download.text
+
+
 def test_an_ordinary_artifact_keeps_its_plain_download_link(workflow_web_env):
     env = workflow_web_env
     env.publish_artifact_field_workflow()

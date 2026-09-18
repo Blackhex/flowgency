@@ -5,7 +5,7 @@
 {% set transitions = detail.current_definition.transitions | selectattr('from_state', 'equalto', current_ticket.state_id) | list %}
 {% macro render_value(field_type, value, git_evidence=none) -%}
   {%- if field_type == "artifact" and value and value.kind == "id" and git_evidence -%}
-    {%- set evidence_base = "/" ~ team ~ "/workflows/" ~ active_workflow_id ~ "/tickets/" ~ current_ticket.ref.ticket_id ~ "/artifacts/" ~ value.value -%}
+    {%- set evidence_base = "/" ~ team ~ "/workflows/" ~ active_workflow_id ~ "/tickets/" ~ current_ticket.ref.ticket_id ~ "/artifacts/" ~ git_evidence.artifact_id -%}
     <a class="workflow-value-link" href="{{ evidence_base }}/diff?source=ticket">View diff</a>
     <a class="workflow-value-link" href="{{ evidence_base }}/patch">Download patch</a>
   {%- elif field_type == "artifact" and value and value.kind == "id" -%}
