@@ -941,6 +941,8 @@ test('git artifact format survives authoring and reload', async ({ page }, testI
   const field = payload.draft.fields.find((row: { label: string }) => row.label === 'Committed implementation');
   expect(field.type).toBe('artifact');
   expect(field.artifact_format).toBe('git-change');
+  const fieldId: string = field.existing_field_id;
+  expect(fieldId).toBeTruthy();
   await openTransitions(page);
   await expect(page.getByLabel('Output artifact format 3', { exact: true })).toHaveValue('git-change');
   await assertNoLayoutIssues(page);
@@ -963,7 +965,8 @@ test('git artifact format survives authoring and reload', async ({ page }, testI
   expect(newTransition.inputs).toHaveLength(1);
   expect(newTransition.inputs[0].required).toBe(false);
 
-  // Switching another artifact field to text clears its format in the draft.
+  // Switching the git-change field itself to text clears the format for good:
+  // the same field keeps its id and its required flag, and reloads as plain text.
   await openTransitions(page);
   if (testInfo.project.name.startsWith('mobile')) {
     await page.getByLabel('Transition picker').selectOption({ label: 'Complete review' });
@@ -971,7 +974,29 @@ test('git artifact format survives authoring and reload', async ({ page }, testI
     await page.getByRole('button', { name: 'Complete review Review Done' }).click();
   }
   await expect(page.getByLabel('Output artifact format 2', { exact: true })).toHaveValue('');
-  await page.getByLabel('Output type 2', { exact: true }).selectOption('text');
-  await expect(page.getByLabel('Output artifact format 2', { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel('Output artifact format 3', { exact: true })).toHaveValue('git-change');
+  await page.getByLabel('Output type 3', { exact: true }).selectOption('text');
+  await expect(page.getByLabel('Output artifact format 3', { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel('Output required 3', { exact: true })).toBeChecked();
+  await saveEditor(page);
+  await page.reload();
+  const clearedPayload = await readEditorPayload(page);
+  const clearedField = clearedPayload.draft.fields.find(
+    (row: { existing_field_id: string | null }) => row.existing_field_id === fieldId,
+  );
+  expect(clearedField.type).toBe('text');
+  expect(clearedField.artifact_format ?? null).toBeNull();
+  const completeTransition = clearedPayload.draft.transitions.find(
+    (row: { name: string }) => row.name === 'Complete review',
+  );
+  const clearedUse = completeTransition.outputs.find(
+    (row: { existing_field_id: string | null }) => row.existing_field_id === fieldId,
+  );
+  expect(clearedUse.required).toBe(true);
+  const reusedTransition = clearedPayload.draft.transitions.find(
+    (row: { name: string }) => row.name !== 'Complete review',
+  );
+  expect(reusedTransition.inputs[0].existing_field_id).toBe(fieldId);
+  expect(reusedTransition.inputs[0].required).toBe(false);
   await assertNoConsoleErrors(page);
 });

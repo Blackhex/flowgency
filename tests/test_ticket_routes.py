@@ -615,6 +615,7 @@ def test_detail_snapshot_exposes_current_definition_fields_and_retained_audit_sn
             "id": "verdict",
             "label": "Review result",
             "type": "boolean",
+            "artifact_format": None,
             "value": True,
             "provenance": {
                 "actor_kind": "user",
@@ -629,6 +630,7 @@ def test_detail_snapshot_exposes_current_definition_fields_and_retained_audit_sn
             "id": "summary",
             "label": "Review summary",
             "type": "text",
+            "artifact_format": None,
             "value": "Verified existing work",
             "provenance": {
                 "actor_kind": "agent",
@@ -643,6 +645,7 @@ def test_detail_snapshot_exposes_current_definition_fields_and_retained_audit_sn
             "id": "evidence",
             "label": "Evidence",
             "type": "artifact",
+            "artifact_format": None,
             "value": {"kind": "id", "value": artifact.value},
             "provenance": {
                 "actor_kind": "agent",
@@ -1069,6 +1072,143 @@ def test_output_projection_falls_back_to_id_on_malformed_snapshot_metadata(
     assert rows[0].label == "custom-result"
     assert rows[0].type is None
     assert rows[0].value == "Newest"
+
+
+def _git_change_definition(env):
+    """Make the shipped ``evidence`` artifact field require Git evidence."""
+    from flowgency.workflows.models import WorkflowDefinition
+
+    source = env.library.inspect(env.blueprint_id)
+    document = source.definition.model_dump(mode="json")
+    for field in document["fields"]:
+        if field["id"] == "evidence":
+            field["artifact_format"] = "git-change"
+    env.configuration_service.save_blueprint(
+        env.store.load().revision,
+        env.blueprint_id,
+        source.digest,
+        WorkflowDefinition.model_validate(document),
+    )
+
+
+def test_detail_snapshot_projects_current_git_change_format(workflow_web_env):
+    env = workflow_web_env
+    env.publish_artifact_field_workflow()
+    _git_change_definition(env)
+    ticket = env.create(values={"verdict": True, "summary": "Pending"})
+
+    payload = env.client.get(
+        f"{env.base_path}/tickets/{ticket.ref.ticket_id}/snapshot"
+    ).json()
+
+    rows = {row["id"]: row for row in payload["fields"]}
+    assert rows["evidence"]["artifact_format"] == "git-change"
+    # An ordinary field of another type carries no format at all.
+    assert rows["summary"]["artifact_format"] is None
+    definitions = {
+        field["id"]: field for field in payload["current_definition"]["fields"]
+    }
+    assert definitions["evidence"]["artifact_format"] == "git-change"
+    assert definitions["summary"]["artifact_format"] is None
+
+
+def test_detail_snapshot_keeps_an_ordinary_artifact_field_formatless(workflow_web_env):
+    env = workflow_web_env
+    env.publish_artifact_field_workflow()
+    ticket = env.create(values={"verdict": True, "summary": "Pending"})
+
+    payload = env.client.get(
+        f"{env.base_path}/tickets/{ticket.ref.ticket_id}/snapshot"
+    ).json()
+
+    rows = {row["id"]: row for row in payload["fields"]}
+    assert rows["evidence"]["type"] == "artifact"
+    assert rows["evidence"]["artifact_format"] is None
+    definitions = {
+        field["id"]: field for field in payload["current_definition"]["fields"]
+    }
+    assert definitions["evidence"]["artifact_format"] is None
+
+
+def test_removed_git_change_output_keeps_its_historical_format(workflow_web_env):
+    from flowgency.tickets.models import TicketEvent
+    from flowgency.tickets.views import _field_rows
+
+    env = workflow_web_env
+    ticket = env.create()
+    view = env.read(ticket.ref)
+    accepted = TicketEvent(
+        kind="transitioned", actor="builder", summary="Accepted",
+        data={
+            "effective_outputs": {"retired-evidence": {"kind": "id", "value": "a" * 64}},
+            "transition_snapshot": {
+                "field_defs": {
+                    "retired-evidence": {
+                        "id": "retired-evidence",
+                        "label": "Retired evidence",
+                        "type": "artifact",
+                        "artifact_format": "git-change",
+                    }
+                }
+            },
+        },
+    )
+    record = view.record.model_copy(update={
+        "field_values": {"retired-evidence": {"kind": "id", "value": "a" * 64}},
+        "events": (accepted,),
+    })
+
+    rows = _field_rows(view.model_copy(update={"record": record, "definition": None}))
+
+    assert len(rows) == 1
+    assert rows[0].label == "Retired evidence"
+    assert rows[0].type == "artifact"
+    assert rows[0].artifact_format == "git-change"
+
+
+@pytest.mark.parametrize(
+    "artifact_format",
+    ["svn-change", "", 7, {"mode": "git-change"}],
+)
+def test_invalid_historical_artifact_format_falls_back_to_plain_text(
+    workflow_web_env, artifact_format
+):
+    from flowgency.tickets.models import TicketEvent
+    from flowgency.tickets.views import _field_rows
+
+    env = workflow_web_env
+    ticket = env.create()
+    view = env.read(ticket.ref)
+    accepted = TicketEvent(
+        kind="transitioned", actor="builder", summary="Accepted",
+        data={
+            "effective_outputs": {"retired-evidence": "Historical payload only"},
+            "transition_snapshot": {
+                "field_defs": {
+                    "retired-evidence": {
+                        "id": "retired-evidence",
+                        "label": "Retired evidence",
+                        "type": "artifact",
+                        "artifact_format": artifact_format,
+                    }
+                }
+            },
+        },
+    )
+    record = view.record.model_copy(update={
+        "field_values": {"retired-evidence": "Historical payload only"},
+        "events": (accepted,),
+    })
+
+    rows = _field_rows(view.model_copy(update={"record": record, "definition": None}))
+
+    assert len(rows) == 1
+    assert rows[0].is_output is True
+    # Unreadable metadata is not guessed at: the row degrades to escaped text.
+    assert rows[0].label == "retired-evidence"
+    assert rows[0].type is None
+    assert rows[0].artifact_format is None
+    assert rows[0].value == "Historical payload only"
 
 
 @pytest.mark.parametrize("malformed_outputs", [None, "not-a-mapping", ["also-not-a-mapping"]])
