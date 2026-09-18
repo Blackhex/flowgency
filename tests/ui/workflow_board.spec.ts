@@ -771,25 +771,40 @@ test('desktop board and mobile ticket detail keep keyboard access and stable scr
   await assertNoConsoleErrors(page);
 });
 
-async function setTerminalReviewVerdict(request: APIRequestContext, ticketId: string): Promise<void> {
+const HOSTILE_OUTPUT_VALUE = '<b>bold</b> & "quoted" <script>window.__xssFired = true</script>';
+
+async function setTerminalReviewVerdict(
+  request: APIRequestContext,
+  ticketId: string,
+  value = 'Verified durable result',
+): Promise<void> {
   const current = await detailSnapshot(request, ticketId);
   const updated = await request.post(`/newsletter/workflows/delivery/tickets/${ticketId}/update`, {
     headers: { Accept: 'application/json' },
     form: { payload: JSON.stringify({
       version: current.ticket.version,
       operation_id: operationId('terminal-result'),
-      patch: { field_values: { 'review-verdict': 'Verified durable result' } },
+      patch: { field_values: { 'review-verdict': value } },
     }) },
   });
   expect(updated.ok()).toBeTruthy();
 }
 
-async function assertTerminalOutputReadOnly(page: Page): Promise<void> {
+async function assertTerminalOutputReadOnly(page: Page, value = 'Verified durable result'): Promise<void> {
   const overview = page.locator('[data-ticket-panel="overview"]');
   await expect(overview.getByRole('heading', { name: 'Outputs', exact: true })).toBeVisible();
-  await expect(overview.getByText('Verified durable result', { exact: true })).toBeVisible();
+  await expect(overview.getByText(value, { exact: true })).toBeVisible();
   await expect(overview.locator('[data-ticket-input="review-verdict"]')).toHaveCount(0);
   await expect(overview.getByText('Not submitted', { exact: true })).toBeVisible();
+}
+
+// Proves the value is decoded literal DOM text, not interpreted markup: an unescaped
+// regression would render <b>/<script> as elements, and the exact-text match above would fail.
+async function assertOutputValueEscaped(page: Page, value: string): Promise<void> {
+  await assertTerminalOutputReadOnly(page, value);
+  const overview = page.locator('[data-ticket-panel="overview"]');
+  await expect(overview.locator('b')).toHaveCount(0);
+  await expect(overview.locator('script')).toHaveCount(0);
 }
 
 test('terminal output remains read-only in inspector and expanded view', async ({ page, request }) => {
@@ -801,6 +816,17 @@ test('terminal output remains read-only in inspector and expanded view', async (
   ]) {
     await page.goto(url);
     await assertTerminalOutputReadOnly(page);
+    await assertNoLayoutIssues(page);
+    await assertNoConsoleErrors(page);
+  }
+
+  await setTerminalReviewVerdict(request, ticketId, HOSTILE_OUTPUT_VALUE);
+  for (const url of [
+    `/newsletter/workflows/delivery?ticket=${ticketId}`,
+    `/newsletter/workflows/delivery/tickets/${ticketId}`,
+  ]) {
+    await page.goto(url);
+    await assertOutputValueEscaped(page, HOSTILE_OUTPUT_VALUE);
     await assertNoLayoutIssues(page);
     await assertNoConsoleErrors(page);
   }
@@ -818,6 +844,12 @@ test('terminal output stays read-only at a 320px viewport', async ({ page, reque
   await assertTerminalOutputReadOnly(page);
   await assertNoLayoutIssues(page);
   await assertNoConsoleErrors(page);
+
+  await setTerminalReviewVerdict(request, ticketId, HOSTILE_OUTPUT_VALUE);
+  await page.reload();
+  await assertOutputValueEscaped(page, HOSTILE_OUTPUT_VALUE);
+  await assertNoLayoutIssues(page);
+  await assertNoConsoleErrors(page);
 });
 
 test.describe('javascript-disabled terminal output', () => {
@@ -830,5 +862,9 @@ test.describe('javascript-disabled terminal output', () => {
     await page.goto(`/newsletter/workflows/delivery/tickets/${ticketId}`);
     await assertTerminalOutputReadOnly(page);
     await assertNoConsoleErrors(page);
+
+    await setTerminalReviewVerdict(request, ticketId, HOSTILE_OUTPUT_VALUE);
+    await page.reload();
+    await assertOutputValueEscaped(page, HOSTILE_OUTPUT_VALUE);
   });
 });
