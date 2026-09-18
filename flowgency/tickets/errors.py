@@ -49,5 +49,11 @@ class TicketForbidden(TicketStorageError):
     http_status = 403
 
 
+class TicketEvidenceInvalid(TicketStorageError):
+    """Structurally invalid or untrusted evidence offered for a ticket field."""
+
+    http_status = 422
+
+
 class WorkflowUnavailable(TicketStorageError):
     http_status = 503

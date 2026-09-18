@@ -17,6 +17,7 @@ from flowgency.tickets.storages import local
 from flowgency.tickets.storages.registry import resolve_storage
 from flowgency.workflows.models import ArtifactRef, ContractError
 from flowgency.jobs.artifacts import retain_failed_stage
+from tests._git_evidence_helpers import requires_git
 from tests._ticket_helpers import storage_binding
 
 
@@ -408,3 +409,307 @@ def test_rejected_transition_leaves_retained_artifact_intact_and_ticket_unchange
     assert env.read(ticket.ref).record == before
     retained = env.current_provider().read_artifact(ticket.ref, published.value)
     assert retained.content == b"artifact-bytes"
+
+
+@requires_git
+def test_git_capture_records_receipt_without_advancing_ticket(workflow_env):
+    from flowgency.git_evidence.models import GitPublicationPolicy
+    from flowgency.tickets.git_evidence import GitCaptureRequest
+    from tests._git_evidence_helpers import configure_git_ticket, create_git_repository
+
+    env = workflow_env
+    fixture = create_git_repository(env.tmp_path / "source")
+    actor, ticket = configure_git_ticket(env, fixture, GitPublicationPolicy(mode="local"))
+    before = env.read(ticket.ref).record
+    request = GitCaptureRequest(
+        transition_id="complete",
+        field_id="evidence",
+        base_commit=fixture.base_commit,
+        end_commit=fixture.end_commit,
+    )
+    result = env.service.capture_git_evidence(
+        actor, ticket.version, request, env.operation("capture", actor_name="builder")
+    )
+    after = env.read(ticket.ref).record
+    assert after.state_id == before.state_id
+    assert after.field_values == before.field_values
+    assert after.active_run == before.active_run
+    assert after.revision == before.revision + 1
+    assert after.events[-1].kind == "git-evidence-captured"
+    assert after.events[-1].data["capture"]["artifact_id"] == result.artifact.value
+    assert result.version.revision == after.revision
+
+
+def _git_capture_env(env, name: str = "source"):
+    from flowgency.git_evidence.models import GitPublicationPolicy
+    from tests._git_evidence_helpers import (
+        capture_request,
+        configure_git_ticket,
+        create_git_repository,
+    )
+
+    fixture = create_git_repository(env.tmp_path / name)
+    actor, ticket = configure_git_ticket(env, fixture, GitPublicationPolicy(mode="local"))
+    return actor, ticket, capture_request(fixture)
+
+
+def _restrict_policy(env):
+    from flowgency.git_evidence.models import GitPublicationPolicy
+
+    snapshot = env.store.load()
+    env.store.patch(
+        snapshot.revision,
+        lambda raw: raw["teams"][env.team_id].__setitem__(
+            "git_publication",
+            GitPublicationPolicy(
+                mode="local", allowed_refs=("refs/heads/main",)
+            ).model_dump(mode="json"),
+        ),
+    )
+
+
+@requires_git
+def test_git_capture_replay_never_reruns_git_even_after_a_policy_change(
+    workflow_env, monkeypatch
+):
+    from flowgency.tickets import service as service_module
+    from flowgency.tickets.errors import OperationConflict, TicketConflict
+    from flowgency.tickets.models import TicketOperation
+
+    env = workflow_env
+    actor, ticket, request = _git_capture_env(env)
+    operation = env.operation("capture", actor_name="builder")
+    first = env.service.capture_git_evidence(actor, ticket.version, request, operation)
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("an accepted capture must never read Git again")
+
+    monkeypatch.setattr(service_module, "capture_committed_range", refuse)
+
+    replay = env.service.capture_git_evidence(
+        actor, ticket.version, request, operation
+    )
+    assert replay.artifact == first.artifact
+    assert replay.version == first.version
+    assert replay.mutation.replayed is True
+    assert replay.mutation.event_id == first.mutation.event_id
+    assert env.read(ticket.ref).record.revision == first.version.revision
+
+    _restrict_policy(env)
+    again = env.service.capture_git_evidence(actor, ticket.version, request, operation)
+    assert again.artifact == first.artifact
+    assert again.mutation.replayed is True
+
+    with pytest.raises(TicketConflict) as stale:
+        env.service.transition(
+            actor,
+            env.read(ticket.ref).version,
+            env.transition_request(
+                outputs={"summary": "Stale", "evidence": first.artifact}
+            ),
+            env.operation("stale-evidence", actor_name="builder"),
+        )
+    assert stale.value.code == "git-evidence-policy-changed"
+
+    with pytest.raises(OperationConflict):
+        env.service.capture_git_evidence(
+            actor,
+            ticket.version,
+            request,
+            TicketOperation(
+                operation_id=operation.operation_id, request_digest="c" * 64
+            ),
+        )
+
+
+@requires_git
+def test_git_capture_commits_nothing_when_the_ticket_or_session_moves(
+    workflow_env, monkeypatch
+):
+    from flowgency.tickets import service as service_module
+    from flowgency.tickets.access import TicketAccessRegistry
+    from flowgency.tickets.errors import TicketConflict, TicketForbidden
+    from flowgency.tickets.models import TicketPatch
+
+    env = workflow_env
+    actor, ticket, request = _git_capture_env(env)
+    before = env.read(ticket.ref).record
+    original = service_module.capture_committed_range
+
+    def interfere(*args, **kwargs):
+        captured = original(*args, **kwargs)
+        env.service.update(
+            env.user,
+            env.read(ticket.ref).version,
+            TicketPatch(title="Renamed during the read"),
+            env.operation("interfering-update"),
+        )
+        return captured
+
+    monkeypatch.setattr(service_module, "capture_committed_range", interfere)
+    with pytest.raises(TicketConflict):
+        env.service.capture_git_evidence(
+            actor,
+            ticket.version,
+            request,
+            env.operation("racing-capture", actor_name="builder"),
+        )
+
+    raced = env.read(ticket.ref).record
+    assert all(event.kind != "git-evidence-captured" for event in raced.events)
+    assert raced.state_id == before.state_id
+    assert raced.field_values == before.field_values
+
+    def revoke(*args, **kwargs):
+        captured = original(*args, **kwargs)
+        TicketAccessRegistry(env.job_store).close(actor.session_id)
+        return captured
+
+    monkeypatch.setattr(service_module, "capture_committed_range", revoke)
+    with pytest.raises(TicketForbidden):
+        env.service.capture_git_evidence(
+            actor,
+            env.read(ticket.ref).version,
+            request,
+            env.operation("revoked-capture", actor_name="builder"),
+        )
+    revoked = env.read(ticket.ref).record
+    assert all(event.kind != "git-evidence-captured" for event in revoked.events)
+
+
+@requires_git
+def test_one_job_captures_each_ticket_against_its_own_identity(workflow_env):
+    from flowgency.tickets.git_evidence import GitEvidenceManifest
+    from tests._git_evidence_helpers import snapshot_repository
+
+    env = workflow_env
+    actor, ticket, request = _git_capture_env(env)
+    workspace = env.store.load().config.teams[env.team_id].workspace_path
+    before_source = snapshot_repository(workspace)
+    first = env.service.capture_git_evidence(
+        actor, ticket.version, request, env.operation("capture-one", actor_name="builder")
+    )
+
+    second_ticket = env.create(title="Second", values={"verdict": True, "summary": "Two"})
+    env.service.start_work(
+        actor, second_ticket.version, env.operation("start-two", actor_name="builder")
+    )
+    second = env.service.capture_git_evidence(
+        actor,
+        env.read(second_ticket.ref).version,
+        request,
+        env.operation("capture-two", actor_name="builder"),
+    )
+
+    assert second.artifact != first.artifact
+    assert snapshot_repository(workspace) == before_source
+    provider = env.current_provider()
+    for ref, result in ((ticket.ref, first), (second_ticket.ref, second)):
+        manifest = GitEvidenceManifest.model_validate_json(
+            provider.read_artifact(ref, result.artifact.value).content
+        )
+        assert manifest.ticket_id == ref.ticket_id
+        record = env.read(ref).record
+        assert record.events[-1].data["capture"]["artifact_id"] == result.artifact.value
+
+
+@requires_git
+def test_capture_is_unavailable_to_users_and_without_a_trusted_job_resolver(
+    workflow_env,
+):
+    from flowgency.tickets.errors import TicketConflict, TicketForbidden
+
+    env = workflow_env
+    actor, ticket, request = _git_capture_env(env)
+
+    with pytest.raises(TicketForbidden):
+        env.service.capture_git_evidence(
+            env.user, ticket.version, request, env.operation("user-capture")
+        )
+
+    env.service.resolve_git_job = None
+    with pytest.raises(TicketConflict) as failure:
+        env.service.capture_git_evidence(
+            actor,
+            ticket.version,
+            request,
+            env.operation("unresolved-capture", actor_name="builder"),
+        )
+    assert failure.value.code == "git-evidence-unavailable"
+    assert all(
+        event.kind != "git-evidence-captured"
+        for event in env.read(ticket.ref).record.events
+    )
+
+
+def test_oversized_evidence_manifest_is_rejected_not_truncated(workflow_env):
+    from datetime import datetime, timezone
+
+    from flowgency.git_evidence.models import (
+        GitFileChange,
+        GitPublicationPolicy,
+        GitPublicationReceipt,
+        GitRangeCapture,
+        git_policy_digest,
+    )
+    from flowgency.tickets.errors import TicketTooLarge
+    from flowgency.tickets.git_evidence import GitCaptureRequest, retained_git_artifact
+    from flowgency.tickets.models import AgentTicketContext
+
+    env = workflow_env
+    ticket = env.create(values={"verdict": True})
+    policy = GitPublicationPolicy(mode="local")
+    commit = "a" * 40
+    captured = GitRangeCapture(
+        repository_id="b" * 64,
+        base_commit=commit,
+        end_commit=commit,
+        commit_ids=(),
+        files=tuple(
+            GitFileChange(
+                path=f"{index:04d}/" + "p" * 150,
+                old_path=None,
+                status="modified",
+                lines_added=1,
+                lines_removed=0,
+                binary=False,
+                submodule=False,
+                old_mode="100644",
+                new_mode="100644",
+                old_object_id="c" * 40,
+                new_object_id="d" * 40,
+            )
+            for index in range(1024)
+        ),
+        patch=b"x" * (640 * 1024),
+    )
+    receipt = GitPublicationReceipt(
+        mode="local",
+        policy_digest=git_policy_digest(policy),
+        publication_ref=None,
+        ref_object_id=None,
+        observed_commit=commit,
+        verified_at=datetime(2026, 9, 18, tzinfo=timezone.utc),
+    )
+
+    with pytest.raises(TicketTooLarge):
+        retained_git_artifact(
+            captured,
+            receipt,
+            actor=AgentTicketContext(
+                job_id="run-a",
+                team_id=env.team_id,
+                agent_name="builder",
+                session_id=f"{env.team_id}:run-a:abc",
+            ),
+            version=ticket.version,
+            request=GitCaptureRequest(
+                transition_id="complete",
+                field_id="evidence",
+                base_commit=commit,
+                end_commit=commit,
+            ),
+            policy=policy,
+            captured_at=datetime(2026, 9, 18, tzinfo=timezone.utc),
+            workspace=env.tmp_path,
+        )

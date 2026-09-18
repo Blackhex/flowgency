@@ -134,6 +134,91 @@ def sha256_supported(tmp_path: Path) -> bool:
     return True
 
 
+def capture_request(fixture: GitTestRepository, **overrides):
+    """The ordinary evidence request for a fixture's seeded commit range."""
+    from flowgency.tickets.git_evidence import GitCaptureRequest
+
+    payload = {
+        "transition_id": "complete",
+        "field_id": "evidence",
+        "base_commit": fixture.base_commit,
+        "end_commit": fixture.end_commit,
+    }
+    payload.update(overrides)
+    return GitCaptureRequest(**payload)
+
+
+def launched_with_effective_policy(env, authority, agent_name: str):
+    """Record the launch-time policy a real launcher would have snapshotted.
+
+    ``WorkflowTestEnv.running_job`` stores a placeholder restricted policy with
+    no rules, which grants nothing, so capture would be denied for a reason no
+    real launch produces. The job file is rewritten through the real job APIs.
+    """
+    from dataclasses import replace
+
+    from flowgency.configuration.effective import resolve_effective_policy
+    from flowgency.jobs.models import RuntimePolicySnapshot
+    from flowgency.jobs.store import read_job, write_job
+
+    record = read_job(authority.path)
+    policy = resolve_effective_policy(env.store.load().config, env.team_id, agent_name)
+    spec = replace(
+        record.spec, runtime_policy=RuntimePolicySnapshot.from_effective_policy(policy)
+    )
+    updated = replace(record, spec=spec, authority_digest=spec.immutable_digest())
+    write_job(authority.path, updated)
+    return env.job_store.reference(
+        env.team_id, record.spec.job_id, updated.authority_digest
+    )
+
+
+def configure_git_ticket(env, fixture: GitTestRepository, policy):
+    """Point a real team at a Git fixture and start a real run on a ticket.
+
+    Returns the running agent's context and the started ticket view.
+    """
+    from flowgency.tickets.access import TicketAccessRegistry
+    from flowgency.workflows.models import WorkflowDefinition
+
+    snapshot = env.store.load()
+
+    def configure(raw):
+        team = raw["teams"][env.team_id]
+        team["workspace_path"] = str(fixture.root)
+        team["git_publication"] = policy.model_dump(mode="json")
+
+    env.store.patch(snapshot.revision, configure)
+    env.publish_artifact_field_workflow()
+    source = env.library.inspect(env.blueprint_id)
+    document = source.definition.model_dump(mode="json")
+    for field in document["fields"]:
+        if field["id"] == "evidence":
+            field["artifact_format"] = "git-change"
+    for transition in document["transitions"]:
+        if transition["id"] == "complete":
+            for use in transition["outputs"]:
+                if use["field_id"] == "evidence":
+                    use["required"] = True
+    env.configuration_service.save_blueprint(
+        env.store.load().revision,
+        env.blueprint_id,
+        source.digest,
+        WorkflowDefinition.model_validate(document),
+    )
+    authority = env.running_job("builder", "git-evidence-run")
+    authority = launched_with_effective_policy(env, authority, "builder")
+    registry = TicketAccessRegistry(env.job_store)
+    actor = registry.open(authority).context
+    env.service.validate_agent_context = registry.validate_context
+    env.service.resolve_git_job = registry.resolve_context
+    ticket = env.create(values={"verdict": True, "summary": "Pending"})
+    env.service.start_work(
+        actor, ticket.version, env.operation("start", actor_name="builder")
+    )
+    return actor, env.read(ticket.ref)
+
+
 def snapshot_repository(root: Path) -> dict[str, str]:
     """Hash every source ref, index byte, and worktree file for parity checks."""
     snapshot: dict[str, str] = {}

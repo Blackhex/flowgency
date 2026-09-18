@@ -293,6 +293,7 @@ def _ticket_runtime(record: JobRecord, job_store: JobStore):
         resolve_storage,
         registry.validate_context,
         clock=lambda: datetime.now(timezone.utc),
+        resolve_git_job=registry.resolve_context,
     )
     coordinator = TicketJobCoordinator(
         service=service,

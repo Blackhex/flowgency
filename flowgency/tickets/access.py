@@ -134,7 +134,8 @@ class TicketAccessRegistry:
         session_id = f"{team_id}:{job_id}:{nonce}"
         return self._authenticate_token(team_id, job_id, session_id, token)
 
-    def validate_context(self, context: AgentTicketContext) -> None:
+    def resolve_context(self, context: AgentTicketContext) -> JobRecord:
+        """Validate a live agent context and return its running job record."""
         team_id, job_id, _ = _split_session_id(context.session_id)
         if team_id != context.team_id or job_id != context.job_id:
             raise TicketForbidden("invalid-agent-context", "Agent context is not authorized")
@@ -155,6 +156,10 @@ class TicketAccessRegistry:
             if session.run_fingerprint != self._run_fingerprint(record):
                 self._drop_session(locked.path, locked.state, context.session_id)
                 raise TicketForbidden("invalid-agent-context", "Agent context is not authorized")
+            return record
+
+    def validate_context(self, context: AgentTicketContext) -> None:
+        self.resolve_context(context)
 
     def close(self, session_id: str) -> None:
         team_id, job_id, _ = _split_session_id(session_id)

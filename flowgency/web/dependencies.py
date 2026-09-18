@@ -107,6 +107,7 @@ def build_services(config_path: Path | None = None) -> FlowgencyServices:
                     lambda binding: resolve_storage(binding, clock=clock_now),
                     access_registry.validate_context,
                     clock=clock_now,
+                    resolve_git_job=access_registry.resolve_context,
                 )
                 ticket_jobs = TicketJobCoordinator(
                     service=tickets,

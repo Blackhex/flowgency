@@ -144,6 +144,17 @@ GIT_EVIDENCE_MESSAGES: dict[str, str] = {
     "git-evidence-publication-ref-denied": "The requested publication ref is not allowed by this policy.",
     "git-evidence-not-published": "The selected end commit is not contained in the required local ref.",
     "git-evidence-verification-incomplete": "Publication could not be proven from the available history.",
+    # Ticket-facing evidence outcomes. They share this table so a ticket, an
+    # HTTP response, and a tool reply all repeat the same fixed public text.
+    "git-evidence-unavailable": "Git evidence capture is not available for this run.",
+    "git-evidence-manifest-too-large": "The evidence manifest exceeds the retained artifact limit.",
+    "git-evidence-manifest-invalid": "The evidence manifest is not readable.",
+    "git-evidence-untrusted": "This artifact is not trusted Git evidence.",
+    "git-evidence-cross-ticket": "This Git evidence belongs to another ticket.",
+    "git-evidence-workspace-changed": "The configured workspace changed since this evidence was captured.",
+    "git-evidence-policy-changed": "The Git publication policy changed since this evidence was captured.",
+    "git-evidence-field-unsupported": "This field does not accept Git evidence.",
+    "git-evidence-transition-unavailable": "The requested transition is not available for this evidence.",
 }
 
 

@@ -10,6 +10,7 @@ from flowgency.tickets.models import TicketReport, TransitionRequest
 from flowgency.tickets.storages.registry import resolve_storage
 from flowgency.workflows.models import CriterionAssessment
 from flowgency.workflows.models import ContractError
+from tests._git_evidence_helpers import requires_git
 from tests._ticket_helpers import storage_binding, ticket_record
 
 
@@ -516,3 +517,144 @@ def test_attempt_only_inputs_do_not_update_current_fields_or_provenance(workflow
     # The accepted attempt's effective input is retained in the event snapshot
     event = persisted.events[-1]
     assert event.data["effective_inputs"] == {"verdict": True}
+
+
+# -- trusted Git evidence at the transition boundary ------------------------
+
+
+def _captured_evidence(env, name: str = "source"):
+    from flowgency.git_evidence.models import GitPublicationPolicy
+    from tests._git_evidence_helpers import (
+        capture_request,
+        configure_git_ticket,
+        create_git_repository,
+    )
+
+    fixture = create_git_repository(env.tmp_path / name)
+    actor, ticket = configure_git_ticket(env, fixture, GitPublicationPolicy(mode="local"))
+    result = env.service.capture_git_evidence(
+        actor,
+        ticket.version,
+        capture_request(fixture),
+        env.operation("capture", actor_name="builder"),
+    )
+    return actor, ticket, result
+
+
+def _complete_with(env, actor, ticket, artifact, label: str):
+    return env.service.transition(
+        actor,
+        env.read(ticket.ref).version,
+        env.transition_request(outputs={"summary": "Done", "evidence": artifact}),
+        env.operation(label, actor_name="builder"),
+    )
+
+
+@requires_git
+def test_transition_rejects_evidence_after_the_publication_policy_changed(workflow_env):
+    from flowgency.git_evidence.models import GitPublicationPolicy
+
+    env = workflow_env
+    actor, ticket, result = _captured_evidence(env)
+    snapshot = env.store.load()
+    env.store.patch(
+        snapshot.revision,
+        lambda raw: raw["teams"][env.team_id].__setitem__(
+            "git_publication",
+            GitPublicationPolicy(
+                mode="local", allowed_refs=("refs/heads/main",)
+            ).model_dump(mode="json"),
+        ),
+    )
+    before = env.read(ticket.ref).record
+
+    with pytest.raises(TicketConflict) as failure:
+        _complete_with(env, actor, ticket, result.artifact, "policy-changed")
+
+    assert failure.value.code == "git-evidence-policy-changed"
+    assert env.read(ticket.ref).record == before
+
+
+@requires_git
+def test_transition_rejects_evidence_after_the_workspace_changed(workflow_env):
+    from tests._git_evidence_helpers import create_git_repository
+
+    env = workflow_env
+    actor, ticket, result = _captured_evidence(env)
+    moved = create_git_repository(env.tmp_path / "moved")
+    snapshot = env.store.load()
+    env.store.patch(
+        snapshot.revision,
+        lambda raw: raw["teams"][env.team_id].__setitem__(
+            "workspace_path", str(moved.root)
+        ),
+    )
+    before = env.read(ticket.ref).record
+
+    with pytest.raises(TicketConflict) as failure:
+        _complete_with(env, actor, ticket, result.artifact, "workspace-changed")
+
+    assert failure.value.code == "git-evidence-workspace-changed"
+    assert env.read(ticket.ref).record == before
+
+
+@requires_git
+def test_transition_rejects_a_corrupt_or_absent_evidence_blob(workflow_env):
+    from flowgency.tickets.errors import TicketCorrupt, TicketNotFound
+    from flowgency.workflows.models import ArtifactRef
+
+    env = workflow_env
+    actor, ticket, result = _captured_evidence(env)
+    before = env.read(ticket.ref).record
+
+    with pytest.raises(TicketNotFound):
+        _complete_with(
+            env, actor, ticket, ArtifactRef(kind="id", value="b" * 64), "absent-blob"
+        )
+    assert env.read(ticket.ref).record == before
+
+    provider = env.current_provider()
+    provider._artifact_path(ticket.ref, result.artifact.value).write_bytes(b"{")
+    with pytest.raises(TicketCorrupt):
+        _complete_with(env, actor, ticket, result.artifact, "corrupt-blob")
+    assert env.read(ticket.ref).record == before
+
+
+@requires_git
+def test_evidence_validation_checks_receipt_binding_and_survives_history(workflow_env):
+    from flowgency.tickets.errors import TicketEvidenceInvalid
+    from flowgency.tickets.git_evidence import validate_git_artifact
+
+    env = workflow_env
+    _, ticket, result = _captured_evidence(env)
+    record = env.read(ticket.ref).record
+    artifact = env.current_provider().read_artifact(ticket.ref, result.artifact.value)
+
+    # Historical read-only display proves the binding without today's policy.
+    manifest = validate_git_artifact(record, artifact)
+    assert manifest.ticket_id == record.id
+
+    captured = record.events[-1]
+    forged = record.model_copy(
+        update={
+            "events": record.events[:-1]
+            + (
+                captured.model_copy(
+                    update={
+                        "data": {
+                            **captured.data,
+                            "capture": {
+                                **captured.data["capture"],
+                                "repository_id": "f" * 64,
+                            },
+                        }
+                    }
+                ),
+            )
+        }
+    )
+    with pytest.raises(TicketEvidenceInvalid):
+        validate_git_artifact(forged, artifact)
+
+    with pytest.raises(TicketForbidden):
+        validate_git_artifact(record.model_copy(update={"id": "ticket-other"}), artifact)

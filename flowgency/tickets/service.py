@@ -2,13 +2,50 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from flowgency.configuration.effective import resolve_effective_policy
+from flowgency.configuration.issues import ValidationFailed
 from flowgency.configuration.store import ConfigSnapshot, ConfigStore
+from flowgency.git_evidence.capture import capture_committed_range
+from flowgency.git_evidence.git import CAPTURE_TIMEOUT_SECONDS, open_git_repository
+from flowgency.git_evidence.models import (
+    GitCommitRange,
+    GitEvidenceError,
+    GitPublicationPolicy,
+)
+from flowgency.git_evidence.publication import verify_publication
+from flowgency.integrations.models import EffectiveRuntimePolicy
+from flowgency.jobs.authority import JobStore
+from flowgency.jobs.models import JobRecord
+from flowgency.jobs.processes import RuntimeProcessLifecycle
 from flowgency.tickets.artifacts import RetainedArtifact, iter_internal_artifact_refs
-from flowgency.tickets.errors import TicketConflict, TicketForbidden, WorkflowUnavailable
+from flowgency.tickets.errors import (
+    OperationConflict,
+    StorageUnavailable,
+    TicketConflict,
+    TicketCorrupt,
+    TicketEvidenceInvalid,
+    TicketForbidden,
+    TicketStorageError,
+    TicketTooLarge,
+    WorkflowUnavailable,
+)
+from flowgency.tickets.git_evidence import (
+    GIT_EVIDENCE_EVENT_KIND,
+    GitCaptureReceipt,
+    GitCaptureRequest,
+    GitCaptureResult,
+    GitEvidenceManifest,
+    evidence_error,
+    retained_git_artifact,
+    validate_git_artifact,
+    workspace_key,
+)
 from flowgency.tickets.models import (
     ActiveTicketRun,
     AgentTicketContext,
@@ -33,12 +70,74 @@ from flowgency.tickets.transitions import report_event, transition_event
 from flowgency.workflows.configuration import WorkflowBinding, resolve_workflow_binding
 from flowgency.workflows.library import WorkflowLibrary
 from flowgency.workflows.locking import workflow_operation
-from flowgency.workflows.models import WorkflowDefinition, _kind_matches_value
+from flowgency.workflows.models import (
+    ArtifactRef,
+    ContractError,
+    FieldValue,
+    WorkflowDefinition,
+    _kind_matches_value,
+)
 from flowgency.workflows.rules import evaluate_transition
 
 
 StorageFactory = Callable[[StorageBinding], TicketStorage]
 AgentContextValidator = Callable[[AgentTicketContext], None]
+GitJobResolver = Callable[[AgentTicketContext], JobRecord]
+
+# Which ticket error a fixed capture code becomes. Anything unlisted is a
+# semantic evidence failure, so a new capture code can never default to 500.
+_GIT_EVIDENCE_UNAVAILABLE = frozenset(
+    {
+        "git-evidence-workspace-invalid",
+        "git-evidence-not-a-repository",
+        "git-evidence-bare-repository",
+        "git-evidence-worktree-unregistered",
+        "git-evidence-unsafe-repository",
+        "git-evidence-shallow-repository",
+        "git-evidence-scratch-invalid",
+        "git-evidence-git-unavailable",
+        "git-evidence-timeout",
+        "git-evidence-command-failed",
+        "git-evidence-verification-incomplete",
+    }
+)
+_GIT_EVIDENCE_LIMITS = frozenset(
+    {
+        "git-evidence-too-many-commits",
+        "git-evidence-too-many-files",
+        "git-evidence-output-too-large",
+    }
+)
+_GIT_EVIDENCE_CONFLICTS = frozenset(
+    {
+        "git-evidence-publication-policy-missing",
+        "git-evidence-repository-changed",
+    }
+)
+
+
+def _git_evidence_failure(error: GitEvidenceError) -> TicketStorageError:
+    if error.code in _GIT_EVIDENCE_UNAVAILABLE:
+        return StorageUnavailable(error.code, error.message)
+    if error.code in _GIT_EVIDENCE_LIMITS:
+        return TicketTooLarge(error.code, error.message)
+    if error.code in _GIT_EVIDENCE_CONFLICTS:
+        return TicketConflict(error.code, error.message)
+    if error.code == "git-evidence-path-denied":
+        return TicketForbidden(error.code, error.message)
+    return TicketEvidenceInvalid(error.code, error.message)
+
+
+@dataclass(frozen=True)
+class _GitCapturePlan:
+    """Everything a bounded Git read needs, resolved while the locks were held."""
+
+    workspace: Path
+    workspace_key: str
+    policy: GitPublicationPolicy
+    policies: tuple[EffectiveRuntimePolicy, ...]
+    scratch_root: Path
+    job_id: str
 
 
 def require_active_owner(record: TicketRecord, actor: AgentTicketContext) -> None:
@@ -68,12 +167,17 @@ class TicketService:
         storage_factory: StorageFactory,
         validate_agent_context: AgentContextValidator,
         clock: Clock,
+        *,
+        resolve_git_job: GitJobResolver | None = None,
     ) -> None:
         self.config_store = config_store
         self._library = library
         self.storage_factory = storage_factory
         self.validate_agent_context = validate_agent_context
         self.clock = clock
+        # Without a trusted resolver capture is unavailable. It never falls
+        # back to believing the caller's own claim about its job.
+        self.resolve_git_job = resolve_git_job
 
     def inspect(self, actor: TicketActor, ref: TicketRef) -> TicketView:
         snapshot = self.config_store.load()
@@ -185,6 +289,11 @@ class TicketService:
             definition, workflow_snapshot = self._resolve_definition(binding, snapshot=snapshot)
             field_values = dict(values or {})
             self._validate_field_values(definition, field_values)
+            # A ticket that does not exist yet can hold no capture receipt, so
+            # no Git evidence can be trusted at creation.
+            for field_id, value in field_values.items():
+                if value is not None and self._is_git_field(definition, field_id):
+                    raise evidence_error(TicketEvidenceInvalid, "git-evidence-untrusted")
             now = self.clock()
             event_id = uuid.uuid4().hex
             event = self._event("opened", actor, "Ticket created", event_id, now)
@@ -367,6 +476,8 @@ class TicketService:
                 now,
                 event_id,
                 self._event("updated", actor, "Ticket content updated", event_id, now),
+                snapshot,
+                binding,
             ),
         )
 
@@ -393,6 +504,7 @@ class TicketService:
                 operation,
                 version,
                 binding,
+                snapshot,
             ),
         )
 
@@ -455,6 +567,384 @@ class TicketService:
             artifact = RetainedArtifact.create(filename, media_type, content)
             self._require_current_contract(binding, snapshot.revision, snapshot_def.digest)
             return provider.put_artifact(version.ref, artifact)
+
+    # -- trusted Git evidence ---------------------------------------------
+
+    def capture_git_evidence(
+        self,
+        actor: AgentTicketContext,
+        version: TicketVersion,
+        request: GitCaptureRequest,
+        operation: TicketOperation,
+    ) -> GitCaptureResult:
+        """Capture a selected committed range as this ticket's trusted evidence.
+
+        Nothing is committed, pushed, fetched, or written to the workspace: the
+        range is read through a private view, and only the ticket changes.
+        """
+        if not isinstance(actor, AgentTicketContext):
+            raise TicketForbidden("forbidden", "Only an agent may capture Git evidence")
+        if self.resolve_git_job is None:
+            raise evidence_error(TicketConflict, "git-evidence-unavailable")
+        self._validate_actor(actor)
+        self._require_team_access(actor, version.ref.team_id)
+        initial = self._resolve_current_binding(
+            version.ref.team_id, version.ref.workflow_id
+        )
+        if initial.storage.binding_id != version.ref.binding_id:
+            raise TicketConflict("stale-ticket", "Refresh the ticket")
+        provider = self.storage_factory(initial.storage)
+        require_active_owner(provider.read(version.ref), actor)
+        # An accepted operation replays from its own receipt: no Git work, and
+        # no rejection merely because the policy or definition moved on.
+        replayed = provider.receipt(version.ref, operation)
+        if replayed is not None:
+            return self._replayed_capture(version.ref, replayed)
+        plan = self._prepare_git_capture(actor, version, request)
+        captured_at = self.clock()
+        artifact = self._read_git_evidence(actor, version, request, plan, captured_at)
+        return self._commit_git_capture(actor, version, request, operation, artifact, plan)
+
+    def _replayed_capture(
+        self, ref: TicketRef, replayed: TicketMutationResult
+    ) -> GitCaptureResult:
+        record = replayed.ticket
+        event = next(
+            (item for item in reversed(record.events) if item.id == replayed.event_id),
+            None,
+        )
+        if event is None or event.kind != GIT_EVIDENCE_EVENT_KIND:
+            raise OperationConflict(
+                "operation-kind-mismatch",
+                "Reused operation id with different content",
+            )
+        try:
+            receipt = GitCaptureReceipt.model_validate(event.data.get("capture"))
+        except Exception as error:
+            raise TicketCorrupt(
+                "corrupt-record",
+                "Ticket capture receipt is not readable",
+                ticket_id=ref.ticket_id,
+            ) from error
+        return GitCaptureResult(
+            artifact=ArtifactRef(kind="id", value=receipt.artifact_id),
+            version=TicketVersion(
+                ref=ref,
+                revision=record.revision,
+                workflow_digest=receipt.workflow_digest,
+                context_digest=receipt.context_digest,
+            ),
+            mutation=replayed,
+        )
+
+    def _prepare_git_capture(
+        self,
+        actor: AgentTicketContext,
+        version: TicketVersion,
+        request: GitCaptureRequest,
+    ) -> _GitCapturePlan:
+        initial = self._resolve_current_binding(
+            version.ref.team_id, version.ref.workflow_id
+        )
+        with workflow_operation(
+            self.config_store,
+            (version.ref.team_id,),
+            (initial.blueprint_id,),
+        ) as snapshot:
+            self._require_capture_context(snapshot, actor, version, request, initial)
+            return self._resolve_git_plan(snapshot, actor, version)
+
+    def _require_capture_context(
+        self,
+        snapshot: ConfigSnapshot,
+        actor: AgentTicketContext,
+        version: TicketVersion,
+        request: GitCaptureRequest,
+        initial: WorkflowBinding,
+    ) -> tuple[WorkflowBinding, WorkflowDefinition, TicketStorage]:
+        binding = resolve_workflow_binding(
+            snapshot, version.ref.team_id, version.ref.workflow_id
+        )
+        if binding.blueprint_id != initial.blueprint_id:
+            raise TicketConflict("stale-ticket", "Refresh the ticket")
+        self._require_configured_agent(snapshot, actor)
+        self._require_current_version(binding, version)
+        definition, snapshot_def = self._resolve_definition(binding, snapshot=snapshot)
+        if snapshot_def.digest != version.workflow_digest:
+            raise TicketConflict("stale-ticket", "Refresh the ticket")
+        provider = self.storage_factory(binding.storage)
+        record = provider.read(version.ref)
+        if record.revision != version.revision:
+            raise TicketConflict("stale-ticket", "Refresh the ticket")
+        require_active_owner(record, actor)
+        self._require_git_output(definition, record, request)
+        return binding, definition, provider
+
+    def _require_git_output(
+        self,
+        definition: WorkflowDefinition,
+        record: TicketRecord,
+        request: GitCaptureRequest,
+    ) -> None:
+        try:
+            transition = definition.transition(request.transition_id)
+        except ContractError as error:
+            raise evidence_error(
+                TicketConflict, "git-evidence-transition-unavailable"
+            ) from error
+        if transition.from_state != record.state_id:
+            raise evidence_error(TicketConflict, "git-evidence-transition-unavailable")
+        if all(use.field_id != request.field_id for use in transition.outputs):
+            raise evidence_error(
+                TicketEvidenceInvalid, "git-evidence-field-unsupported"
+            )
+        try:
+            field = definition.field(request.field_id)
+        except ContractError as error:
+            raise evidence_error(
+                TicketEvidenceInvalid, "git-evidence-field-unsupported"
+            ) from error
+        if field.type != "artifact" or field.artifact_format != "git-change":
+            raise evidence_error(TicketEvidenceInvalid, "git-evidence-field-unsupported")
+
+    def _resolve_git_plan(
+        self,
+        snapshot: ConfigSnapshot,
+        actor: AgentTicketContext,
+        version: TicketVersion,
+    ) -> _GitCapturePlan:
+        team = snapshot.config.teams[version.ref.team_id]
+        policy = team.git_publication
+        if policy is None:
+            raise evidence_error(
+                TicketConflict, "git-evidence-publication-policy-missing"
+            )
+        job = self.resolve_git_job(actor)
+        if workspace_key(job.spec.workspace_root) != workspace_key(team.workspace_path):
+            raise evidence_error(TicketConflict, "git-evidence-workspace-changed")
+        try:
+            current_policy = resolve_effective_policy(
+                snapshot.config, version.ref.team_id, actor.agent_name
+            )
+        except (KeyError, ValidationFailed) as error:
+            raise TicketForbidden(
+                "unknown-agent", "Configured agent does not exist"
+            ) from error
+        store = JobStore(snapshot.config.flowgency.memory_store)
+        artifacts = store.artifact_root(version.ref.team_id, job.spec.job_id)
+        scratch_root = (artifacts / "git-evidence").resolve(strict=False)
+        if scratch_root.parent != artifacts:
+            raise evidence_error(StorageUnavailable, "git-evidence-scratch-invalid")
+        return _GitCapturePlan(
+            workspace=Path(team.workspace_path),
+            workspace_key=workspace_key(team.workspace_path),
+            policy=policy,
+            # Reads must satisfy the launch-time policy and today's policy.
+            policies=(job.spec.runtime_policy.to_effective_policy(), current_policy),
+            scratch_root=scratch_root,
+            job_id=job.spec.job_id,
+        )
+
+    def _read_git_evidence(
+        self,
+        actor: AgentTicketContext,
+        version: TicketVersion,
+        request: GitCaptureRequest,
+        plan: _GitCapturePlan,
+        captured_at,
+    ) -> RetainedArtifact:
+        """Read the selected range with every configuration lock released."""
+        generation = f"git-evidence-{uuid.uuid4().hex}"
+        lifecycle = RuntimeProcessLifecycle(job_id=plan.job_id, generation=generation)
+        deadline = time.monotonic() + CAPTURE_TIMEOUT_SECONDS
+        try:
+            plan.scratch_root.mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            raise evidence_error(
+                StorageUnavailable, "git-evidence-scratch-invalid"
+            ) from error
+        try:
+            # ``open_git_repository`` owns a fresh private session below this
+            # root and removes it again; this generation owns the processes.
+            with open_git_repository(
+                plan.workspace,
+                scratch_root=plan.scratch_root,
+                lifecycle=lifecycle,
+                deadline=deadline,
+            ) as repository:
+                captured = capture_committed_range(
+                    repository,
+                    GitCommitRange(request.base_commit, request.end_commit),
+                    policies=plan.policies,
+                    lifecycle=lifecycle,
+                    deadline=deadline,
+                )
+                receipt = verify_publication(
+                    repository,
+                    captured,
+                    plan.policy,
+                    publication_ref=request.publication_ref,
+                    lifecycle=lifecycle,
+                    deadline=deadline,
+                    now=captured_at,
+                )
+        except GitEvidenceError as error:
+            raise _git_evidence_failure(error) from error
+        return retained_git_artifact(
+            captured,
+            receipt,
+            actor=actor,
+            version=version,
+            request=request,
+            policy=plan.policy,
+            captured_at=captured_at,
+            workspace=plan.workspace,
+        )
+
+    def _commit_git_capture(
+        self,
+        actor: AgentTicketContext,
+        version: TicketVersion,
+        request: GitCaptureRequest,
+        operation: TicketOperation,
+        artifact: RetainedArtifact,
+        plan: _GitCapturePlan,
+    ) -> GitCaptureResult:
+        manifest = GitEvidenceManifest.model_validate_json(artifact.content)
+        initial = self._resolve_current_binding(
+            version.ref.team_id, version.ref.workflow_id
+        )
+        with workflow_operation(
+            self.config_store,
+            (version.ref.team_id,),
+            (initial.blueprint_id,),
+        ) as snapshot:
+            # The session, the run's ownership, and the whole contract are
+            # proven again: the read above ran without any of these locks.
+            self._validate_actor(actor)
+            binding, _, provider = self._require_capture_context(
+                snapshot, actor, version, request, initial
+            )
+            current = self._resolve_git_plan(snapshot, actor, version)
+            if current.workspace_key != plan.workspace_key:
+                raise evidence_error(TicketConflict, "git-evidence-workspace-changed")
+            if current.policy != plan.policy:
+                raise evidence_error(TicketConflict, "git-evidence-policy-changed")
+            _, snapshot_def = self._resolve_definition(binding, snapshot=snapshot)
+            now = self.clock()
+            event_id = uuid.uuid4().hex
+            receipt = GitCaptureReceipt(
+                artifact_id=artifact.digest,
+                repository_id=manifest.repository_id,
+                workspace_identity=manifest.workspace_identity,
+                policy_digest=manifest.policy_digest,
+                workflow_digest=version.workflow_digest,
+                context_digest=version.context_digest,
+                transition_id=request.transition_id,
+                field_id=request.field_id,
+                agent_name=actor.agent_name,
+                job_id=actor.job_id,
+            )
+            event = TicketEvent(
+                id=event_id,
+                kind=GIT_EVIDENCE_EVENT_KIND,
+                actor=actor.agent_name,
+                summary="Captured Git evidence",
+                data={
+                    "job_id": actor.job_id,
+                    "operation_id": operation.operation_id,
+                    "recorded_at": now.isoformat(),
+                    "capture": receipt.model_dump(mode="json"),
+                },
+                at=now,
+            )
+            result = provider.apply(
+                version.ref,
+                version.revision,
+                operation,
+                lambda record: self._capture_record(
+                    record,
+                    actor,
+                    artifact,
+                    event,
+                    provider,
+                    version.ref,
+                    snapshot,
+                    binding,
+                    snapshot_def.digest,
+                ),
+            )
+        return GitCaptureResult(
+            artifact=artifact.ref(),
+            version=TicketVersion(
+                ref=version.ref,
+                revision=result.ticket.revision,
+                workflow_digest=receipt.workflow_digest,
+                context_digest=receipt.context_digest,
+            ),
+            mutation=result,
+        )
+
+    def _capture_record(
+        self,
+        record: TicketRecord,
+        actor: AgentTicketContext,
+        artifact: RetainedArtifact,
+        event: TicketEvent,
+        provider: TicketStorage,
+        ref: TicketRef,
+        snapshot: ConfigSnapshot,
+        binding: WorkflowBinding,
+        workflow_digest: str,
+    ) -> TicketRecord:
+        self._require_current_contract(binding, snapshot.revision, workflow_digest)
+        require_active_owner(record, actor)
+        # The ticket lock is already held here; the artifact lock is always
+        # taken inside it, never the other way round.
+        provider.put_artifact(ref, artifact)
+        return record.model_copy(update={"events": record.events + (event,)})
+
+    def _require_trusted_git_values(
+        self,
+        record: TicketRecord,
+        definition: WorkflowDefinition,
+        values: dict[str, FieldValue],
+        *,
+        snapshot: ConfigSnapshot,
+        binding: WorkflowBinding,
+    ) -> None:
+        """Refuse any Git-format field value this ticket did not itself capture."""
+        team = snapshot.config.teams[binding.team_id]
+        provider: TicketStorage | None = None
+        for field_id, value in values.items():
+            if value is None or not self._is_git_field(definition, field_id):
+                continue
+            if not isinstance(value, ArtifactRef) or value.kind != "id":
+                raise evidence_error(TicketEvidenceInvalid, "git-evidence-untrusted")
+            if record.ref is None:
+                raise TicketConflict(
+                    "unbound-record", "Ticket record must be scoped with a ref"
+                )
+            if team.git_publication is None:
+                raise evidence_error(
+                    TicketConflict, "git-evidence-publication-policy-missing"
+                )
+            if provider is None:
+                provider = self.storage_factory(binding.storage)
+            artifact = provider.read_artifact(record.ref, value.value)
+            validate_git_artifact(
+                record,
+                artifact,
+                workspace=team.workspace_path,
+                policy=team.git_publication,
+            )
+
+    def _is_git_field(self, definition: WorkflowDefinition, field_id: str) -> bool:
+        try:
+            field = definition.field(field_id)
+        except ContractError:
+            return False
+        return field.artifact_format == "git-change"
 
     def _mutate(
         self,
@@ -616,6 +1106,8 @@ class TicketService:
         now,
         event_id: str,
         event: TicketEvent,
+        snapshot: ConfigSnapshot,
+        binding: WorkflowBinding,
     ) -> TicketRecord:
         if isinstance(actor, AgentTicketContext):
             self._require_agent_ownership(record, actor)
@@ -623,6 +1115,13 @@ class TicketService:
         field_provenance = dict(record.field_provenance)
         if patch.field_values is not None:
             self._validate_field_values(definition, patch.field_values)
+            self._require_trusted_git_values(
+                record,
+                definition,
+                dict(patch.field_values),
+                snapshot=snapshot,
+                binding=binding,
+            )
             field_values.update(patch.field_values)
             field_provenance.update(
                 self._stamp_field_provenance(actor, patch.field_values, event_id, now)
@@ -843,6 +1342,7 @@ class TicketService:
         operation: TicketOperation,
         version: TicketVersion,
         binding: WorkflowBinding,
+        snapshot: ConfigSnapshot,
     ) -> TicketRecord:
         require_active_owner(record, actor)
         evaluated = evaluate_transition(
@@ -856,6 +1356,13 @@ class TicketService:
         )
         if record.ref is None:
             raise TicketConflict("unbound-record", "Ticket record must be scoped with a ref")
+        self._require_trusted_git_values(
+            record,
+            definition,
+            {**dict(evaluated.effective_inputs), **dict(evaluated.effective_outputs)},
+            snapshot=snapshot,
+            binding=binding,
+        )
         provider = self.storage_factory(binding.storage)
         for artifact_ref in iter_internal_artifact_refs(
             dict(evaluated.effective_inputs),

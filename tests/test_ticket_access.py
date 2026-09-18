@@ -20,6 +20,23 @@ def test_closed_session_cannot_mutate(workflow_env):
         env.access_registry.authenticate(grant.token)
 
 
+def test_resolve_context_returns_the_running_job_and_fails_closed(workflow_env):
+    env = workflow_env
+    authority = env.running_job("builder", "run-a")
+
+    grant = env.access_registry.open(authority)
+    record = env.access_registry.resolve_context(grant.context)
+
+    assert record.spec.job_id == authority.job_id
+    assert record.spec.agent_name == "builder"
+    assert record.status == "running"
+    assert env.access_registry.validate_context(grant.context) is None
+
+    env.access_registry.close(grant.session_id)
+    with pytest.raises(TicketForbidden):
+        env.access_registry.resolve_context(grant.context)
+
+
 def test_open_persists_token_hash_only(workflow_env):
     env = workflow_env
     authority = env.running_job("builder", "run-a")
