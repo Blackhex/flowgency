@@ -98,6 +98,17 @@ def create_git_repository(root: Path, *, object_format: str = "sha1") -> GitTest
     return GitTestRepository(root, base_commit, end_commit)
 
 
+def create_bare_remote(root: Path) -> Path:
+    """Initialise an empty bare repository fixtures may publish into.
+
+    Only ever called with a ``tmp_path`` destination: publication tests must
+    reach an isolated repository, never a real project remote.
+    """
+    root.mkdir(parents=True, exist_ok=True)
+    git_command(root, "init", "--bare", "--template=", "--initial-branch=main")
+    return root
+
+
 def commit_tree(root: Path, entries: bytes, *, parent: str, message: str = "test: raw tree") -> str:
     """Commit a literal ``mktree -z`` payload.
 

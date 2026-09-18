@@ -15,6 +15,7 @@ import contextlib
 import hashlib
 import math
 import os
+import re
 import shutil
 import time
 import uuid
@@ -32,6 +33,8 @@ MAX_PATCH_BYTES = 640 * 1024
 # their own bounded room, so a patch that exactly fills its byte budget is not
 # rejected because of a harmless warning.
 STDERR_ALLOWANCE_BYTES = 64 * 1024
+
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
 
 _SUPPORTED_OBJECT_FORMATS = {"sha1", "sha256"}
 
@@ -465,3 +468,94 @@ def run_git_bytes(
     if code != 0:
         raise GitEvidenceError("git-evidence-command-failed")
     return data
+
+
+def untrusted_roots(repository: GitRepository) -> tuple[Path, ...]:
+    """Roots no helper executable for this repository may be resolved from."""
+    return _untrusted_roots(repository.workspace, repository.object_view.parent)
+
+
+def read_source_config_values(
+    repository: GitRepository,
+    key: str,
+    *,
+    lifecycle: RuntimeProcessLifecycle,
+    deadline: float,
+) -> tuple[str, ...]:
+    """Every value of one source config key, with includes and discovery off.
+
+    Used to check what the project *declares*, never to decide what capture
+    does: an ``include.path``, an ``insteadOf`` rewrite, or a credential helper
+    in the source config can neither be evaluated nor inherited from here.
+    """
+    session = repository.object_view.parent
+    forbidden_roots = _untrusted_roots(repository.workspace, session)
+    executable = resolve_trusted_executable("git", forbidden_roots=forbidden_roots)
+    code, data = _run_git_raw(
+        executable,
+        (
+            "config",
+            "--no-includes",
+            "--file",
+            str(repository.common_dir / "config"),
+            "--get-all",
+            key,
+        ),
+        cwd=session,
+        env=_git_environment(session, forbidden_roots=forbidden_roots),
+        lifecycle=lifecycle,
+        deadline=deadline,
+        output_limit=64 * 1024,
+    )
+    if code != 0:
+        return ()
+    text = data.decode("utf-8", errors="replace")
+    return tuple(line.strip() for line in text.split("\n") if line.strip())
+
+
+# Only these names may be added to a transport read's environment. Everything
+# else Git or SSH would consult for a credential, a helper, or a destination
+# stays absent, exactly as it is for an ordinary offline read.
+_ALLOWED_REMOTE_ENV_NAMES = frozenset({"GIT_SSH_COMMAND", "SSH_AUTH_SOCK"})
+
+
+def run_git_remote(
+    repository: GitRepository,
+    arguments: tuple[str, ...],
+    *,
+    config_options: tuple[str, ...] = (),
+    environment_overrides: dict[str, str] | None = None,
+    lifecycle: RuntimeProcessLifecycle,
+    deadline: float,
+    output_limit: int,
+) -> tuple[int, bytes]:
+    """Run one bounded read that may contact an already-approved endpoint.
+
+    The private object view is still the working context and the environment is
+    still built from scratch, so the source repository's configuration cannot
+    choose the destination, the transport, or a helper.
+    """
+    session = repository.object_view.parent
+    forbidden_roots = _untrusted_roots(repository.workspace, session)
+    executable = resolve_trusted_executable("git", forbidden_roots=forbidden_roots)
+    env = _git_environment(session, forbidden_roots=forbidden_roots)
+    for name, value in (environment_overrides or {}).items():
+        if name not in _ALLOWED_REMOTE_ENV_NAMES:
+            raise ValueError(f"Unsupported remote environment override: {name!r}")
+        if _CONTROL_CHARS_RE.search(value):
+            raise ValueError("Remote environment override must not contain control characters")
+        env[name] = value
+    options: list[str] = []
+    for option in config_options:
+        if "=" not in option or _CONTROL_CHARS_RE.search(option):
+            raise ValueError(f"Unsupported Git config option: {option!r}")
+        options.extend(("-c", option))
+    return _run_git_raw(
+        executable,
+        ("--git-dir", str(repository.object_view), *options, *arguments),
+        cwd=repository.object_view,
+        env=env,
+        lifecycle=lifecycle,
+        deadline=deadline,
+        output_limit=output_limit,
+    )

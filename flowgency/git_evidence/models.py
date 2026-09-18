@@ -17,7 +17,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import string
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
@@ -151,6 +153,32 @@ class GitPublicationPolicy(BaseModel):
         return self
 
 
+def validate_exact_ref(ref: str) -> str:
+    """Validate one concrete ref name, rejecting the allowlist wildcard form."""
+    if not isinstance(ref, str):
+        raise ValueError("Ref must be a string")
+    _validate_ref(ref)
+    if "*" in ref:
+        raise ValueError(f"A publication ref must be exact, not a pattern: {ref!r}")
+    return ref
+
+
+def ref_matches_allowlist(ref: str, allowed_refs: tuple[str, ...]) -> bool:
+    """Whether an exact ref is authorized by an allowlist entry.
+
+    A trailing ``/*`` entry authorizes names below that prefix; it never
+    authorizes the prefix itself, and no other wildcard form exists.
+    """
+    for pattern in allowed_refs:
+        if pattern.endswith("/*"):
+            prefix = pattern[:-1]
+            if ref.startswith(prefix) and len(ref) > len(prefix):
+                return True
+        elif ref == pattern:
+            return True
+    return False
+
+
 def git_policy_digest(policy: GitPublicationPolicy | None) -> str | None:
     """Return a canonical SHA-256 digest of a publication policy, or None."""
     if policy is None:
@@ -184,6 +212,17 @@ GIT_EVIDENCE_MESSAGES: dict[str, str] = {
     "git-evidence-unsupported-change": "A change kind in the selected range is not supported.",
     "git-evidence-path-denied": "A changed path is outside the actor's effective read permissions.",
     "git-evidence-repository-changed": "The source repository changed while evidence was being read.",
+    "git-evidence-publication-policy-missing": "No Git publication policy is configured for this team.",
+    "git-evidence-publication-ref-required": "This publication policy requires an explicitly allowed ref.",
+    "git-evidence-publication-ref-denied": "The requested publication ref is not allowed by this policy.",
+    "git-evidence-not-published": "The selected end commit is not published at the required ref.",
+    "git-evidence-verification-incomplete": "Publication could not be proven from the available history.",
+    "git-evidence-remote-misconfigured": "The configured remote does not match the approved publication endpoint.",
+    "git-evidence-remote-unreachable": "The approved publication endpoint could not be read.",
+    "git-evidence-remote-response-invalid": "The publication endpoint's ref advertisement could not be trusted.",
+    "git-evidence-credentials-denied": "This job may not use Git credentials for publication verification.",
+    "git-evidence-credential-helper-unavailable": "No trusted Git credential helper was found on the deployment path.",
+    "git-evidence-ssh-agent-unavailable": "No allowed SSH agent socket is available for publication verification.",
 }
 
 
@@ -201,6 +240,22 @@ class GitEvidenceError(Exception):
         super().__init__(resolved)
         self.code = code
         self.message = resolved
+
+
+_OBJECT_ID_LENGTHS = {"sha1": 40, "sha256": 64}
+_HEX_DIGITS = frozenset(string.hexdigits.lower())
+
+
+def validate_object_id(value: str, object_format: str) -> str:
+    """Accept only a full lowercase object ID of this repository's format."""
+    expected = _OBJECT_ID_LENGTHS.get(object_format)
+    if expected is None:
+        raise GitEvidenceError("git-evidence-invalid-commit")
+    if not isinstance(value, str) or len(value) != expected:
+        raise GitEvidenceError("git-evidence-invalid-commit")
+    if any(character not in _HEX_DIGITS or character.isupper() for character in value):
+        raise GitEvidenceError("git-evidence-invalid-commit")
+    return value
 
 
 @dataclass(frozen=True)
@@ -244,3 +299,28 @@ class GitRangeCapture:
     commit_ids: tuple[str, ...]
     files: tuple[GitFileChange, ...]
     patch: bytes
+
+
+@dataclass(frozen=True)
+class GitRefObservation:
+    """One ref's own object plus the commit it resolves to.
+
+    An annotated tag's ref object is the tag object, not its commit, so both
+    identities are kept: peeling must never be mistaken for the published ref.
+    """
+
+    ref_object_id: str
+    commit_id: str
+
+
+@dataclass(frozen=True)
+class GitPublicationReceipt:
+    """What was observed, where, and when – not a permanent membership claim."""
+
+    mode: Literal["local", "remote"]
+    policy_digest: str
+    publication_ref: str | None
+    ref_object_id: str | None
+    observed_commit: str
+    verified_at: datetime
+    remote_identity: str | None

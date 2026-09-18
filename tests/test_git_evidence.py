@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import json
 import os
 import shutil
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -22,6 +24,7 @@ from pydantic import ValidationError
 
 from flowgency.git_evidence import capture as capture_module
 from flowgency.git_evidence import git as git_module
+from flowgency.git_evidence import publication as publication_module
 from flowgency.git_evidence.capture import capture_committed_range
 from flowgency.git_evidence.git import (
     open_git_repository,
@@ -43,6 +46,7 @@ from flowgency.jobs.processes import (
 )
 from tests._git_evidence_helpers import (
     commit_tree,
+    create_bare_remote,
     create_git_repository,
     git_command,
     init_git_repository,
@@ -79,6 +83,46 @@ def _source_unchanged(root: Path):
     before = snapshot_repository(root)
     yield
     assert snapshot_repository(root) == before
+
+
+_VERIFIED_AT = datetime(2026, 9, 18, 12, 0, tzinfo=timezone.utc)
+
+
+@contextlib.contextmanager
+def _publication_context(root: Path, base: str, end: str, scratch: Path):
+    lifecycle = _lifecycle("publication-test")
+    with open_git_repository(root, scratch_root=scratch, lifecycle=lifecycle) as repository:
+        deadline = time.monotonic() + 120
+        captured = capture_committed_range(
+            repository,
+            GitCommitRange(base, end),
+            policies=UNRESTRICTED,
+            lifecycle=lifecycle,
+            deadline=deadline,
+        )
+        yield (repository, captured, lifecycle, deadline)
+
+
+def _verify(context, policy, *, publication_ref, credentials_allowed=False):
+    repository, captured, lifecycle, deadline = context
+    return publication_module.verify_publication(
+        repository,
+        captured,
+        policy,
+        publication_ref=publication_ref,
+        credentials_allowed=credentials_allowed,
+        lifecycle=lifecycle,
+        deadline=deadline,
+        now=_VERIFIED_AT,
+    )
+
+
+def _file_remote_policy(remote: Path, *allowed_refs: str) -> GitPublicationPolicy:
+    return GitPublicationPolicy(
+        mode="remote",
+        allowed_refs=allowed_refs or ("refs/heads/main",),
+        remote=GitRemotePolicy(name="origin", url=remote.as_uri()),
+    )
 
 
 def test_local_git_policy_needs_no_remote():
@@ -1106,3 +1150,605 @@ def test_a_read_that_exactly_fills_its_stdout_limit_is_accepted(tmp_path):
             )
     assert at_limit == exact
     assert failure.value.code == "git-evidence-output-too-large"
+
+
+@requires_git
+def test_local_publication_does_not_query_a_remote(monkeypatch, tmp_path):
+    from datetime import datetime, timezone
+
+    from flowgency.git_evidence import publication
+
+    fixture = create_git_repository(tmp_path / "repo")
+    lifecycle = RuntimeProcessLifecycle(job_id="capture-test", generation="local-only")
+
+    def reject_remote(*arguments, **keywords):
+        pytest.fail("Local policy attempted remote verification")
+
+    monkeypatch.setattr(publication, "observe_remote_ref", reject_remote)
+    with open_git_repository(
+        fixture.root, scratch_root=tmp_path / "scratch", lifecycle=lifecycle
+    ) as repository:
+        deadline = time.monotonic() + 120
+        captured = capture_committed_range(
+            repository,
+            GitCommitRange(fixture.base_commit, fixture.end_commit),
+            policies=(EffectiveRuntimePolicy(timeout=30),),
+            lifecycle=lifecycle,
+            deadline=deadline,
+        )
+        receipt = publication.verify_publication(
+            repository,
+            captured,
+            GitPublicationPolicy(mode="local"),
+            publication_ref=None,
+            credentials_allowed=False,
+            lifecycle=lifecycle,
+            deadline=deadline,
+            now=datetime.now(timezone.utc),
+        )
+    assert receipt.mode == "local"
+    assert receipt.remote_identity is None
+    assert receipt.observed_commit == fixture.end_commit
+    assert receipt.publication_ref is None
+    assert receipt.ref_object_id is None
+    assert receipt.policy_digest == git_policy_digest(GitPublicationPolicy(mode="local"))
+
+
+@requires_git
+def test_local_publication_can_require_an_allowed_ref(tmp_path):
+    fixture = create_git_repository(tmp_path / "repo")
+    policy = GitPublicationPolicy(mode="local", allowed_refs=("refs/heads/main",))
+    with _publication_context(
+        fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch"
+    ) as context:
+        receipt = _verify(context, policy, publication_ref="refs/heads/main")
+        with pytest.raises(GitEvidenceError) as missing:
+            _verify(context, policy, publication_ref=None)
+    assert receipt.mode == "local"
+    assert receipt.publication_ref == "refs/heads/main"
+    assert receipt.ref_object_id == fixture.end_commit
+    assert receipt.observed_commit == fixture.end_commit
+    assert missing.value.code == "git-evidence-publication-ref-required"
+
+
+@requires_git
+def test_local_publication_preserves_an_annotated_tag_and_its_commit(tmp_path):
+    fixture = create_git_repository(tmp_path / "repo")
+    git_command(fixture.root, "tag", "-a", "v1", "-m", "test: release one")
+    tag_object = git_command(fixture.root, "rev-parse", "refs/tags/v1").decode().strip()
+    assert tag_object != fixture.end_commit
+    policy = GitPublicationPolicy(mode="local", allowed_refs=("refs/tags/*",))
+    with _publication_context(
+        fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch"
+    ) as context:
+        receipt = _verify(context, policy, publication_ref="refs/tags/v1")
+    assert receipt.ref_object_id == tag_object
+    assert receipt.observed_commit == fixture.end_commit
+
+
+@requires_git
+@pytest.mark.parametrize(
+    "requested",
+    [
+        "refs/heads/other",
+        "refs/heads/*",
+        "refs/heads/ma?n",
+        "refs/heads/ma[i]n",
+        "refs/tags/v1",
+        "main",
+        "refs/heads/../../evil",
+    ],
+)
+def test_local_publication_rejects_a_ref_outside_the_allowlist(tmp_path, requested):
+    fixture = create_git_repository(tmp_path / "repo")
+    policy = GitPublicationPolicy(mode="local", allowed_refs=("refs/heads/main",))
+    with _publication_context(
+        fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch"
+    ) as context:
+        with pytest.raises(GitEvidenceError) as failure:
+            _verify(context, policy, publication_ref=requested)
+    assert failure.value.code == "git-evidence-publication-ref-denied"
+
+
+@requires_git
+def test_remote_publication_is_observed_rather_than_inferred(tmp_path):
+    fixture = create_git_repository(tmp_path / "repo")
+    remote = create_bare_remote(tmp_path / "remote.git")
+    git_command(fixture.root, "remote", "add", "origin", str(remote))
+    policy = _file_remote_policy(remote)
+    git_command(fixture.root, "push", str(remote), f"{fixture.base_commit}:refs/heads/main")
+    # A branch that is not the approved one must not make the claim true.
+    git_command(fixture.root, "push", str(remote), f"{fixture.end_commit}:refs/heads/other")
+
+    with _source_unchanged(fixture.root):
+        with _publication_context(
+            fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch"
+        ) as context:
+            with pytest.raises(GitEvidenceError) as failure:
+                _verify(context, policy, publication_ref="refs/heads/main")
+    assert failure.value.code == "git-evidence-not-published"
+
+    git_command(fixture.root, "push", str(remote), f"{fixture.end_commit}:refs/heads/main")
+    with _publication_context(
+        fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch"
+    ) as context:
+        receipt = _verify(context, policy, publication_ref="refs/heads/main")
+    assert receipt.mode == "remote"
+    assert receipt.observed_commit == fixture.end_commit
+    assert receipt.ref_object_id == fixture.end_commit
+    assert receipt.remote_identity == f"file:{remote.resolve().as_posix()}"
+    assert receipt.verified_at == _VERIFIED_AT
+
+
+@requires_git
+def test_an_absent_remote_ref_is_not_published(tmp_path):
+    fixture = create_git_repository(tmp_path / "repo")
+    remote = create_bare_remote(tmp_path / "remote.git")
+    git_command(fixture.root, "remote", "add", "origin", str(remote))
+    with _publication_context(
+        fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch"
+    ) as context:
+        with pytest.raises(GitEvidenceError) as failure:
+            _verify(context, _file_remote_policy(remote), publication_ref="refs/heads/main")
+    assert failure.value.code == "git-evidence-not-published"
+
+
+@requires_git
+def test_a_local_tracking_ref_cannot_stand_in_for_publication(tmp_path):
+    fixture = create_git_repository(tmp_path / "repo")
+    remote = create_bare_remote(tmp_path / "remote.git")
+    git_command(fixture.root, "remote", "add", "origin", str(remote))
+    git_command(fixture.root, "push", str(remote), f"{fixture.base_commit}:refs/heads/main")
+    git_command(
+        fixture.root, "update-ref", "refs/remotes/origin/main", fixture.end_commit
+    )
+
+    with _publication_context(
+        fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch"
+    ) as context:
+        with pytest.raises(GitEvidenceError) as failure:
+            _verify(context, _file_remote_policy(remote), publication_ref="refs/heads/main")
+    assert failure.value.code == "git-evidence-not-published"
+
+
+@requires_git
+def test_publication_is_proven_for_an_ancestor_of_the_observed_tip(tmp_path):
+    fixture = create_git_repository(tmp_path / "repo")
+    remote = create_bare_remote(tmp_path / "remote.git")
+    git_command(fixture.root, "remote", "add", "origin", str(remote))
+    (fixture.root / "later.txt").write_bytes(b"later\n")
+    git_command(fixture.root, "add", "--", "later.txt")
+    git_command(fixture.root, "commit", "-m", "test: advance past the evidence")
+    later = git_command(fixture.root, "rev-parse", "HEAD").decode().strip()
+    git_command(fixture.root, "push", str(remote), f"{later}:refs/heads/main")
+
+    with _publication_context(
+        fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch"
+    ) as context:
+        receipt = _verify(context, _file_remote_policy(remote), publication_ref="refs/heads/main")
+    assert receipt.observed_commit == later
+    assert receipt.observed_commit != fixture.end_commit
+
+
+@requires_git
+def test_a_remote_tip_absent_locally_is_incomplete_not_a_fetch_or_downgrade(tmp_path):
+    fixture = create_git_repository(tmp_path / "repo")
+    remote = create_bare_remote(tmp_path / "remote.git")
+    git_command(fixture.root, "remote", "add", "origin", str(remote))
+    elsewhere = create_git_repository(tmp_path / "elsewhere")
+    (elsewhere.root / "remote-only.txt").write_bytes(b"remote-only\n")
+    git_command(elsewhere.root, "add", "--", "remote-only.txt")
+    git_command(elsewhere.root, "commit", "-m", "test: commit this repository lacks")
+    unknown = git_command(elsewhere.root, "rev-parse", "HEAD").decode().strip()
+    git_command(elsewhere.root, "push", "--force", str(remote), f"{unknown}:refs/heads/main")
+
+    with _source_unchanged(fixture.root):
+        with _publication_context(
+            fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch"
+        ) as context:
+            with pytest.raises(GitEvidenceError) as failure:
+                _verify(
+                    context, _file_remote_policy(remote), publication_ref="refs/heads/main"
+                )
+    assert failure.value.code == "git-evidence-verification-incomplete"
+
+
+@requires_git
+def test_remote_publication_preserves_an_annotated_tag_and_its_peeled_commit(tmp_path):
+    fixture = create_git_repository(tmp_path / "repo")
+    remote = create_bare_remote(tmp_path / "remote.git")
+    git_command(fixture.root, "remote", "add", "origin", str(remote))
+    git_command(fixture.root, "tag", "-a", "v1", "-m", "test: release one")
+    git_command(fixture.root, "tag", "v1-light")
+    tag_object = git_command(fixture.root, "rev-parse", "refs/tags/v1").decode().strip()
+    git_command(fixture.root, "push", str(remote), "refs/tags/v1", "refs/tags/v1-light")
+    policy = _file_remote_policy(remote, "refs/tags/*")
+
+    with _publication_context(
+        fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch"
+    ) as context:
+        annotated = _verify(context, policy, publication_ref="refs/tags/v1")
+        lightweight = _verify(context, policy, publication_ref="refs/tags/v1-light")
+    assert annotated.ref_object_id == tag_object
+    assert annotated.observed_commit == fixture.end_commit
+    assert lightweight.ref_object_id == fixture.end_commit
+    assert lightweight.observed_commit == fixture.end_commit
+
+
+@requires_git
+def test_a_receipt_describes_the_observation_it_was_made_from(tmp_path):
+    fixture = create_git_repository(tmp_path / "repo")
+    remote = create_bare_remote(tmp_path / "remote.git")
+    git_command(fixture.root, "remote", "add", "origin", str(remote))
+    git_command(fixture.root, "push", str(remote), f"{fixture.end_commit}:refs/heads/main")
+    with _publication_context(
+        fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch"
+    ) as context:
+        receipt = _verify(context, _file_remote_policy(remote), publication_ref="refs/heads/main")
+
+    git_command(
+        fixture.root, "push", "--force", str(remote), f"{fixture.base_commit}:refs/heads/main"
+    )
+    assert receipt.observed_commit == fixture.end_commit
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        receipt.observed_commit = fixture.base_commit
+
+
+@requires_git
+@pytest.mark.parametrize(
+    ("retarget", "code"),
+    [
+        (("set-url", "origin", "elsewhere"), "git-evidence-remote-misconfigured"),
+        (("set-url", "--add", "origin", "elsewhere"), "git-evidence-remote-misconfigured"),
+    ],
+)
+def test_a_retargeted_or_ambiguous_alias_is_refused(tmp_path, retarget, code):
+    fixture = create_git_repository(tmp_path / "repo")
+    remote = create_bare_remote(tmp_path / "remote.git")
+    other = create_bare_remote(tmp_path / "other.git")
+    git_command(fixture.root, "remote", "add", "origin", str(remote))
+    git_command(fixture.root, "push", str(remote), f"{fixture.end_commit}:refs/heads/main")
+    git_command(
+        fixture.root,
+        "remote",
+        *(str(other) if part == "elsewhere" else part for part in retarget),
+    )
+
+    with _publication_context(
+        fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch"
+    ) as context:
+        with pytest.raises(GitEvidenceError) as failure:
+            _verify(context, _file_remote_policy(remote), publication_ref="refs/heads/main")
+    assert failure.value.code == code
+
+
+@requires_git
+def test_a_relative_alias_destination_is_refused(tmp_path):
+    fixture = create_git_repository(tmp_path / "repo")
+    remote = create_bare_remote(tmp_path / "remote.git")
+    git_command(fixture.root, "remote", "add", "origin", "../remote.git")
+    with _publication_context(
+        fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch"
+    ) as context:
+        with pytest.raises(GitEvidenceError) as failure:
+            _verify(context, _file_remote_policy(remote), publication_ref="refs/heads/main")
+    assert failure.value.code == "git-evidence-remote-misconfigured"
+
+
+@requires_git
+def test_source_rewriting_and_helpers_cannot_choose_the_destination(tmp_path, monkeypatch):
+    fixture = create_git_repository(tmp_path / "repo")
+    remote = create_bare_remote(tmp_path / "remote.git")
+    hostile = create_bare_remote(tmp_path / "hostile.git")
+    git_command(fixture.root, "remote", "add", "origin", str(remote))
+    config = fixture.root / ".git" / "config"
+    config.write_text(
+        config.read_text(encoding="utf-8")
+        + f'[url "{hostile.as_posix()}"]\n'
+        + f"\tinsteadOf = {remote.as_posix()}\n"
+        + "[credential]\n"
+        + "\thelper = !printf 'password=hunter2\\n'\n"
+        + "[http]\n"
+        + "\tfollowRedirects = true\n",
+        encoding="utf-8",
+    )
+    recorded: dict[str, object] = {}
+
+    def fake_remote(repository, arguments, **keywords):
+        recorded["arguments"] = arguments
+        recorded.update(keywords)
+        return 2, b""
+
+    monkeypatch.setattr(publication_module, "run_git_remote", fake_remote)
+    with _publication_context(
+        fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch"
+    ) as context:
+        with pytest.raises(GitEvidenceError) as failure:
+            _verify(context, _file_remote_policy(remote), publication_ref="refs/heads/main")
+
+    assert failure.value.code == "git-evidence-not-published"
+    assert recorded["arguments"][-2] == str(remote.resolve())
+    assert str(hostile) not in " ".join(recorded["arguments"])
+    assert "http.followRedirects=false" in recorded["config_options"]
+    assert "credential.helper=" in recorded["config_options"]
+    assert recorded["environment_overrides"] == {}
+
+
+@requires_git
+@pytest.mark.parametrize(
+    ("response", "code"),
+    [
+        ((2, b""), "git-evidence-not-published"),
+        ((128, b""), "git-evidence-remote-unreachable"),
+        ((1, b""), "git-evidence-remote-unreachable"),
+        ((0, b""), "git-evidence-remote-response-invalid"),
+        ((0, b"not-an-advertisement\n"), "git-evidence-remote-response-invalid"),
+        ((0, b"zzzz\trefs/heads/main\n"), "git-evidence-remote-response-invalid"),
+        ((0, b"\xff\xfe\trefs/heads/main\n"), "git-evidence-remote-response-invalid"),
+        (
+            (0, b"a" * 40 + b"\trefs/heads/other\n"),
+            "git-evidence-not-published",
+        ),
+    ],
+)
+def test_remote_verification_failures_are_reported_not_downgraded(tmp_path, monkeypatch, response, code):
+    fixture = create_git_repository(tmp_path / "repo")
+    remote = create_bare_remote(tmp_path / "remote.git")
+    git_command(fixture.root, "remote", "add", "origin", str(remote))
+    monkeypatch.setattr(
+        publication_module, "run_git_remote", lambda *arguments, **keywords: response
+    )
+    with _publication_context(
+        fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch"
+    ) as context:
+        with pytest.raises(GitEvidenceError) as failure:
+            _verify(context, _file_remote_policy(remote), publication_ref="refs/heads/main")
+    assert failure.value.code == code
+
+
+@requires_git
+def test_a_transport_timeout_is_not_a_local_publication(tmp_path, monkeypatch):
+    fixture = create_git_repository(tmp_path / "repo")
+    remote = create_bare_remote(tmp_path / "remote.git")
+    git_command(fixture.root, "remote", "add", "origin", str(remote))
+
+    def timeout(*arguments, **keywords):
+        raise GitEvidenceError("git-evidence-timeout")
+
+    monkeypatch.setattr(publication_module, "run_git_remote", timeout)
+    with _publication_context(
+        fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch"
+    ) as context:
+        with pytest.raises(GitEvidenceError) as failure:
+            _verify(context, _file_remote_policy(remote), publication_ref="refs/heads/main")
+    assert failure.value.code == "git-evidence-timeout"
+
+
+@requires_git
+def test_a_missing_publication_policy_is_an_actionable_configuration_error(tmp_path):
+    fixture = create_git_repository(tmp_path / "repo")
+    with _publication_context(
+        fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch"
+    ) as context:
+        with pytest.raises(GitEvidenceError) as failure:
+            _verify(context, None, publication_ref=None)
+    assert failure.value.code == "git-evidence-publication-policy-missing"
+
+
+def _https_policy(auth: str, **extra) -> GitPublicationPolicy:
+    return GitPublicationPolicy(
+        mode="remote",
+        allowed_refs=("refs/heads/main",),
+        remote=GitRemotePolicy(
+            name="origin",
+            url="https://git.example.invalid/team/project.git",
+            auth=auth,
+            **extra,
+        ),
+    )
+
+
+@requires_git
+def test_anonymous_https_verification_offers_no_credential_and_no_redirect(tmp_path, monkeypatch):
+    fixture = create_git_repository(tmp_path / "repo")
+    git_command(
+        fixture.root, "remote", "add", "origin", "https://git.example.invalid/team/project.git/"
+    )
+    recorded: dict[str, object] = {}
+
+    def fake_remote(repository, arguments, **keywords):
+        recorded["arguments"] = arguments
+        recorded.update(keywords)
+        return 0, b"b" * 40 + b"\trefs/heads/main\n"
+
+    monkeypatch.setattr(publication_module, "run_git_remote", fake_remote)
+    with _publication_context(
+        fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch"
+    ) as context:
+        with pytest.raises(GitEvidenceError) as failure:
+            _verify(context, _https_policy("anonymous"), publication_ref="refs/heads/main")
+
+    assert failure.value.code == "git-evidence-verification-incomplete"
+    assert recorded["arguments"][:3] == ("ls-remote", "--exit-code", "--refs")
+    assert recorded["arguments"][3] == "https://git.example.invalid/team/project.git"
+    assert recorded["environment_overrides"] == {}
+    options = recorded["config_options"]
+    assert "http.followRedirects=false" in options
+    assert "core.askPass=" in options
+    assert "credential.helper=" in options
+    assert "protocol.allow=never" in options
+    assert "protocol.https.allow=always" in options
+
+
+@requires_git
+@pytest.mark.parametrize("auth", ["credential-manager", "ssh-agent"])
+def test_credentialed_verification_is_refused_when_the_job_may_not_use_credentials(
+    tmp_path, monkeypatch, auth
+):
+    fixture = create_git_repository(tmp_path / "repo")
+    if auth == "ssh-agent":
+        known_hosts = tmp_path / "known_hosts"
+        known_hosts.write_text("git.example.invalid ssh-ed25519 AAAA\n", encoding="utf-8")
+        url = "ssh://git@git.example.invalid/team/project.git"
+        policy = GitPublicationPolicy(
+            mode="remote",
+            allowed_refs=("refs/heads/main",),
+            remote=GitRemotePolicy(
+                name="origin", url=url, auth=auth, known_hosts=known_hosts
+            ),
+        )
+    else:
+        url = "https://git.example.invalid/team/project.git"
+        policy = _https_policy(auth)
+    git_command(fixture.root, "remote", "add", "origin", url)
+
+    def reject(*arguments, **keywords):
+        pytest.fail("A credentialed transport ran without credential eligibility")
+
+    monkeypatch.setattr(publication_module, "run_git_remote", reject)
+    with _publication_context(
+        fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch"
+    ) as context:
+        with pytest.raises(GitEvidenceError) as failure:
+            _verify(
+                context, policy, publication_ref="refs/heads/main", credentials_allowed=False
+            )
+    assert failure.value.code == "git-evidence-credentials-denied"
+
+
+@requires_git
+def test_credential_manager_mode_uses_only_the_trusted_noninteractive_helper(tmp_path, monkeypatch):
+    fixture = create_git_repository(tmp_path / "repo")
+    git_command(
+        fixture.root, "remote", "add", "origin", "https://git.example.invalid/team/project.git"
+    )
+    helper = tmp_path / "bin" / "git-credential-manager"
+    monkeypatch.setattr(
+        publication_module, "resolve_trusted_executable", lambda name, **keywords: helper
+    )
+    recorded: dict[str, object] = {}
+
+    def fake_remote(repository, arguments, **keywords):
+        recorded.update(keywords)
+        return 128, b"fatal: Authentication failed for 'https://user:hunter2@git.example.invalid'\n"
+
+    monkeypatch.setattr(publication_module, "run_git_remote", fake_remote)
+    with _publication_context(
+        fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch"
+    ) as context:
+        with pytest.raises(GitEvidenceError) as failure:
+            _verify(
+                context,
+                _https_policy("credential-manager"),
+                publication_ref="refs/heads/main",
+                credentials_allowed=True,
+            )
+
+    assert failure.value.code == "git-evidence-remote-unreachable"
+    assert "hunter2" not in str(failure.value)
+    assert "hunter2" not in failure.value.message
+    options = list(recorded["config_options"])
+    assert options.index("credential.helper=") < options.index(
+        f"credential.helper={helper.as_posix()}"
+    )
+    assert "credential.useHttpPath=true" in options
+    assert "credential.interactive=false" in options
+    assert "credential.guiPrompt=false" in options
+    assert recorded["environment_overrides"] == {}
+
+
+@requires_git
+def test_ssh_agent_mode_is_strict_noninteractive_and_agent_only(tmp_path, monkeypatch):
+    fixture = create_git_repository(tmp_path / "repo")
+    url = "ssh://git@git.example.invalid/team/project.git"
+    git_command(fixture.root, "remote", "add", "origin", url)
+    known_hosts = tmp_path / "known_hosts"
+    known_hosts.write_text("git.example.invalid ssh-ed25519 AAAA\n", encoding="utf-8")
+    policy = GitPublicationPolicy(
+        mode="remote",
+        allowed_refs=("refs/heads/main",),
+        remote=GitRemotePolicy(
+            name="origin", url=url, auth="ssh-agent", known_hosts=known_hosts
+        ),
+    )
+    monkeypatch.setenv("SSH_AUTH_SOCK", str(tmp_path / "agent.sock"))
+    monkeypatch.setattr(
+        publication_module,
+        "resolve_trusted_executable",
+        lambda name, **keywords: tmp_path / "bin" / name,
+    )
+    recorded: dict[str, object] = {}
+
+    def fake_remote(repository, arguments, **keywords):
+        recorded.update(keywords)
+        command = keywords["environment_overrides"]["GIT_SSH_COMMAND"]
+        recorded["ssh_config"] = Path(
+            command.split('-F "', 1)[1].split('"', 1)[0]
+        ).read_bytes()
+        return 128, b"Host key verification failed.\n"
+
+    monkeypatch.setattr(publication_module, "run_git_remote", fake_remote)
+    with _publication_context(
+        fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch"
+    ) as context:
+        with pytest.raises(GitEvidenceError) as failure:
+            _verify(
+                context, policy, publication_ref="refs/heads/main", credentials_allowed=True
+            )
+
+    assert failure.value.code == "git-evidence-remote-unreachable"
+    assert recorded["ssh_config"] == b""
+    command = recorded["environment_overrides"]["GIT_SSH_COMMAND"]
+    assert '"BatchMode=yes"' in command
+    assert '"StrictHostKeyChecking=yes"' in command
+    assert f'"UserKnownHostsFile={known_hosts.as_posix()}"' in command
+    assert '"PasswordAuthentication=no"' in command
+    assert '"KbdInteractiveAuthentication=no"' in command
+    assert '"NumberOfPasswordPrompts=0"' in command
+    assert "askpass" not in command.lower()
+    assert recorded["environment_overrides"]["SSH_AUTH_SOCK"] == str(tmp_path / "agent.sock")
+    assert "protocol.ssh.allow=always" in recorded["config_options"]
+
+
+@requires_git
+def test_a_publication_receipt_carries_no_secret(tmp_path):
+    fixture = create_git_repository(tmp_path / "repo")
+    remote = create_bare_remote(tmp_path / "remote.git")
+    git_command(fixture.root, "remote", "add", "origin", str(remote))
+    git_command(fixture.root, "push", str(remote), f"{fixture.end_commit}:refs/heads/main")
+    with _publication_context(
+        fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch"
+    ) as context:
+        receipt = _verify(context, _file_remote_policy(remote), publication_ref="refs/heads/main")
+
+    rendered = json.dumps(dataclasses.asdict(receipt), default=str) + repr(receipt)
+    for forbidden in ("password", "token", "hunter2", "SSH_AUTH_SOCK", "credential"):
+        assert forbidden not in rendered
+    assert receipt.remote_identity == f"file:{remote.resolve().as_posix()}"
+
+
+@requires_git
+def test_a_transport_environment_override_is_limited_to_named_variables(tmp_path):
+    fixture = create_git_repository(tmp_path / "repo")
+    lifecycle = _lifecycle()
+    with open_git_repository(
+        fixture.root, scratch_root=tmp_path / "scratch", lifecycle=lifecycle
+    ) as repository:
+        with pytest.raises(ValueError):
+            git_module.run_git_remote(
+                repository,
+                ("ls-remote",),
+                environment_overrides={"GIT_ASKPASS": "python"},
+                lifecycle=lifecycle,
+                deadline=time.monotonic() + 30,
+                output_limit=4096,
+            )
+        with pytest.raises(ValueError):
+            git_module.run_git_remote(
+                repository,
+                ("ls-remote",),
+                config_options=("credential.helper",),
+                lifecycle=lifecycle,
+                deadline=time.monotonic() + 30,
+                output_limit=4096,
+            )

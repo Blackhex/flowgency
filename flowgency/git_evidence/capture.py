@@ -10,7 +10,6 @@ before any patch byte is produced.
 
 from __future__ import annotations
 
-import string
 from pathlib import Path, PurePosixPath
 
 from flowgency.git_evidence.git import (
@@ -27,6 +26,7 @@ from flowgency.git_evidence.models import (
     GitFileChange,
     GitRangeCapture,
     GitRepository,
+    validate_object_id,
 )
 from flowgency.integrations.models import EffectiveRuntimePolicy
 from flowgency.jobs.processes import RuntimeProcessLifecycle
@@ -34,8 +34,6 @@ from flowgency.jobs.processes import RuntimeProcessLifecycle
 MAX_COMMITS = 512
 MAX_FILES = 1024
 
-_OBJECT_ID_LENGTHS = {"sha1": 40, "sha256": 64}
-_HEX_DIGITS = frozenset(string.hexdigits.lower())
 _STATUS_NAMES: dict[bytes, GitChangeStatus] = {
     b"A": "added",
     b"M": "modified",
@@ -66,17 +64,6 @@ class _RawRecord:
         self.status = status
         self.old_path = old_path
         self.new_path = new_path
-
-
-def _validated_object_id(value: str, object_format: str) -> str:
-    expected = _OBJECT_ID_LENGTHS.get(object_format)
-    if expected is None:
-        raise GitEvidenceError("git-evidence-invalid-commit")
-    if not isinstance(value, str) or len(value) != expected:
-        raise GitEvidenceError("git-evidence-invalid-commit")
-    if any(character not in _HEX_DIGITS or character.isupper() for character in value):
-        raise GitEvidenceError("git-evidence-invalid-commit")
-    return value
 
 
 def _require_commit(
@@ -260,7 +247,7 @@ def _commit_ids(
     if len(commits) > MAX_COMMITS:
         raise GitEvidenceError("git-evidence-too-many-commits")
     return tuple(
-        _validated_object_id(commit, repository.object_format) for commit in commits
+        validate_object_id(commit, repository.object_format) for commit in commits
     )
 
 
@@ -272,8 +259,8 @@ def capture_committed_range(
     lifecycle: RuntimeProcessLifecycle,
     deadline: float,
 ) -> GitRangeCapture:
-    base_commit = _validated_object_id(selected.base_commit, repository.object_format)
-    end_commit = _validated_object_id(selected.end_commit, repository.object_format)
+    base_commit = validate_object_id(selected.base_commit, repository.object_format)
+    end_commit = validate_object_id(selected.end_commit, repository.object_format)
     _require_commit(repository, base_commit, lifecycle=lifecycle, deadline=deadline)
     _require_commit(repository, end_commit, lifecycle=lifecycle, deadline=deadline)
 
