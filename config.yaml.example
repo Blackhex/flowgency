@@ -34,6 +34,11 @@ teams:
       timeout: 1800
     dispatch:
       enabled: true
+    # Optional: allow Git-format evidence capture (artifact_format: git-change)
+    # for this team's tickets. Local-only; no remote or authentication fields.
+    # git_publication:
+    #   mode: local
+    #   allowed_refs: []
     workflows:
       project-delivery:
         name: Delivery

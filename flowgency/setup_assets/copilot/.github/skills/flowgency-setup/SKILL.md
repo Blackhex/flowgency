@@ -376,6 +376,8 @@ Shipped reusable blueprints — including `software-delivery` and `research` fro
 
 When proposing or reviewing a custom workflow blueprint definition, ask what each transition consumes as input, what it produces as durable output, which produced values are required, and whether a transition intentionally produces no results. This applies to every transition in every blueprint; do not assume a transition must always declare an output.
 
+For each produced durable output, also ask whether it requires local Git evidence: a durable output can be an ordinary artifact (a file or a URL) or a Git-format artifact (`artifact_format: git-change`) capturing an already-committed local range. For a code-producing project, propose the Git-format output and the corresponding local commit/ref policy (`teams.<team-id>.git_publication`, see `references/ticket-workflow-steps.md`) for the user's approval alongside the transition. Do not add a required Git-format field to every shipped Software delivery or Research transition by default; propose it only where the user confirms committed local change is the actual expected evidence. Remote push obligations remain project instructions, never evidence configuration: Git-evidence policy never validates a remote, and setup must not propose one.
+
 For each approved workflow instance, write it under `teams.<team-id>.workflows`:
 
 ```yaml

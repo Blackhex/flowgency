@@ -84,6 +84,31 @@ If the field is absent or `false`, ticket-enabled restricted Copilot runs fail
 preflight with `ticket-local-network-required` rather than widening network
 policy automatically.
 
+## Git evidence policy
+
+A team may declare `teams.<team-id>.git_publication` to allow Git-format evidence
+capture (`artifact_format: git-change`, see [data-formats.md](data-formats.md)) for
+that team's tickets. Absent `git_publication`, a Git-evidence capture request fails
+with an actionable configuration error; ordinary workflows are unaffected.
+
+The only supported `mode` is `local`. There are no remote or authentication fields:
+capture verifies committed content in the team's own `workspace_path` locally only,
+and never contacts a remote, fetches, or reports a verified push.
+
+```yaml
+git_publication:
+  mode: local
+  allowed_refs: []
+```
+
+`allowed_refs` optionally restricts which ref a capture may name as its publication
+ref: each entry is an exact `refs/heads/...` / `refs/tags/...` value or a single
+trailing `/*` prefix pattern. An empty list means no local ref restriction.
+
+```yaml
+git_publication: {mode: local, allowed_refs: [refs/heads/main, 'refs/heads/feature/*']}
+```
+
 ## Superseded layouts
 
 The application does not auto-load directory-coupled agent state, sidecars, prompt schedules, or per-agent memory files. Native integration prompt files are generated from canonical prompt authority and are never edited as source. A `config.yaml` declaring an older `schema_version` is rejected; the `runtime.sandbox`, `runtime.tools`, and `capabilities` keys from version 4 are not accepted.

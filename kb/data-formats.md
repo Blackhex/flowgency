@@ -77,7 +77,7 @@ Identifiers (`id`) are stable technical keys; labels (`name`, `label`) are mutab
 
 ### Field Catalog
 
-Each entry declares an `id`, a `label`, and a `type`. The types are `text`, `number`, `boolean`, and `artifact`. Transitions reference catalog entries by id through a `FieldUse` (`field_id`, `required`) rather than duplicating field definitions, so a field's label or type is defined in exactly one place.
+Each entry declares an `id`, a `label`, and a `type`. The types are `text`, `number`, `boolean`, and `artifact`. Transitions reference catalog entries by id through a `FieldUse` (`field_id`, `required`) rather than duplicating field definitions, so a field's label or type is defined in exactly one place. An `artifact` field may also declare `artifact_format: git-change`; an omitted `artifact_format` is an ordinary artifact, and only `type: artifact` may set it.
 
 ### Transition Fields
 
@@ -99,6 +99,37 @@ A transition's `outputs` are the durable results it records; declaring an output
 ## Artifact References
 
 An `artifact` field holds an immutable `ArtifactRef`, either `{kind: id, value: ...}` (no path separators) or `{kind: url, value: https://...}` (HTTPS host, no embedded credentials). Recorded artifacts are immutable.
+
+## Git Evidence Artifacts
+
+A field declared with `artifact_format: git-change` holds trusted evidence of an
+already-committed local range rather than an ordinary uploaded file or link.
+Capture it through `ticket_capture_git_evidence`, never through `publish_artifact`:
+
+```yaml
+fields:
+  - id: implementation
+    label: Committed implementation
+    type: artifact
+    artifact_format: git-change
+```
+
+Capture requires the team to declare `teams.<team-id>.git_publication` (see
+[configuration.md](configuration.md)); with no policy configured, a capture request
+fails with an actionable configuration error and ordinary artifact fields are
+unaffected. The schema is local-only: there is no remote or authentication option,
+and a captured artifact never claims a verified push. If the local Git graph cannot
+prove the requested range because objects are missing, capture fails rather than
+silently returning a partial or unverifiable result. A captured artifact's
+publication receipt is a snapshot taken at verification time; it is not
+re-verified later, and the underlying local ref may move on afterward.
+
+The retained artifact is a canonical JSON manifest (media type
+`application/vnd.flowgency.git-change+json`) carrying the exact patch as strict
+base64; downloading it decodes the patch as `application/octet-stream` with an
+attachment filename ending `.patch`. Staged, unstaged, and untracked content never
+enters the artifact, and capture never commits, pushes, fetches, or rebases on the
+agent's behalf.
 
 
 ## Ticket Records
