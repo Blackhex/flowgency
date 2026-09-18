@@ -18,12 +18,7 @@
     {{ value }}
   {%- endif -%}
 {%- endmacro %}
-{% set output_ns = namespace(ids=[]) %}
-{% for transition in transitions %}
-  {% for field_use in transition.outputs %}
-    {% if field_use.field_id not in output_ns.ids %}{% set _ = output_ns.ids.append(field_use.field_id) %}{% endif %}
-  {% endfor %}
-{% endfor %}
+{% set output_fields = detail.fields | selectattr('is_output') | list %}
 <aside class="workflow-ticket-inspector{% if workflow_detail_page %} workflow-ticket-inspector-page{% endif %}" aria-label="Ticket details">
   {% if ticket_form_errors %}
   <div class="workflow-issue-banner" role="alert">
@@ -159,7 +154,7 @@
         <input type="hidden" name="version.context_digest" value="{{ current_ticket.version.context_digest }}">
         <input type="hidden" name="operation_id" value="{{ ticket_form_operation_ids.update }}">
       {% for field in detail.fields %}
-      {% if field.type != "artifact" and field.id not in output_ns.ids %}
+      {% if field.type != "artifact" and not field.is_output %}
       <label class="workflow-field-block" for="field-{{ field.id }}">
         <span>{{ field.label }}</span>
         {% set field_draft = ticket_form_draft.patch.field_values[field.id] if ticket_form_draft and ticket_form_draft.patch and ticket_form_draft.patch.field_values and field.id in ticket_form_draft.patch.field_values else field.value %}
@@ -186,17 +181,15 @@
       </noscript>
       </form>
     </section>
-    {% if output_ns.ids %}
+    {% if output_fields %}
     <section class="workflow-ticket-section">
       <h3>Outputs</h3>
       <dl class="workflow-field-list">
-        {% for field in detail.fields %}
-        {% if field.id in output_ns.ids %}
+        {% for field in output_fields %}
         <div>
           <dt>{{ field.label }}</dt>
           <dd>{{ render_value(field.type, field.value) }}</dd>
         </div>
-        {% endif %}
         {% endfor %}
       </dl>
     </section>
@@ -295,7 +288,7 @@
       {% if event.data.source_state_name or event.data.destination_state_name %}
       <p>{{ event.data.source_state_name or event.data.transition_snapshot.from_state }} -> {{ event.data.destination_state_name or event.data.transition_snapshot.to_state }}</p>
       {% endif %}
-      {% if event.data.effective_outputs %}
+      {% if event.data.effective_outputs is mapping and event.data.effective_outputs %}
       <dl class="workflow-field-list">
         {% for field_id, value in event.data.effective_outputs.items() %}
         {% set field_def = event.data.transition_snapshot.field_defs[field_id] if event.data.transition_snapshot and event.data.transition_snapshot.field_defs and field_id in event.data.transition_snapshot.field_defs else none %}

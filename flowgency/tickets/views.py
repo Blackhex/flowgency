@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Literal
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from flowgency.jobs.authority import JobStore
 from flowgency.jobs.store import TERMINAL_STATUSES
@@ -12,6 +12,7 @@ from flowgency.tickets.errors import TicketStorageError, WorkflowUnavailable
 from flowgency.tickets.models import TicketEvent, TicketRef, TicketVersion, TicketView, UserTicketContext
 from flowgency.tickets.service import TicketService
 from flowgency.workflows.configuration import WorkflowBinding
+from flowgency.workflows.models import FieldDefinition
 
 
 class ViewIssue(BaseModel):
@@ -66,6 +67,7 @@ class TicketFieldValueView(BaseModel):
     type: str | None = None
     value: Any = None
     provenance: TicketFieldProvenanceView | None = None
+    is_output: bool = False
 
 
 class WorkflowStateView(BaseModel):
@@ -419,23 +421,70 @@ def _provenance_view(provenance) -> TicketFieldProvenanceView | None:
     )
 
 
+def output_field_definitions(view: TicketView) -> dict[str, FieldDefinition | None]:
+    output_fields: dict[str, FieldDefinition | None] = {}
+    for event in view.record.events:
+        if event.kind != "transitioned" or not isinstance(event.data, dict):
+            continue
+        values = event.data.get("effective_outputs")
+        if not isinstance(values, dict):
+            continue
+        snapshot = event.data.get("transition_snapshot")
+        definitions = snapshot.get("field_defs") if isinstance(snapshot, dict) else None
+        for field_id in values:
+            if not isinstance(field_id, str) or not field_id:
+                continue
+            output_fields[field_id] = None
+            raw = definitions.get(field_id) if isinstance(definitions, dict) else None
+            if not isinstance(raw, dict):
+                continue
+            try:
+                definition = FieldDefinition.model_validate(raw)
+            except ValidationError:
+                continue
+            if definition.id == field_id:
+                output_fields[field_id] = definition
+    if view.definition is not None:
+        for transition in view.definition.transitions:
+            for use in transition.outputs:
+                output_fields[use.field_id] = view.definition.field(use.field_id)
+    return output_fields
+
+
 def _field_rows(view: TicketView) -> tuple[TicketFieldValueView, ...]:
     definition_fields = () if view.definition is None else view.definition.fields
     ordered_ids = [field.id for field in definition_fields]
     for field_id in view.record.field_values:
         if field_id not in ordered_ids:
             ordered_ids.append(field_id)
+    output_fields = output_field_definitions(view)
+    for field_id in output_fields:
+        if field_id not in ordered_ids:
+            ordered_ids.append(field_id)
     definition_index = {field.id: field for field in definition_fields}
-    return tuple(
-        TicketFieldValueView(
-            id=field_id,
-            label=definition_index[field_id].label if field_id in definition_index else field_id,
-            type=definition_index[field_id].type if field_id in definition_index else None,
-            value=view.record.field_values.get(field_id),
-            provenance=_provenance_view(view.record.field_provenance.get(field_id)),
+    rows = []
+    for field_id in ordered_ids:
+        current_definition = definition_index.get(field_id)
+        fallback_definition = output_fields.get(field_id)
+        label = field_id
+        field_type: str | None = None
+        if current_definition is not None:
+            label = current_definition.label
+            field_type = current_definition.type
+        elif fallback_definition is not None:
+            label = fallback_definition.label
+            field_type = fallback_definition.type
+        rows.append(
+            TicketFieldValueView(
+                id=field_id,
+                label=label,
+                type=field_type,
+                value=view.record.field_values.get(field_id),
+                provenance=_provenance_view(view.record.field_provenance.get(field_id)),
+                is_output=field_id in output_fields,
+            )
         )
-        for field_id in ordered_ids
-    )
+    return tuple(rows)
 
 
 def _definition_view(view: TicketView, blueprint_id: str) -> WorkflowDefinitionView:

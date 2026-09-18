@@ -623,6 +623,7 @@ def test_detail_snapshot_exposes_current_definition_fields_and_retained_audit_sn
                 "event_id": payload["fields"][0]["provenance"]["event_id"],
                 "recorded_at": payload["fields"][0]["provenance"]["recorded_at"],
             },
+            "is_output": False,
         },
         {
             "id": "summary",
@@ -636,6 +637,7 @@ def test_detail_snapshot_exposes_current_definition_fields_and_retained_audit_sn
                 "event_id": payload["fields"][1]["provenance"]["event_id"],
                 "recorded_at": payload["fields"][1]["provenance"]["recorded_at"],
             },
+            "is_output": True,
         },
         {
             "id": "evidence",
@@ -649,6 +651,7 @@ def test_detail_snapshot_exposes_current_definition_fields_and_retained_audit_sn
                 "event_id": payload["fields"][2]["provenance"]["event_id"],
                 "recorded_at": payload["fields"][2]["provenance"]["recorded_at"],
             },
+            "is_output": True,
         },
     ]
     assert payload["current_definition"]["fields"][0]["label"] == "Review result"
@@ -951,3 +954,307 @@ def test_detail_snapshot_hides_terminal_or_stale_pending_jobs(workflow_web_env, 
     assert stale_payload["pending_run_job_id"] is None
     assert stale_payload["pending_run_status"] is None
     assert stale_payload["pending_run_issue"]["code"] == "pending-run-stale"
+
+
+def test_terminal_ticket_keeps_saved_output_visible(workflow_web_env):
+    env = workflow_web_env
+    ticket = env.create(values={"verdict": True, "summary": "Initial"})
+    actor = env.agent("builder", "output-run")
+    env.service.start_work(
+        actor, ticket.version, env.operation("start", actor_name="builder")
+    )
+    env.service.transition(
+        actor,
+        env.read(ticket.ref).version,
+        env.transition_request(outputs={"summary": "Retained result"}),
+        env.operation("finish", actor_name="builder"),
+    )
+    path = f"{env.base_path}/tickets/{ticket.ref.ticket_id}"
+    payload = env.client.get(f"{path}/snapshot").json()
+    summary = next(field for field in payload["fields"] if field["id"] == "summary")
+    assert payload["ticket"]["state_id"] == "done"
+    assert summary["value"] == "Retained result"
+    assert summary["is_output"] is True
+    page = env.client.get(path)
+    assert page.status_code == 200
+    assert "<h3>Outputs</h3>" in page.text
+    assert 'data-ticket-input="summary"' not in page.text
+    assert "Retained result" in page.text
+
+
+def test_output_projection_ignores_report_payloads(workflow_web_env):
+    from flowgency.tickets.models import TicketEvent
+    from flowgency.tickets.views import output_field_definitions
+
+    env = workflow_web_env
+    ticket = env.create(values={"verdict": True})
+    view = env.read(ticket.ref)
+    report = TicketEvent(
+        kind="reported", actor="builder", summary="Not an accepted transition",
+        data={"effective_outputs": {"invented-result": "do not project"}},
+    )
+    copied = view.model_copy(update={
+        "record": view.record.model_copy(update={"events": view.record.events + (report,)})
+    })
+    assert "invented-result" not in output_field_definitions(copied)
+
+
+@pytest.mark.parametrize(
+    ("field_type", "current_value"),
+    [("boolean", False), ("number", 0), ("text", None), ("text", "Newest")],
+)
+def test_retired_output_uses_saved_value_and_snapshot_label(
+    workflow_web_env, field_type, current_value
+):
+    from flowgency.tickets.models import TicketEvent
+    from flowgency.tickets.views import _field_rows
+
+    env = workflow_web_env
+    ticket = env.create()
+    view = env.read(ticket.ref)
+    definition = {"id": "custom-result", "label": "Recorded result", "type": field_type}
+    accepted = TicketEvent(
+        kind="transitioned", actor="builder", summary="Accepted",
+        data={
+            "effective_outputs": {"custom-result": "Historical payload only"},
+            "transition_snapshot": {"field_defs": {"custom-result": definition}},
+        },
+    )
+    record = view.record.model_copy(update={
+        "field_values": {"custom-result": current_value}, "events": (accepted,)
+    })
+    rows = _field_rows(view.model_copy(update={"record": record, "definition": None}))
+    assert len(rows) == 1
+    assert rows[0].is_output is True
+    assert rows[0].label == "Recorded result"
+    assert rows[0].type == field_type
+    assert rows[0].value == current_value
+    assert rows[0].provenance is None
+
+
+@pytest.mark.parametrize(
+    "snapshot",
+    [
+        None,
+        "not-a-mapping",
+        ["also-not-a-mapping"],
+        {"field_defs": None},
+        {"field_defs": "not-a-mapping"},
+        {"field_defs": ["also-not-a-mapping"]},
+        {"field_defs": {"custom-result": {"id": "other-id", "label": "Mismatched", "type": "text"}}},
+    ],
+)
+def test_output_projection_falls_back_to_id_on_malformed_snapshot_metadata(
+    workflow_web_env, snapshot
+):
+    from flowgency.tickets.models import TicketEvent
+    from flowgency.tickets.views import _field_rows
+
+    env = workflow_web_env
+    ticket = env.create()
+    view = env.read(ticket.ref)
+    accepted = TicketEvent(
+        kind="transitioned", actor="builder", summary="Accepted",
+        data={
+            "effective_outputs": {"custom-result": "Historical payload only"},
+            "transition_snapshot": snapshot,
+        },
+    )
+    record = view.record.model_copy(update={
+        "field_values": {"custom-result": "Newest"}, "events": (accepted,)
+    })
+    rows = _field_rows(view.model_copy(update={"record": record, "definition": None}))
+    assert len(rows) == 1
+    assert rows[0].is_output is True
+    assert rows[0].label == "custom-result"
+    assert rows[0].type is None
+    assert rows[0].value == "Newest"
+
+
+@pytest.mark.parametrize("malformed_outputs", [None, "not-a-mapping", ["also-not-a-mapping"]])
+def test_output_projection_ignores_malformed_effective_outputs(workflow_web_env, malformed_outputs):
+    from flowgency.tickets.models import TicketEvent
+    from flowgency.tickets.views import output_field_definitions
+
+    env = workflow_web_env
+    ticket = env.create(values={"verdict": True})
+    view = env.read(ticket.ref)
+    accepted = TicketEvent(
+        kind="transitioned", actor="builder", summary="Accepted",
+        data={"effective_outputs": malformed_outputs},
+    )
+    copied = view.model_copy(update={
+        "record": view.record.model_copy(update={"events": view.record.events + (accepted,)}),
+        "definition": None,
+    })
+    assert output_field_definitions(copied) == {}
+
+
+@pytest.mark.parametrize("malformed_outputs", [None, "not-a-mapping", ["also-not-a-mapping"]])
+def test_history_panel_ignores_malformed_effective_outputs_payload(workflow_web_env, malformed_outputs):
+    from flowgency.tickets.models import TicketEvent
+
+    env = workflow_web_env
+    ticket = env.create(values={"verdict": True})
+    current = env.provider.read(ticket.ref)
+    malformed = TicketEvent(
+        kind="transitioned", actor="builder", summary="Accepted",
+        data={"effective_outputs": malformed_outputs},
+    )
+    env.provider.write_record(
+        current.model_copy(update={"events": current.events + (malformed,)})
+    )
+
+    path = f"{env.base_path}/tickets/{ticket.ref.ticket_id}"
+    page = env.client.get(path)
+    snapshot = env.client.get(f"{path}/snapshot")
+
+    assert page.status_code == 200
+    assert snapshot.status_code == 200
+    verdict = next(field for field in snapshot.json()["fields"] if field["id"] == "verdict")
+    assert verdict["is_output"] is False
+
+
+def test_output_projection_retains_classification_after_output_removed_from_transition(
+    workflow_web_env,
+):
+    from flowgency.tickets.views import _field_rows
+
+    env = workflow_web_env
+    ticket = env.create(values={"verdict": True, "summary": "Initial"})
+    actor = env.agent("builder", "remove-run")
+    env.service.start_work(actor, ticket.version, env.operation("start", actor_name="builder"))
+    env.service.transition(
+        actor,
+        env.read(ticket.ref).version,
+        env.transition_request(outputs={"summary": "Recorded"}),
+        env.operation("finish", actor_name="builder"),
+    )
+
+    source = env.library.inspect(env.blueprint_id)
+    transitions = tuple(
+        transition.model_copy(update={"outputs": ()})
+        if transition.id == "complete"
+        else transition
+        for transition in source.definition.transitions
+    )
+    env.configuration_service.save_blueprint(
+        env.store.load().revision,
+        env.blueprint_id,
+        source.digest,
+        source.definition.model_copy(update={"transitions": transitions}),
+    )
+
+    rows = {row.id: row for row in _field_rows(env.read(ticket.ref))}
+    assert rows["summary"].is_output is True
+    assert rows["summary"].label == "Review summary"
+    assert rows["summary"].value == "Recorded"
+
+
+def test_output_projection_keeps_classification_when_reused_as_input(workflow_web_env):
+    from flowgency.tickets.views import _field_rows
+
+    env = workflow_web_env
+    ticket = env.create(values={"verdict": True, "summary": "Initial"})
+    actor = env.agent("builder", "reuse-run")
+    env.service.start_work(actor, ticket.version, env.operation("start", actor_name="builder"))
+    env.service.transition(
+        actor,
+        env.read(ticket.ref).version,
+        env.transition_request(outputs={"summary": "Recorded"}),
+        env.operation("finish", actor_name="builder"),
+    )
+
+    source = env.library.inspect(env.blueprint_id)
+    reopen = source.definition.transitions[0].model_copy(
+        update={
+            "id": "reopen",
+            "name": "Reopen",
+            "from_state": "done",
+            "to_state": "review",
+            "inputs": (FieldUse(field_id="summary", required=False),),
+            "outputs": (),
+            "preconditions": (),
+            "criteria": (),
+        }
+    )
+    env.configuration_service.save_blueprint(
+        env.store.load().revision,
+        env.blueprint_id,
+        source.digest,
+        source.definition.model_copy(update={"transitions": source.definition.transitions + (reopen,)}),
+    )
+
+    rows = {row.id: row for row in _field_rows(env.read(ticket.ref))}
+    assert rows["summary"].is_output is True
+
+
+def test_http_repeat_transition_retains_each_accepted_output_in_its_own_history_event(
+    workflow_web_env,
+):
+    env = workflow_web_env
+    ticket = env.create(values={"verdict": True, "summary": "Initial"})
+    actor = env.agent("builder", "repeat-run")
+
+    source = env.library.inspect(env.blueprint_id)
+    reopen = source.definition.transitions[0].model_copy(
+        update={
+            "id": "reopen",
+            "name": "Reopen",
+            "from_state": "done",
+            "to_state": "review",
+            "inputs": (),
+            "outputs": (),
+            "preconditions": (),
+            "criteria": (),
+        }
+    )
+    env.configuration_service.save_blueprint(
+        env.store.load().revision,
+        env.blueprint_id,
+        source.digest,
+        source.definition.model_copy(update={"transitions": source.definition.transitions + (reopen,)}),
+    )
+
+    env.service.start_work(
+        actor, env.read(ticket.ref).version, env.operation("start", actor_name="builder")
+    )
+    env.service.transition(
+        actor,
+        env.read(ticket.ref).version,
+        env.transition_request(transition_id="complete", outputs={"summary": "First result"}),
+        env.operation("finish-a", actor_name="builder"),
+    )
+    env.service.transition(
+        actor,
+        env.read(ticket.ref).version,
+        env.transition_request(transition_id="reopen"),
+        env.operation("reopen", actor_name="builder"),
+    )
+    env.service.transition(
+        actor,
+        env.read(ticket.ref).version,
+        env.transition_request(transition_id="complete", outputs={"summary": "Second result"}),
+        env.operation("finish-b", actor_name="builder"),
+    )
+
+    path = f"{env.base_path}/tickets/{ticket.ref.ticket_id}"
+    payload = env.client.get(f"{path}/snapshot").json()
+    summary = next(field for field in payload["fields"] if field["id"] == "summary")
+    assert payload["ticket"]["state_id"] == "done"
+    assert summary["value"] == "Second result"
+    assert summary["is_output"] is True
+
+    accepted_events = [
+        event
+        for event in payload["history"]
+        if event["kind"] == "transitioned" and event["data"].get("effective_outputs")
+    ]
+    assert len(accepted_events) == 2
+    assert accepted_events[0]["id"] != accepted_events[1]["id"]
+    assert accepted_events[0]["data"]["effective_outputs"]["summary"] == "First result"
+    assert accepted_events[1]["data"]["effective_outputs"]["summary"] == "Second result"
+
+    page = env.client.get(path)
+    assert page.status_code == 200
+    assert "Second result" in page.text
