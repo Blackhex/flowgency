@@ -332,22 +332,19 @@ def test_research_close_requires_output_even_when_input_is_supplied():
 
 Keep the existing real-provider tests for missing output, invalid type, stale revisions, receipts, and attempt-only inputs. Do not edit the evaluator if those tests already pass.
 
-- [ ] **Step 4: Write a failing packaged-guidance assertion, then replace the misleading wording.**
+- [ ] **Step 4: Correct the guidance and verify its packaged delivery and consumer behavior.**
+
+Execution preflight ruling, approved by the user on 2026-09-18: behavioral and packaging checks govern instead of exact-text prose assertions. Do not add tests that grep guidance wording. Use the existing real service/transition tests for the executable input/output boundary, tool-schema checks for the consuming interface, and source/package parity for the instruction distribution boundary.
 
 ```python
-def test_packaged_ticket_guidance_distinguishes_durable_outputs():
-        reference = (
-                copilot_discovery_root()
-                / ".github/skills/flowgency-setup/references/ticket-workflow-steps.md"
-        ).read_text(encoding="utf-8")
-        normalized = " ".join(reference.split())
-        assert "required inputs and optional outputs" not in normalized
-        assert "required and optional outputs" in normalized
-        assert "Attempt-only inputs do not update saved ticket fields." in normalized
-        assert "Reports and logs do not populate output fields." in normalized
+@pytest.mark.parametrize("relative", ["SKILL.md", "references/ticket-workflow-steps.md"])
+def test_packaged_ticket_guidance_matches_discovery_source(relative):
+    packaged = copilot_discovery_root() / ".github/skills/flowgency-setup" / relative
+    discovery = REPO_ROOT / ".github/skills/flowgency-setup" / relative
+    assert packaged.read_bytes() == discovery.read_bytes()
 ```
 
-Run: `python -m pytest tests/test_workflow_setup.py -k packaged_ticket_guidance -q`.
+Run: `python -m pytest tests/test_workflow_setup.py -k packaged_ticket_guidance -q`. This distribution guard may already pass; do not damage a source copy merely to manufacture a failing test. The result-persistence regression in Steps 1-3 supplies behavioral red/green evidence.
 
 Make both source copies use these semantics:
 
@@ -361,7 +358,9 @@ results are unavailable, report the blocker and leave the state unchanged.
 
 The generic setup authoring checklist must ask what each transition consumes, what it produces, which produced values are required, and whether no results are intentional. Replace the instruction to write a generic `notes` field on failure with `ticket_report`; arbitrary workflows need not have that field. Preserve all consent and authority wording. Update both the package-owned source and `.github` discovery copy, not `build/lib`.
 
-Rerun the same guidance test immediately. Add a source/package byte-parity assertion for the two touched Markdown files to `tests/test_setup_assets.py`; retain wheel packaging tests.
+Rerun the same distribution test immediately and retain the existing wheel-content tests. Do not duplicate the same parity assertion in another test file.
+
+When editing the skill, use the writing-skills testing workflow with an isolated consumer exercise: provide a custom transition with an arbitrary required text output and a distinct temporary input, plus the emitted guidance, and request the consumer's next tool payload. Assert the consumer places the durable result in `outputs` and does not substitute a report or a field update before transition. Add a second blocked-result scenario and verify the consumer reports the blocker without attempting to advance. This exercise must have no live ticket tools, credentials, workspace writes, or project-agent launches; retain its exact prompt and responses in the task report. Do not claim that source/package parity alone proves agent behavior.
 
 - [ ] **Step 5: Expose the same contract in runtime-facing descriptions and the knowledge base.**
 
@@ -377,7 +376,7 @@ reports and logs do not save outputs. Accepted outputs and state commit together
 
 Use that docstring on `ticket_transition`. Describe `ticket_report` as informational with no field or state mutation and `ticket_update` as an explicit field edit, not a substitute for required transition output submission. Insert the same three-sentence transition contract into `_ticket_task_input` before the serialized ticket/definition blocks. Keep all current snapshot refresh instructions.
 
-Extend the existing MCP tool-list test to assert these descriptions are actually returned in the schema, and the job-input test to assert the guidance precedes `## Current ticket`. In `kb/data-formats.md`, move the sample review notes to a required output, keep `approved` as an input precondition, and document optional output omission, canonical field persistence, and History retention.
+Extend the existing MCP tool-list test to verify nonempty tool descriptions and the actual typed input/output schema returned by the server; do not assert verbatim prose. Exercise the emitted job input in the isolated consumer scenarios from Step 4. In `kb/data-formats.md`, move the sample review notes to a required output, keep `approved` as an input precondition, and document optional output omission, canonical field persistence, and History retention.
 
 - [ ] **Step 6: Run the complete affected slice, commit, and review.**
 

@@ -803,7 +803,9 @@ fields:
     artifact_format: git-change
 ```
 
-Document exact policy authentication options, no implicit credential grant, noninteractive SSH host checks, `known_hosts` ownership, the missing-local-graph error, and snapshot-at-verification-time semantics. Runtime never parses the constitution directly. Update package-owned and discovery skill copies and retain wheel/parity tests. Add guidance assertions to the existing setup tests for local-only support, explicit policy approval, and no universal push requirement.
+Document exact policy authentication options, no implicit credential grant, noninteractive SSH host checks, `known_hosts` ownership, the missing-local-graph error, and snapshot-at-verification-time semantics. Runtime never parses the constitution directly. Update package-owned and discovery skill copies and retain wheel/parity tests.
+
+Execution preflight ruling, approved by the user on 2026-09-18: do not add exact-text guidance assertions. Use the policy, service, and tool tests to prove local-only support, explicit approved destinations, and failure without policy. Use isolated consumer exercises under the writing-skills workflow to verify that a local-only project does not trigger a push, a remote-policy project selects its approved ref, and absent policy leads to a configuration blocker rather than an invented grant. Provide typed mocked tool responses only; no live project tools or user agents. Retain prompts, observed tool payloads, and outcomes in the task report. Packaging parity proves delivery of those instructions, not their behavioral effect.
 
 - [ ] **Step 4: Run adapters, authoring, and packaged-guide gates; commit and review.**
 
