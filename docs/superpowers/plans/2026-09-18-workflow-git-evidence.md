@@ -504,6 +504,7 @@ Stage only files changed for this task, including any affected existing config t
 - Modify: `flowgency/tickets/errors.py` (one typed semantic-evidence error).
 - Modify: `flowgency/web/dependencies.py`, `flowgency/jobs/execution.py` (live-service constructors).
 - Modify: `tests/_git_evidence_helpers.py`.
+- Modify: `tests/_ticket_helpers.py` (optional launch policy supplied before job creation, retaining existing defaults).
 - Test: `tests/test_ticket_artifacts.py`, `tests/test_ticket_transitions.py`, `tests/test_ticket_access.py`, `tests/test_ticket_service.py`.
 
 **Interfaces:**
@@ -515,7 +516,7 @@ Stage only files changed for this task, including any affected existing config t
 - Produces: `TicketService.capture_git_evidence(actor: AgentTicketContext, version: TicketVersion, request: GitCaptureRequest, operation: TicketOperation) -> GitCaptureResult`.
 - Produces: `GitEvidenceManifest` and `GitCaptureReceipt` models in `tickets/git_evidence.py`, described below.
 - Produces: `TicketEvidenceInvalid(TicketStorageError)` in `tickets/errors.py`, with `http_status = 422` for structurally invalid or untrusted evidence; preserve the existing exception vocabulary for other failures.
-- Produces: `retained_git_artifact(captured: GitRangeCapture, receipt: GitPublicationReceipt, *, actor: AgentTicketContext, version: TicketVersion, request: GitCaptureRequest, policy: GitPublicationPolicy, captured_at: datetime) -> RetainedArtifact`.
+- Produces: `retained_git_artifact(captured: GitRangeCapture, receipt: GitPublicationReceipt, *, actor: AgentTicketContext, version: TicketVersion, request: GitCaptureRequest, policy: GitPublicationPolicy, captured_at: datetime, workspace: Path) -> RetainedArtifact`. The configured workspace is required to derive its identity hash without exposing its path in the manifest.
 - Produces: `validate_git_artifact(record: TicketRecord, artifact: RetainedArtifact, *, workspace: Path | None = None, policy: GitPublicationPolicy | None = None) -> GitEvidenceManifest`. It always verifies the trusted capture/manifest binding; supplied current workspace/policy additionally enforce transition-time compatibility. Read-only historical display omits current-policy checks and performs no Git/network access.
 
 - [ ] **Step 1: Add a reusable service fixture using a real ticket provider and running job.**
@@ -524,6 +525,8 @@ Add `configure_git_ticket(env: WorkflowTestEnv, fixture: GitTestRepository, poli
 
 ```python
 def configure_git_ticket(env, fixture, policy):
+    from flowgency.configuration.effective import resolve_effective_policy
+    from flowgency.jobs.models import RuntimePolicySnapshot
     from flowgency.tickets.access import TicketAccessRegistry
     from flowgency.workflows.models import WorkflowDefinition
 
@@ -548,7 +551,12 @@ def configure_git_ticket(env, fixture, policy):
         env.store.load().revision, env.blueprint_id, source.digest,
         WorkflowDefinition.model_validate(document),
     )
-    authority = env.running_job("builder", "git-evidence-run")
+    launch_policy = RuntimePolicySnapshot.from_effective_policy(
+        resolve_effective_policy(env.store.load().config, env.team_id, "builder")
+    )
+    authority = env.running_job(
+        "builder", "git-evidence-run", runtime_policy=launch_policy
+    )
     registry = TicketAccessRegistry(env.job_store)
     actor = registry.open(authority).context
     env.service.validate_agent_context = registry.validate_context
@@ -559,6 +567,8 @@ def configure_git_ticket(env, fixture, policy):
 ```
 
 The new `resolve_git_job` attribute is intentionally injectable on an individual fixture service; never monkeypatch a process-global submission function or install UI runtime state in the shared pytest process.
+
+Extend `WorkflowTestEnv.running_job` with keyword-only `runtime_policy: RuntimePolicySnapshot | None = None`, preserving the existing restricted default when omitted. Supply the selected policy to `JobSpec` before `JobRecord.from_spec` and `JobStore.create`. Do not rewrite an already-created immutable spec or recompute its authority digest in a helper. Use explicit denied launch/current-policy fixtures as well as permissive ones.
 
 - [ ] **Step 2: Add the capture-without-transition regression.**
 
@@ -598,7 +608,7 @@ Use strict, frozen Pydantic models with `extra="forbid"`. The manifest has `sche
 
 `workspace_identity` is the SHA-256 of the platform-normalized configured workspace path, not the exposed raw path. `policy_snapshot` contains only `mode: local` and allowed local refs; no remote identity, authentication profile, credential paths, or environment. `repository_id` is Task 2's stable authorized-repository identity. Enforce full-object/digest syntax, timezone-aware timestamps, counts, strict base64, decoded patch length, and exact `patch_sha256`. Check total canonical JSON length with `RetainedArtifact.create`; return an artifact-too-large error rather than truncating.
 
-The event's `data["capture"]` contains a strict `GitCaptureReceipt`: `artifact_id`, `repository_id`, `workspace_identity`, `policy_digest`, `workflow_digest`, `context_digest`, intended `transition_id`, intended `field_id`, `agent_name`, and `job_id`. The outer event supplies its ID and timestamp. It intentionally duplicates only identity/check fields, not patch bytes, commit lists, or the full manifest. Generic upload/report/update commands cannot submit this event kind or shape.
+The event's `data["capture"]` contains a strict `GitCaptureReceipt`: `artifact_id`, `repository_id`, `workspace_identity`, `policy_digest`, `workflow_digest`, `context_digest`, intended `transition_id`, intended `field_id`, `agent_name`, and `job_id`. The outer event supplies its ID and timestamp. It records identity/check fields and original capture intent, not patch bytes, commit lists, or the full manifest. Generic upload/report/update commands cannot submit this event kind or shape.
 
 Canonical encoding:
 
@@ -627,7 +637,9 @@ Rerun the capture regression immediately, then `tests/test_ticket_access.py` bef
 
 - [ ] **Step 5: Add evidence checks to every field-write and transition boundary.**
 
-`validate_git_artifact` must find an exact trusted capture event in the same ticket, parse its receipt, read the artifact through the binding-scoped provider, verify the retained envelope and inner patch digest, and cross-check all receipt/manifest identity fields. Current transition/write checks also require the same workspace identity and current publication-policy digest. Do not require the current actor/job to equal the original producing actor/job: a reviewer may reuse verified evidence on the same ticket. Keep the original producer attribution and record the new transition actor separately.
+`validate_git_artifact` must find an exact trusted capture event in the same ticket, parse its receipt, read the artifact through the binding-scoped provider, verify the retained envelope and inner patch digest, and cross-check the shared artifact/repository/workspace/policy/producer identity fields. Current transition/write checks also require the same workspace identity and current publication-policy digest. Do not require the current actor/job to equal the original producing actor/job: a reviewer may reuse verified evidence on the same ticket. Keep the original producer attribution and record the new transition actor separately.
+
+User ruling on 2026-09-18: evidence is reusable anywhere on the same ticket. Original `transition_id` and `field_id` in the capture receipt are provenance-only, not a restriction on another field or transition. Keep capture-time target validation, but do not require those intent IDs to match subsequent write targets. Add a real-provider test reusing the same artifact in a second Git-change field and later transition on the same ticket, preserving the original capture intent and producer. Cross-ticket reuse must still fail.
 
 Call this validator for non-null Git-format field values in:
 
@@ -665,6 +677,8 @@ Then upload byte-identical-looking JSON through `publish_artifact` on a differen
 For a successful capture, replace the module's `capture_committed_range` callable with a function that raises if called, replay the same operation, and assert the same artifact, event, revision, and `replayed=True`. Mutate the policy afterward and repeat the accepted replay without a remote call; a new transition using the stale receipt must still fail. Test request-digest mismatch separately.
 
 Pause a fake capture at a barrier, change the ticket revision/assignee or config policy/workspace/blueprint, then release it. Assert no capture event or field/state mutation is committed. Revoke the runtime session while paused and assert rejection. Test different tickets handled by the same job and same ticket evidence referenced by a later review job; never join by nearest timestamp.
+
+Explicitly test launch-time read denial, current-policy read denial, and current read permission narrowing while a bounded capture is in flight. All must reject the entire capture without an accepted event/receipt. Merely reconstructing both policies after the read is not enforcement: recheck the captured source paths under the current policies or fail the changed-policy capture before committing. Narrow receipt parse exceptions to expected validation failures so programming errors are not mislabeled as corrupt storage.
 
 Run: `python -m pytest tests/test_ticket_artifacts.py tests/test_ticket_transitions.py tests/test_ticket_access.py tests/test_ticket_service.py tests/test_git_evidence.py -q`.
 
