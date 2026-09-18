@@ -773,9 +773,7 @@ git_publication:
 ```
 
 ```yaml
-git_publication:
-    mode: local
-  allowed_refs: [refs/heads/main, 'refs/heads/feature/*']
+git_publication: {mode: local, allowed_refs: [refs/heads/main, 'refs/heads/feature/*']}
 ```
 
 Show a generic artifact field, independent of workflow/agent names:
