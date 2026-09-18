@@ -2,8 +2,8 @@
 
 Date: 2026-09-18
 
-Status: Generic outputs and Git-evidence design directions approved; revised
-written specification awaiting user review.
+Status: Approved for implementation. User ruling on 2026-09-18 explicitly
+excludes validation of remote publication.
 
 ## Goal
 
@@ -18,9 +18,9 @@ Overview shows the latest saved value of each output. History preserves the
 outputs of earlier accepted transitions and their original context.
 
 Code changes are represented by an immutable Git-change artifact generated
-from exact committed revisions, with a line-by-line diff viewer. Whether those
-commits must also be pushed is determined by the project's constitution and
-explicit configured policy, not a universal Flowgency requirement.
+from exact locally available committed revisions, with a line-by-line diff
+viewer. The project's constitution may require a push, but Flowgency does not
+validate remote publication or make ticket transitions depend on it.
 
 ## Evidence and Existing Contract
 
@@ -65,7 +65,8 @@ Relevant implementation anchors:
 In scope are the generic workflow authoring process, setup and agent guidance,
 tool descriptions, maintained workflow examples and packaged assets, ticket
 projection and rendering, trusted committed-change capture, project publication
-policy, an immutable diff viewer, documentation, and regression coverage.
+policy for local commit/ref checks only, an immutable diff viewer, documentation,
+and regression coverage.
 
 There are no ticket backfills, history rewrites, automatic input promotion,
 startup conversions, historical job replays, agent launches, or permission
@@ -74,7 +75,7 @@ field names, or agent roles.
 
 Retain the generic field/output model and existing artifact references. Add an
 opt-in artifact format for Git changes, a generic trusted capture operation,
-and structured publication policy under canonical configuration. Do not add
+and structured local commit/ref policy under canonical configuration. Do not add
 workflow-specific APIs, a second ticket-result store, or metadata duplicating
 the role already expressed by `outputs`. Existing definitions and ordinary
 artifact fields retain their behavior without conversion.
@@ -89,6 +90,12 @@ Do not manufacture evidence by committing, rebasing, merging, or pushing on
 the agent's behalf. Do not reconstruct historical run diffs or redesign the
 existing best-effort job change collector. No PR integration, patch application,
 or code editing is part of the read-only viewer.
+
+Do not contact remotes, verify pushes, fetch missing objects, select SSH agents,
+invoke credential helpers, or add authentication/remote-endpoint configuration
+for evidence capture. Remote publication rules remain project/agent instructions,
+not an application verification gate. Remove the unshipped remote verifier and
+its transport-only configuration rather than retaining an unused branch.
 
 ## Generic Definition Process
 
@@ -216,8 +223,8 @@ The retained artifact contains:
   including additions, deletions, renames, and explicit binary-file metadata.
 - Producing team, ticket binding, agent, job, and capture time from trusted
   context, not caller-supplied identity claims.
-- The publication policy and its digest, plus the applicable verification
-  receipt described below.
+- The local commit/ref policy and its digest, plus the local verification
+  receipt described below. It makes no assertion about remote publication.
 
 Bind the accepted reference and its capture identity to the transition event
 when the transition commits. Capture can precede acceptance; it does not itself
@@ -232,56 +239,49 @@ as such; requiring an artifact is not an implicit requirement to invent edits.
 Missing commits, invalid ancestry, unavailable Git, non-Git workspaces, denied
 access, or exceeded capture limits return structured errors, not empty success.
 
-## Project Publication Policy
+## Local Commit Policy
 
-The project constitution decides what publication means. Setup must translate
-the approved rules into explicit structured policy associated with the team's
-workspace in canonical configuration. Runtime does not parse prose instructions
-or infer a requirement from the presence of an `origin` remote.
+The project constitution governs the agent's commit and push obligations.
+Flowgency verifies committed content locally only. Runtime does not parse prose
+instructions or infer a requirement from the presence of an `origin` remote.
 
-The policy contains an explicit local-commit or remote-publication mode, any
-accepted branch/ref restrictions, and, for remote mode, the approved configured
-remote and accepted remote refs. Capture receives an allowed ref selection when
-needed, never an arbitrary repository path or remote URL supplied by an agent.
-Bind the approved remote's identity in policy; a workspace configuration edit
-that retargets the same remote name must not silently change the verifier's
-destination. Keep authentication material outside the policy and evidence.
-If no applicable policy is configured, a Git-evidence request fails with an
-actionable configuration error; ordinary workflows remain unaffected.
+Retain the explicit `git_publication` configuration entry for local commit/ref
+checks, with `mode: local` and optional accepted local branch/tag restrictions.
+It has no remote endpoint or authentication fields. Setup may translate approved
+local-ref restrictions into this policy; it must not translate a project's push
+rule into an application check. If no applicable policy is configured, a
+Git-evidence request fails with an actionable configuration error; ordinary
+workflows remain unaffected.
 
-- Local mode verifies the committed range in the authorized repository and any
-  configured local-ref restriction. It does not require a remote or perform a
-  network check. Unpushed commits can satisfy the contract.
-- Remote mode additionally verifies that the selected end commit is reachable
-  from an accepted ref on the configured remote. A local tracking ref, agent
-  assertion, or log of a push is insufficient. Record the observed remote ref,
-  its object ID, the relationship checked, and the verification time. Do not
-  retain credentials or credential-bearing URLs.
+Capture verifies the committed range in the authorized repository. With local
+ref restrictions, the selected end must be reachable from an allowed local ref;
+without restrictions, the exact valid commit range is sufficient. Record the
+observed local ref object ID, peeled commit ID, and verification time when a
+ref is selected. Unpushed commits can satisfy the contract, even in a project
+whose separate agent instructions require pushing. Tracking refs, remote URLs,
+and reported pushes neither strengthen nor weaken this local evidence.
 
-Remote verification is evidence of publication at the recorded time, not a
-promise that a mutable remote ref will retain that commit forever. It is
-read-only toward the remote and must not update the source workspace's files
-or refs. Authentication or network failure cannot silently downgrade to local
-mode. Use only explicitly authorized transports and credentials; no permission
-widening or automatic local-network consent is part of this feature.
+All verification is offline and read-only toward the source repository. Missing
+objects or incomplete ancestry produce explicit errors, never an automatic
+fetch. No SSH-agent selection, credential retrieval, permission widening, or
+local-network consent is part of this feature.
 
 Policy changes participate in the ticket context/version fence. At transition
 acceptance, validate the artifact's integrity, ticket/repository binding, and
-matching policy receipt. A capture against a stale policy cannot satisfy the
-current requirement. Accepted-operation replay returns its original receipt
-without recapturing a moving range or reinterpreting later remote state.
+matching local-policy receipt. A capture against a stale policy cannot satisfy
+the current requirement. Accepted-operation replay returns its original receipt
+without recapturing a moving range or reinterpreting later local refs.
 
-Keep the responsibilities distinct: reusable workflow definitions declare the
-kind of required result, and project configuration determines acceptable Git
-publication. A workflow blueprint must work for both local-only and remotely
-published projects without hard-coded remote names or branches.
+Reusable workflows declare the required result type. Project configuration may
+restrict local refs. Whether work must be pushed remains solely a project
+instruction, and evidence/viewer copy must never imply a verified push.
 
 ## Git Capture and Error Boundaries
 
 Use a narrow trusted capture operation behind the existing authenticated ticket
 tool boundary. It resolves the execution repository from job authority, checks
 ticket ownership and the requested output contract, validates the selected Git
-range and publication policy, and returns an immutable artifact reference.
+range and local commit/ref policy, and returns an immutable artifact reference.
 Read-only review agents may reference or inspect valid evidence through existing
 ticket permissions; the new operation does not confer workspace write access.
 Capture must also respect the actor's effective read permissions and workspace
@@ -298,8 +298,7 @@ another repository. Apply existing artifact confinement and reparse defenses.
 
 Preserve the existing transition atomicity: invalid, missing, wrong-ticket,
 corrupt, or policy-incompatible evidence must not commit state or output values.
-Git publication and ticket persistence are separate operations; do not claim a
-transaction spanning a remote server and the local ticket store. Publishing or
+Git commits and ticket persistence are separate operations. Committing or
 capturing evidence can succeed while a stale ticket transition is rejected.
 The agent then refreshes context and follows the existing retry contract.
 
@@ -350,11 +349,13 @@ summaries. The existing filename/count summary is not relabeled as proof of
 an agent's committed code changes.
 
 Use a read-only page within the existing application shell. Show repository,
-base/end revisions, publication mode and verification receipt, and a file list
+base/end revisions, a local commit/ref verification receipt, and a file list
 with added/removed counts. Render an accessible unified line-by-line diff with
 old/new line numbers and additions/deletions distinguishable without color
 alone. Use a proven diff parser/renderer and escape all repository-controlled
 content. Do not enable patch application, editing, or remote actions.
+Label the evidence `Local commits`; do not show a remote-publication status or
+claim that a selected commit has been pushed.
 
 Provide file navigation and a return link to the originating ticket or job.
 Long paths wrap in navigation; code panes scroll horizontally without widening
@@ -392,7 +393,7 @@ required versus optional outputs accurately.
 
 Add a generic Git-change artifact example to the workflow-definition guidance,
 using the same output declaration and required flag available to any field.
-Setup must make the artifact requirement and local/remote policy explicit for
+Setup must make the artifact requirement and local commit/ref policy explicit for
 projects that produce code changes. Do not make every Software delivery or
 Research transition require Git: non-code work remains a supported use case.
 Code-producing project definitions select the contract during authoring rather
@@ -429,10 +430,12 @@ transition IDs, not either shipped blueprint. It must cover:
   excluding pre-existing dirty, staged, and untracked files. Verify retained
   bytes after subsequent branch movement and workspace changes, and prove
   that separate ticket submissions from one job are not conflated.
-12. Local-only policy succeeding without a remote or network operation; remote
-  policy requiring actual publication to an accepted ref. Exercise unpublished
-  commits, disallowed refs, stale tracking refs, unreachable remotes, absent
-  policy, and policy changes. Use isolated test remotes, not the user's origin.
+12. Local policy succeeds without a remote or network operation, including
+  unpushed commits. Exercise allowed/disallowed local refs, annotated tags,
+  missing objects, absent policy, and policy changes. Confirm remote URL,
+  tracking-ref, credential-helper, and SSH environment changes cannot cause
+  transport execution or alter a successful local receipt. Reject unsupported
+  remote-mode/authentication configuration instead of silently accepting it.
 13. Binding capture identity to trusted context, resisting forged metadata and
   wrong-ticket/repository references, and preserving state on corrupt,
   incomplete, oversized, denied, or otherwise invalid evidence.
@@ -469,16 +472,17 @@ write to their configured ticket storage.
   the selected committed result and can include unrelated work.
 - Recompute historical diffs from moving refs: changes the evidence after the
   transition and fails when the repository is later unavailable.
-- Require every project to push to a remote: contradicts local-only project
-  constitutions. Conversely, accepting local commits unconditionally ignores
-  projects that require verified remote publication.
+- Validate remote publication: explicitly excluded by the user. Projects may
+  require pushes in their instructions, but Flowgency does not verify or enforce
+  that requirement when accepting committed-change evidence.
 - Accept an arbitrary uploaded patch as verified Git evidence: does not prove
-  correspondence with actual commits or the applicable publication policy.
+  correspondence with actual commits or the applicable local commit/ref policy.
 - Repair historical tickets: explicitly excluded by the user.
 
 ## Approval Boundary
 
-This commit contains only the design specification. Implementation has not
-started. After the user approves this written specification, create the
-implementation plan in a separate documentation-only commit before changing
-application code, setup guidance, or workflow assets.
+The original design and implementation plans were approved and implementation
+is in progress. This revision records the user's explicit scope reduction on
+2026-09-18: do not validate remote publication. Revise the remaining plan and
+remove the unshipped remote verifier before dependent work. Keep this design
+revision and the plan revision in separate documentation-only commits.
