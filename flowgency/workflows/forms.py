@@ -36,6 +36,7 @@ class DraftField(BaseModel):
     existing_field_id: str | None = None
     label: str
     type: FieldKind
+    artifact_format: Literal["git-change"] | None = None
 
 
 class DraftFieldUse(BaseModel):
@@ -189,6 +190,7 @@ def editor_payload(snapshot: WorkflowSnapshot) -> dict[str, object]:
                 existing_field_id=field.id,
                 label=field.label,
                 type=field.type,
+                artifact_format=field.artifact_format,
             )
             for field in definition.fields
         ),
@@ -307,7 +309,12 @@ def parse_editor_draft(source: WorkflowSnapshot, payload: dict) -> WorkflowDefin
             field_id = _draft_key("fl")
         field_id_by_key[row.key] = field_id
         fields.append(
-            FieldDefinition(id=field_id, label=_nonblank(row.label, "Field label"), type=row.type)
+            FieldDefinition(
+                id=field_id,
+                label=_nonblank(row.label, "Field label"),
+                type=row.type,
+                artifact_format=row.artifact_format,
+            )
         )
 
     final_state_ids = {state.id for state in states}

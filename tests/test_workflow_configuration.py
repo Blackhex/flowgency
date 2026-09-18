@@ -380,3 +380,145 @@ def test_stale_global_setting_change_cannot_race_ticket_mutation(configured_stor
             configured_store, all_teams=True, expected_revision=stale_revision
         ):
             pass
+
+
+def test_ordinary_team_has_no_git_publication_policy(configured_snapshot):
+    assert configured_snapshot.config.teams["newsletter"].git_publication is None
+
+
+def test_git_policy_changes_context_not_storage_identity(configured_store):
+    from flowgency.configuration.patches import patch_team_git_publication
+    from flowgency.git_evidence.models import GitPublicationPolicy
+    from flowgency.workflows.configuration import resolve_workflow_binding
+
+    before_snapshot = configured_store.load()
+    before = resolve_workflow_binding(before_snapshot, "newsletter", "workflow-one")
+    after_snapshot = patch_team_git_publication(
+        configured_store, before_snapshot.revision, "newsletter",
+        GitPublicationPolicy(mode="local"),
+    )
+    after = resolve_workflow_binding(after_snapshot, "newsletter", "workflow-one")
+    assert before.storage.binding_id == after.storage.binding_id
+    assert before.context_digest != after.context_digest
+    assert (
+        before_snapshot.raw["teams"]["newsletter"]["agents"]
+        == after_snapshot.raw["teams"]["newsletter"]["agents"]
+    )
+
+
+def test_git_policy_patch_rejects_stale_revision_and_leaves_file_untouched(
+    configured_store,
+):
+    from flowgency.configuration.patches import patch_team_git_publication
+    from flowgency.git_evidence.models import GitPublicationPolicy
+
+    snapshot = configured_store.load()
+    stale_revision = snapshot.revision
+    patch_team_git_publication(
+        configured_store, snapshot.revision, "newsletter", GitPublicationPolicy(mode="local")
+    )
+    before_bytes = configured_store.path.read_bytes()
+    with pytest.raises(ConfigConflictError):
+        patch_team_git_publication(
+            configured_store, stale_revision, "newsletter", GitPublicationPolicy(mode="local")
+        )
+    assert configured_store.path.read_bytes() == before_bytes
+
+
+def test_reapplying_same_git_policy_does_not_change_context_digest(configured_store):
+    from flowgency.configuration.patches import patch_team_git_publication
+    from flowgency.git_evidence.models import GitPublicationPolicy
+    from flowgency.workflows.configuration import resolve_workflow_binding
+
+    snapshot = configured_store.load()
+    policy = GitPublicationPolicy(mode="local")
+    first_snapshot = patch_team_git_publication(
+        configured_store, snapshot.revision, "newsletter", policy
+    )
+    first = resolve_workflow_binding(first_snapshot, "newsletter", "workflow-one")
+    second_snapshot = patch_team_git_publication(
+        configured_store, first_snapshot.revision, "newsletter", policy
+    )
+    second = resolve_workflow_binding(second_snapshot, "newsletter", "workflow-one")
+    assert first.storage.binding_id == second.storage.binding_id
+    assert first.context_digest == second.context_digest
+
+
+def test_removing_git_policy_still_changes_context(configured_store):
+    from flowgency.configuration.patches import patch_team_git_publication
+    from flowgency.git_evidence.models import GitPublicationPolicy
+    from flowgency.workflows.configuration import resolve_workflow_binding
+
+    snapshot = configured_store.load()
+    with_policy_snapshot = patch_team_git_publication(
+        configured_store, snapshot.revision, "newsletter", GitPublicationPolicy(mode="local")
+    )
+    with_policy = resolve_workflow_binding(with_policy_snapshot, "newsletter", "workflow-one")
+    removed_snapshot = patch_team_git_publication(
+        configured_store, with_policy_snapshot.revision, "newsletter", None
+    )
+    removed = resolve_workflow_binding(removed_snapshot, "newsletter", "workflow-one")
+    assert removed.context_digest != with_policy.context_digest
+    assert "git_publication" not in removed_snapshot.raw["teams"]["newsletter"]
+
+
+def test_workspace_path_change_alters_context_only_when_policy_configured(
+    configured_store, tmp_path
+):
+    from flowgency.configuration.patches import (
+        TeamSettingsStatePatch,
+        patch_team_git_publication,
+        patch_team_settings_state,
+    )
+    from flowgency.git_evidence.models import GitPublicationPolicy
+    from flowgency.workflows.configuration import resolve_workflow_binding
+
+    workspace_a = tmp_path / "workspace-a"
+    workspace_b = tmp_path / "workspace-b"
+    workspace_a.mkdir()
+    workspace_b.mkdir()
+
+    def _move_workspace(snapshot, expected_revision, workspace_path):
+        team = snapshot.config.teams["newsletter"]
+        return patch_team_settings_state(
+            configured_store,
+            expected_revision,
+            "newsletter",
+            TeamSettingsStatePatch(
+                name=team.name,
+                workspace_path=str(workspace_path),
+                path=str(team.path),
+                default_integration=team.default_integration,
+                runtime_timeout=team.runtime.timeout,
+            ),
+        )
+
+    without_policy_snapshot = configured_store.load()
+    before_no_policy = resolve_workflow_binding(
+        without_policy_snapshot, "newsletter", "workflow-one"
+    )
+    moved_no_policy_snapshot = _move_workspace(
+        without_policy_snapshot, without_policy_snapshot.revision, workspace_a
+    )
+    after_no_policy = resolve_workflow_binding(
+        moved_no_policy_snapshot, "newsletter", "workflow-one"
+    )
+    assert before_no_policy.context_digest == after_no_policy.context_digest
+
+    with_policy_snapshot = patch_team_git_publication(
+        configured_store,
+        moved_no_policy_snapshot.revision,
+        "newsletter",
+        GitPublicationPolicy(mode="local"),
+    )
+    before_with_policy = resolve_workflow_binding(
+        with_policy_snapshot, "newsletter", "workflow-one"
+    )
+    moved_with_policy_snapshot = _move_workspace(
+        with_policy_snapshot, with_policy_snapshot.revision, workspace_b
+    )
+    after_with_policy = resolve_workflow_binding(
+        moved_with_policy_snapshot, "newsletter", "workflow-one"
+    )
+    assert before_with_policy.storage.binding_id == after_with_policy.storage.binding_id
+    assert before_with_policy.context_digest != after_with_policy.context_digest

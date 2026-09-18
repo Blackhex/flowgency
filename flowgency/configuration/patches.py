@@ -5,6 +5,8 @@ from dataclasses import dataclass
 import os
 from typing import Any, Literal
 
+from flowgency.git_evidence.models import GitPublicationPolicy
+
 from .store import ConfigSnapshot, ConfigStore
 
 
@@ -256,6 +258,28 @@ def patch_team_dispatch(
         team["dispatch"] = {
             "enabled": patch.enabled,
         }
+
+    return store.patch(expected_revision, apply)
+
+
+def patch_team_git_publication(
+    store: ConfigStore,
+    expected_revision: str,
+    team_id: str,
+    policy: GitPublicationPolicy | None,
+) -> ConfigSnapshot:
+    """Set or clear a team's Git publication policy.
+
+    Only ``git_publication`` is touched; every other team field, including
+    agents, is preserved by the shared revision-checked config patch.
+    """
+
+    def apply(raw: dict[str, Any]) -> None:
+        team = _team(raw, team_id)
+        if policy is None:
+            team.pop("git_publication", None)
+        else:
+            team["git_publication"] = policy.model_dump(mode="json")
 
     return store.patch(expected_revision, apply)
 

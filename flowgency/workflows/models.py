@@ -11,6 +11,7 @@ from pydantic import (
     StrictFloat,
     StrictInt,
     StrictStr,
+    model_serializer,
     model_validator,
 )
 
@@ -68,6 +69,20 @@ class FieldDefinition(BaseModel):
     id: str
     label: str
     type: FieldKind
+    artifact_format: Literal["git-change"] | None = None
+
+    @model_validator(mode="after")
+    def _validate_artifact_format(self) -> "FieldDefinition":
+        if self.artifact_format is not None and self.type != "artifact":
+            raise ValueError("Artifact format requires an artifact field")
+        return self
+
+    @model_serializer(mode="wrap")
+    def _serialize_field(self, handler):
+        payload = handler(self)
+        if self.artifact_format is None:
+            payload.pop("artifact_format", None)
+        return payload
 
 
 class FieldUse(BaseModel):

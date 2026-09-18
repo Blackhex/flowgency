@@ -413,3 +413,27 @@ def test_precondition_bool_value_rejected_for_number_field():
                 "criteria": [],
             }],
         })
+
+
+# ---------------------------------------------------------------------------
+# Git-change artifact format (Git evidence Task 1)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("kind", ["text", "number", "boolean"])
+def test_git_change_format_requires_artifact_field(kind):
+    from flowgency.workflows.models import FieldDefinition
+
+    with pytest.raises(ValidationError):
+        FieldDefinition(id="result", label="Result", type=kind, artifact_format="git-change")
+
+
+def test_git_change_format_round_trips_without_changing_ordinary_artifacts():
+    from flowgency.workflows.models import FieldDefinition
+
+    result = FieldDefinition(
+        id="result", label="Result", type="artifact", artifact_format="git-change"
+    )
+    assert FieldDefinition.model_validate(result.model_dump()).artifact_format == "git-change"
+    ordinary = FieldDefinition(id="file", label="File", type="artifact")
+    assert ordinary.artifact_format is None
+    assert "artifact_format" not in ordinary.model_dump()

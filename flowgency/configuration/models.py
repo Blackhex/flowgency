@@ -7,6 +7,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from flowgency.git_evidence.models import GitPublicationPolicy
+
 from .issues import ValidationFailed, ValidationIssue
 
 MemoryScope = Literal["run", "routine", "agent", "team", "channel"]
@@ -159,6 +161,7 @@ class TeamConfig(BaseModel):
     agents: dict[str, AgentInstance] = Field(default_factory=dict)
     workspaces: tuple[WorkspaceConfig, ...] = ()
     workflows: dict[str, WorkflowInstance] = Field(default_factory=dict)
+    git_publication: GitPublicationPolicy | None = None
 
 
 class FlowgencyConfig(BaseModel):
@@ -1060,6 +1063,27 @@ def _resolve_permission_paths(owner_entry: dict[str, Any], workspace_path: Path)
     owner_entry["permissions"] = permissions
 
 
+def _resolve_git_publication_paths(owner_entry: dict[str, Any], config_dir: Path) -> None:
+    """Resolve config-relative known_hosts and file endpoint paths.
+
+    Lexical checks happen before resolution: a relative ``file:`` URL is
+    rejected outright by the pure policy model, so only an already-absolute
+    endpoint reaches here for the URL, while ``known_hosts`` may be relative
+    and is resolved against the config directory like other control paths.
+    """
+    git_publication = owner_entry.get("git_publication")
+    if not _is_mapping(git_publication):
+        return
+    git_publication = dict(git_publication)
+    remote = git_publication.get("remote")
+    if _is_mapping(remote):
+        remote = dict(remote)
+        if remote.get("known_hosts") is not None:
+            remote["known_hosts"] = _path_from_config(remote["known_hosts"], config_dir)
+        git_publication["remote"] = remote
+    owner_entry["git_publication"] = git_publication
+
+
 def _prepare_for_model(raw: dict[str, Any], config_path: Path) -> dict[str, Any]:
     config_dir = config_path.parent.resolve()
     prepared = dict(raw)
@@ -1098,6 +1122,7 @@ def _prepare_for_model(raw: dict[str, Any], config_path: Path) -> dict[str, Any]
             resolved_team.get("runtime") or {}, workspace_root
         )
         _resolve_permission_paths(resolved_team, Path(workspace_path) if workspace_path else config_dir)
+        _resolve_git_publication_paths(resolved_team, config_dir)
         agents = {}
         for agent in resolved_team.get("agents") or []:
             if not isinstance(agent, dict):

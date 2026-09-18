@@ -26,6 +26,7 @@ from flowgency.configuration.store import (
     ConfigSnapshot,
     ConfigStore,
 )
+from flowgency.git_evidence.models import GitPublicationPolicy, git_policy_digest
 from flowgency.tickets.errors import StorageUnavailable
 from flowgency.tickets.models import StorageBinding, TicketRecord
 from flowgency.tickets.storages.base import TicketStorage
@@ -170,18 +171,20 @@ def _context_digest(
     blueprint_id: str,
     workflow_library: Path | None,
     context_generation: int,
+    workspace_path: Path | None = None,
+    git_publication: GitPublicationPolicy | None = None,
 ) -> str:
-    payload = json.dumps(
-        {
-            "binding_id": storage.binding_id,
-            "blueprint_id": blueprint_id,
-            "workflow_library": _canonical_library(workflow_library),
-            "context_generation": context_generation,
-        },
-        sort_keys=True,
-        default=str,
-    )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    payload: dict[str, Any] = {
+        "binding_id": storage.binding_id,
+        "blueprint_id": blueprint_id,
+        "workflow_library": _canonical_library(workflow_library),
+        "context_generation": context_generation,
+    }
+    if git_publication is not None:
+        payload["workspace_path"] = _canonical_library(workspace_path)
+        payload["git_policy_digest"] = git_policy_digest(git_publication)
+    payload_json = json.dumps(payload, sort_keys=True, default=str)
+    return hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
 
 
 def resolve_workflow_binding(
@@ -201,6 +204,8 @@ def resolve_workflow_binding(
         blueprint_id=workflow.blueprint,
         workflow_library=snapshot.config.flowgency.workflow_library,
         context_generation=workflow.context_generation,
+        workspace_path=team.workspace_path,
+        git_publication=team.git_publication,
     )
     return WorkflowBinding(
         team_id=team_id,

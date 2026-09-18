@@ -10,6 +10,7 @@ labels. Renames change display text, never the ids that references point at.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 from uuid import uuid4
 
 from flowgency.workflows.models import (
@@ -119,10 +120,19 @@ def add_transition(
 
 
 def add_field(
-    definition: WorkflowDefinition, label: str, kind: FieldKind
+    definition: WorkflowDefinition,
+    label: str,
+    kind: FieldKind,
+    *,
+    artifact_format: Literal["git-change"] | None = None,
 ) -> DefinitionEdit:
     field_id = _new_id("fl")
-    field = FieldDefinition(id=field_id, label=_require_label(label), type=kind)
+    field = FieldDefinition(
+        id=field_id,
+        label=_require_label(label),
+        type=kind,
+        artifact_format=artifact_format,
+    )
     updated = _rebuild(definition, fields=definition.fields + (field,))
     return DefinitionEdit(updated, field_id)
 
