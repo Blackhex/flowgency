@@ -153,7 +153,8 @@ def _selected_ref(
             raise GitEvidenceError("git-evidence-publication-ref-required")
         return None
     ref = _validated_ref(publication_ref)
-    if not ref_matches_allowlist(ref, policy.allowed_refs):
+    # An empty allowlist means no ref restriction, not "no ref is authorized".
+    if policy.allowed_refs and not ref_matches_allowlist(ref, policy.allowed_refs):
         raise GitEvidenceError("git-evidence-publication-ref-denied")
     return ref
 

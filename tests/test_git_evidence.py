@@ -1129,15 +1129,48 @@ def test_an_unrestricted_local_policy_proves_the_range_without_a_ref(tmp_path):
             fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch"
         ) as context:
             receipt = _verify(context, policy, publication_ref=None)
-            with pytest.raises(GitEvidenceError) as denied:
-                _verify(context, policy, publication_ref="refs/heads/main")
+            with_ref = _verify(context, policy, publication_ref="refs/heads/main")
     assert receipt.mode == "local"
     assert receipt.observed_commit == fixture.end_commit
     assert receipt.publication_ref is None
     assert receipt.ref_object_id is None
     assert receipt.verified_at == _VERIFIED_AT
     assert receipt.policy_digest == git_policy_digest(policy)
-    assert denied.value.code == "git-evidence-publication-ref-denied"
+    # A valid supplied ref is proven, not rejected, when nothing restricts it.
+    assert with_ref.publication_ref == "refs/heads/main"
+    assert with_ref.ref_object_id == fixture.end_commit
+    assert with_ref.observed_commit == fixture.end_commit
+
+
+@requires_git
+def test_an_unrestricted_local_policy_rejects_a_ref_that_does_not_contain_the_end(tmp_path):
+    fixture = create_git_repository(tmp_path / "repo")
+    git_command(fixture.root, "branch", "before", fixture.base_commit)
+    policy = GitPublicationPolicy(mode="local")
+    with _publication_context(
+        fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch"
+    ) as context:
+        with pytest.raises(GitEvidenceError) as failure:
+            _verify(context, policy, publication_ref="refs/heads/before")
+    assert failure.value.code == "git-evidence-not-published"
+
+
+@requires_git
+@pytest.mark.parametrize(
+    "requested",
+    ["main", "refs/remotes/origin/main", "refs/heads/ma?n", "refs/heads/../../evil"],
+)
+def test_an_unrestricted_local_policy_still_rejects_malformed_or_tracking_refs(
+    tmp_path, requested
+):
+    fixture = create_git_repository(tmp_path / "repo")
+    policy = GitPublicationPolicy(mode="local")
+    with _publication_context(
+        fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch"
+    ) as context:
+        with pytest.raises(GitEvidenceError) as failure:
+            _verify(context, policy, publication_ref=requested)
+    assert failure.value.code == "git-evidence-publication-ref-denied"
 
 
 @requires_git
