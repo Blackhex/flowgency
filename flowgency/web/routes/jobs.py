@@ -21,12 +21,14 @@ from flowgency.jobs.models import JobRecord
 from flowgency.jobs.queue import queue_snapshot
 from flowgency.jobs.store import InvalidJobTransition, cancel_job, read_job
 from flowgency.web.dependencies import FlowgencyServices, get_services
+from flowgency.web.git_evidence import job_git_evidence_links
 from flowgency.web.job_presentation import friendly_status as _friendly_status
 from flowgency.web.job_presentation import friendly_trigger as _friendly_trigger
 from flowgency.web.job_presentation import routine_title as _routine_title
 from flowgency.web.job_presentation import status_badge_classes as _status_badge_classes
 from flowgency.web.logs import log_href as _shared_log_href
 from flowgency.web.team_navigation import build_team_context
+from flowgency.web.workflow_context import user_context
 
 
 router = APIRouter()
@@ -172,7 +174,7 @@ def _job_rows(snapshot, job_store: JobStore, team_id: str) -> list[dict[str, Any
     return rows
 
 
-def _job_detail_context(snapshot, team_id: str, record) -> dict[str, Any]:
+def _job_detail_context(snapshot, team_id: str, record, ticket_service=None) -> dict[str, Any]:
     team_cfg = snapshot.config.teams[team_id]
     instance = team_cfg.agents.get(record.spec.agent_name)
     agent_name = record.spec.agent_name
@@ -190,6 +192,12 @@ def _job_detail_context(snapshot, team_id: str, record) -> dict[str, Any]:
             )
     publication = record.memory_publication or {}
     resume_argv = _resume_argv(record)
+    git_evidence_links: tuple[dict[str, str], ...] = ()
+    git_evidence_issues: tuple[Any, ...] = ()
+    if ticket_service is not None:
+        git_evidence_links, git_evidence_issues = job_git_evidence_links(
+            ticket_service, user_context(team_id), record
+        )
     return {
         "job": record,
         "job_status_label": _friendly_status(record.status),
@@ -204,6 +212,8 @@ def _job_detail_context(snapshot, team_id: str, record) -> dict[str, Any]:
         "memory_label": _memory_label(record.spec.memory.selector, snapshot),
         "failed_artifacts": failed_artifacts,
         "publication_receipt": publication,
+        "git_evidence_links": git_evidence_links,
+        "git_evidence_issues": git_evidence_issues,
         "activity_href": f"/{team_id}/agents/{agent_name}/activity" if instance is not None else "",
         "routine_href": f"/{team_id}/agents/{agent_name}/routines" if instance is not None else "",
         "profile_href": f"/{team_id}/agents/{agent_name}/profile" if instance is not None else "",
@@ -253,7 +263,7 @@ async def job_detail(request: Request, team: str, job_id: str, artifact: str = "
     if not path.exists():
         raise HTTPException(status_code=404, detail="Job not found")
     record = read_job(path)
-    context = _job_detail_context(snapshot, team, record)
+    context = _job_detail_context(snapshot, team, record, services.tickets)
     return _templates(request).TemplateResponse(
         request,
         "job_detail.html",

@@ -80,6 +80,7 @@ from flowgency.web.routes import (
     agent_permissions_router,
     agent_routines_router,
     agents_router,
+    git_evidence_router,
     jobs_router,
     tickets_router,
     workflow_library_router,
@@ -878,6 +879,7 @@ app.include_router(agent_routines_router)
 app.include_router(agent_detail_router)
 app.include_router(jobs_router)
 app.include_router(workflows_router)
+app.include_router(git_evidence_router)
 app.include_router(tickets_router)
 
 

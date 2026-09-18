@@ -1570,3 +1570,141 @@ def test_a_receipt_is_fixed_at_the_state_it_observed(tmp_path):
     assert after.observed_commit == later
     with pytest.raises(dataclasses.FrozenInstanceError):
         first.observed_commit = later
+
+
+# -- bounded presentation of a retained patch --------------------------------
+
+
+def _retained_manifest(capture):
+    """The manifest a real capture would be retained as, without a ticket."""
+    import base64
+    import hashlib
+
+    from flowgency.tickets.git_evidence import GitEvidenceManifest, GitFileEntry
+
+    policy = GitPublicationPolicy(mode="local")
+    digest = git_policy_digest(policy)
+    receipt = GitPublicationReceipt(
+        mode="local",
+        policy_digest=digest,
+        publication_ref=None,
+        ref_object_id=None,
+        observed_commit=capture.end_commit,
+        verified_at=_VERIFIED_AT,
+    )
+    return GitEvidenceManifest(
+        schema_version=1,
+        repository_id=capture.repository_id,
+        workspace_identity="a" * 64,
+        base_commit=capture.base_commit,
+        end_commit=capture.end_commit,
+        commit_ids=capture.commit_ids,
+        files=tuple(GitFileEntry.from_change(change) for change in capture.files),
+        patch_b64=base64.b64encode(capture.patch).decode("ascii"),
+        patch_sha256=hashlib.sha256(capture.patch).hexdigest(),
+        team_id="newsletter",
+        workflow_id="board-a",
+        ticket_id="ticket-1",
+        binding_id="b" * 64,
+        agent_name="builder",
+        job_id="job-1",
+        captured_at=_VERIFIED_AT,
+        policy_digest=digest,
+        policy_snapshot=policy,
+        publication=receipt,
+    )
+
+
+def _committed_manifest(tmp_path, name: str, content: bytes):
+    root = tmp_path / "preview-source"
+    init_git_repository(root)
+    (root / name).write_bytes(b"before\n")
+    git_command(root, "add", "--", name)
+    git_command(root, "commit", "-m", "test: seed")
+    base = git_command(root, "rev-parse", "HEAD").decode().strip()
+    (root / name).write_bytes(content)
+    git_command(root, "add", "--", name)
+    git_command(root, "commit", "-m", "test: change")
+    end = git_command(root, "rev-parse", "HEAD").decode().strip()
+    return _retained_manifest(_capture(root, base, end, tmp_path / "scratch-preview"))
+
+
+@requires_git
+def test_preview_rows_carry_line_numbers_and_a_no_newline_marker(tmp_path):
+    from flowgency.web.git_evidence import parse_git_diff
+
+    manifest = _committed_manifest(tmp_path, "result.txt", b"after")
+
+    preview = parse_git_diff(manifest)
+
+    assert preview.unavailable_reason is None
+    assert preview.omitted is False
+    assert len(preview.files) == 1
+    assert preview.files[0].anchor == "change-0"
+    assert preview.files[0].change.path == "result.txt"
+    kinds = [line.kind for line in preview.files[0].lines]
+    assert "removed" in kinds and "added" in kinds
+    removed = next(line for line in preview.files[0].lines if line.kind == "removed")
+    added = next(line for line in preview.files[0].lines if line.kind == "added")
+    assert (removed.old_line, removed.new_line) == (1, None)
+    assert (added.old_line, added.new_line) == (None, 1)
+    assert kinds[-1] == "marker"
+
+
+@requires_git
+def test_a_non_utf8_patch_is_unshowable_but_never_altered(tmp_path):
+    from flowgency.web.git_evidence import PREVIEW_UNAVAILABLE_ENCODING, parse_git_diff
+
+    manifest = _committed_manifest(tmp_path, "encoded.txt", b"\xff\xfe latin bytes\n")
+
+    preview = parse_git_diff(manifest)
+
+    assert preview.unavailable_reason == PREVIEW_UNAVAILABLE_ENCODING
+    assert preview.files == ()
+    assert b"\xff\xfe latin bytes" in manifest.patch
+
+
+@requires_git
+def test_a_hunk_beyond_the_display_budget_is_omitted_whole(tmp_path):
+    from flowgency.web.git_evidence import parse_git_diff
+
+    manifest = _committed_manifest(tmp_path, "result.txt", b"after\n")
+
+    bounded = parse_git_diff(manifest, max_lines=1)
+    complete = parse_git_diff(manifest)
+
+    assert bounded.omitted is True
+    assert bounded.files[0].lines == ()
+    assert complete.omitted is False
+    assert complete.files[0].lines != ()
+
+
+@requires_git
+def test_an_empty_range_is_no_net_change_not_an_omission(tmp_path):
+    from flowgency.web.git_evidence import parse_git_diff
+
+    fixture = create_git_repository(tmp_path / "empty-range")
+    capture = _capture(
+        fixture.root, fixture.end_commit, fixture.end_commit, tmp_path / "scratch-empty"
+    )
+
+    preview = parse_git_diff(_retained_manifest(capture))
+
+    assert preview.files == ()
+    assert preview.omitted is False
+    assert preview.unavailable_reason is None
+
+
+@requires_git
+def test_binary_metadata_comes_from_the_manifest_not_the_parser(tmp_path):
+    from flowgency.web.git_evidence import parse_git_diff
+
+    manifest = _committed_manifest(tmp_path, "blob.bin", b"\x00\x01\x02\x00binary\n")
+
+    preview = parse_git_diff(manifest)
+
+    assert len(preview.files) == 1
+    assert preview.files[0].change.binary is True
+    assert preview.files[0].change.lines_added == 0
+    assert preview.files[0].lines == ()
+

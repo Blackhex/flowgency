@@ -9,10 +9,15 @@ from flowgency.jobs.authority import JobStore
 from flowgency.jobs.store import TERMINAL_STATUSES
 from flowgency.tickets.artifacts import iter_internal_artifact_refs
 from flowgency.tickets.errors import TicketStorageError, WorkflowUnavailable
-from flowgency.tickets.models import TicketEvent, TicketRef, TicketVersion, TicketView, UserTicketContext
+from flowgency.tickets.git_evidence import (
+    GIT_EVIDENCE_EVENT_KIND,
+    GitEvidenceManifest,
+    validate_git_artifact,
+)
+from flowgency.tickets.models import TicketEvent, TicketRecord, TicketRef, TicketVersion, TicketView, UserTicketContext
 from flowgency.tickets.service import TicketService
 from flowgency.workflows.configuration import WorkflowBinding
-from flowgency.workflows.models import FieldDefinition
+from flowgency.workflows.models import ArtifactRef, FieldDefinition
 
 
 class ViewIssue(BaseModel):
@@ -49,6 +54,28 @@ class TicketAuditEventView(BaseModel):
     summary: str
     at: Any = None
     data: dict[str, Any] = {}
+    git_outputs: dict[str, "GitEvidenceSummaryView"] = {}
+    evidence_issues: tuple[ViewIssue, ...] = ()
+
+
+class GitEvidenceSummaryView(BaseModel):
+    """What a verified retained manifest claims, for display only."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    artifact_id: str
+    repository_id: str
+    base_commit: str
+    end_commit: str
+    job_id: str
+    agent_name: str
+    captured_at: Any = None
+    publication_mode: str
+    publication_ref: str | None = None
+    observed_commit: str
+    verified_at: Any = None
+    file_count: int
+    lines_added: int
+    lines_removed: int
 
 
 class TicketFieldProvenanceView(BaseModel):
@@ -69,6 +96,8 @@ class TicketFieldValueView(BaseModel):
     value: Any = None
     provenance: TicketFieldProvenanceView | None = None
     is_output: bool = False
+    git_evidence: GitEvidenceSummaryView | None = None
+    evidence_issue: ViewIssue | None = None
 
 
 class WorkflowStateView(BaseModel):
@@ -453,7 +482,101 @@ def output_field_definitions(view: TicketView) -> dict[str, FieldDefinition | No
     return output_fields
 
 
-def _field_rows(view: TicketView) -> tuple[TicketFieldValueView, ...]:
+def git_evidence_summary(
+    artifact_id: str, manifest: GitEvidenceManifest
+) -> GitEvidenceSummaryView:
+    return GitEvidenceSummaryView(
+        artifact_id=artifact_id,
+        repository_id=manifest.repository_id,
+        base_commit=manifest.base_commit,
+        end_commit=manifest.end_commit,
+        job_id=manifest.job_id,
+        agent_name=manifest.agent_name,
+        captured_at=manifest.captured_at,
+        publication_mode=manifest.publication.mode,
+        publication_ref=manifest.publication.publication_ref,
+        observed_commit=manifest.publication.observed_commit,
+        verified_at=manifest.publication.verified_at,
+        file_count=len(manifest.files),
+        lines_added=sum(entry.lines_added for entry in manifest.files),
+        lines_removed=sum(entry.lines_removed for entry in manifest.files),
+    )
+
+
+class TicketGitEvidence:
+    """Verifies one ticket's captured artifacts at most once per request.
+
+    Only artifact IDs this ticket's own capture events vouch for are read, so
+    an ordinary retained upload keeps its ordinary download behaviour and
+    never acquires a verified label or an alarming issue.
+    """
+
+    def __init__(self, record: TicketRecord, provider, ref: TicketRef) -> None:
+        self._record = record
+        self._provider = provider
+        self._ref = ref
+        self._trusted = _captured_artifact_ids(record)
+        self._cache: dict[
+            str, tuple[GitEvidenceSummaryView | None, ViewIssue | None]
+        ] = {}
+
+    def resolve(
+        self, artifact_id: str
+    ) -> tuple[GitEvidenceSummaryView | None, ViewIssue | None]:
+        if artifact_id not in self._trusted:
+            return None, None
+        if artifact_id not in self._cache:
+            self._cache[artifact_id] = self._verify(artifact_id)
+        return self._cache[artifact_id]
+
+    def _verify(
+        self, artifact_id: str
+    ) -> tuple[GitEvidenceSummaryView | None, ViewIssue | None]:
+        try:
+            artifact = self._provider.read_artifact(self._ref, artifact_id)
+            manifest = validate_git_artifact(self._record, artifact)
+        except TicketStorageError as error:
+            return None, ViewIssue(code=error.code, message=error.message)
+        return git_evidence_summary(artifact_id, manifest), None
+
+
+def _captured_artifact_ids(record: TicketRecord) -> frozenset[str]:
+    ids: set[str] = set()
+    for event in record.events:
+        if event.kind != GIT_EVIDENCE_EVENT_KIND or not isinstance(event.data, dict):
+            continue
+        payload = event.data.get("capture")
+        if not isinstance(payload, dict):
+            continue
+        artifact_id = payload.get("artifact_id")
+        if isinstance(artifact_id, str) and artifact_id:
+            ids.add(artifact_id)
+    return frozenset(ids)
+
+
+def _artifact_id_of(value: Any) -> str | None:
+    if isinstance(value, ArtifactRef):
+        return value.value if value.kind == "id" else None
+    if isinstance(value, dict) and value.get("kind") == "id":
+        candidate = value.get("value")
+        return candidate if isinstance(candidate, str) and candidate else None
+    return None
+
+
+def _resolved_evidence(
+    evidence: "TicketGitEvidence | None", value: Any
+) -> tuple[GitEvidenceSummaryView | None, ViewIssue | None]:
+    if evidence is None:
+        return None, None
+    artifact_id = _artifact_id_of(value)
+    if artifact_id is None:
+        return None, None
+    return evidence.resolve(artifact_id)
+
+
+def _field_rows(
+    view: TicketView, evidence: "TicketGitEvidence | None" = None
+) -> tuple[TicketFieldValueView, ...]:
     definition_fields = () if view.definition is None else view.definition.fields
     ordered_ids = [field.id for field in definition_fields]
     for field_id in view.record.field_values:
@@ -479,15 +602,19 @@ def _field_rows(view: TicketView) -> tuple[TicketFieldValueView, ...]:
             label = fallback_definition.label
             field_type = fallback_definition.type
             artifact_format = fallback_definition.artifact_format
+        value = view.record.field_values.get(field_id)
+        summary, issue = _resolved_evidence(evidence, value)
         rows.append(
             TicketFieldValueView(
                 id=field_id,
                 label=label,
                 type=field_type,
                 artifact_format=artifact_format,
-                value=view.record.field_values.get(field_id),
+                value=value,
                 provenance=_provenance_view(view.record.field_provenance.get(field_id)),
                 is_output=field_id in output_fields,
+                git_evidence=summary,
+                evidence_issue=issue,
             )
         )
     return tuple(rows)
@@ -554,18 +681,36 @@ def _definition_view(view: TicketView, blueprint_id: str) -> WorkflowDefinitionV
     )
 
 
-def _audit_history(view: TicketView) -> tuple[TicketAuditEventView, ...]:
-    return tuple(
-        TicketAuditEventView(
-            id=event.id,
-            kind=event.kind,
-            actor=event.actor,
-            summary=event.summary,
-            at=event.at,
-            data=dict(event.data),
+def _audit_history(
+    view: TicketView, evidence: "TicketGitEvidence | None" = None
+) -> tuple[TicketAuditEventView, ...]:
+    rows: list[TicketAuditEventView] = []
+    for event in view.record.events:
+        git_outputs: dict[str, GitEvidenceSummaryView] = {}
+        issues: list[ViewIssue] = []
+        outputs = event.data.get("effective_outputs") if isinstance(event.data, dict) else None
+        if evidence is not None and event.kind == "transitioned" and isinstance(outputs, dict):
+            for field_id, value in outputs.items():
+                summary, issue = _resolved_evidence(evidence, value)
+                if summary is not None and isinstance(field_id, str):
+                    git_outputs[field_id] = summary
+                if issue is not None:
+                    issues.append(issue)
+        rows.append(
+            TicketAuditEventView(
+                id=event.id,
+                kind=event.kind,
+                actor=event.actor,
+                summary=event.summary,
+                at=event.at,
+                # The audited payload is repeated exactly; evidence is added
+                # beside it, never merged into it.
+                data=dict(event.data),
+                git_outputs=git_outputs,
+                evidence_issues=tuple(issues),
+            )
         )
-        for event in view.record.events
-    )
+    return tuple(rows)
 
 
 def _matches_filter(view: TicketView, *, query: str, assignee: str | None) -> bool:
@@ -805,13 +950,16 @@ def build_ticket_detail_view(
         (view.ref.binding_id, view.ref.workflow_id, view.ref.ticket_id),
         (),
     )
+    evidence = TicketGitEvidence(
+        view.record, service.storage_factory(binding.storage), ref
+    )
     return TicketDetailView(
         binding=_binding_view(binding),
         name=workflow.name,
         revision=snapshot.revision,
         ticket=_summary_view(view, reservations=reservations, ticket_jobs=ticket_jobs),
-        fields=_field_rows(view),
+        fields=_field_rows(view, evidence),
         current_definition=_definition_view(view, binding.blueprint_id),
-        history=_audit_history(view),
+        history=_audit_history(view, evidence),
         issues=issues,
     )

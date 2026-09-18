@@ -19,6 +19,7 @@ dependencies = [
     "python-multipart",
     "pywin32; sys_platform == 'win32'",
     "tomli-w>=1,<2",
+    "unidiff>=0.7.5,<0.8",
 ]
 
 [project.optional-dependencies]

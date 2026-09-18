@@ -14,6 +14,7 @@ from flowgency import app as app_mod
 from flowgency.jobs.authority import JobStore
 from flowgency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from flowgency.jobs.store import read_job, transition_job, write_job
+from tests._git_evidence_helpers import requires_git
 from tests._team_helpers import apply_team_paths, create_team_environment
 
 
@@ -712,6 +713,92 @@ def test_a_queued_job_offers_cancel(monkeypatch, tmp_path, raw_config):
     assert response.status_code == 200
     assert "/jobs/" in response.text
     assert "cancel" in response.text.lower()
+
+
+def _accepted_git_evidence(env):
+    """Capture real evidence in one job and accept it as the ticket's output."""
+    from flowgency.git_evidence.models import GitPublicationPolicy
+    from flowgency.tickets.git_evidence import GitCaptureRequest
+    from tests._git_evidence_helpers import configure_git_ticket, create_git_repository
+
+    fixture = create_git_repository(env.tmp_path / "source")
+    actor, ticket = configure_git_ticket(env, fixture, GitPublicationPolicy(mode="local"))
+    captured = env.service.capture_git_evidence(
+        actor,
+        ticket.version,
+        GitCaptureRequest(
+            transition_id="complete",
+            field_id="evidence",
+            base_commit=fixture.base_commit,
+            end_commit=fixture.end_commit,
+        ),
+        env.operation("capture", actor_name="builder"),
+    )
+    env.service.transition(
+        actor,
+        captured.version,
+        env.transition_request(
+            outputs={"summary": "Committed result", "evidence": captured.artifact}
+        ),
+        env.operation("finish", actor_name="builder"),
+    )
+    return fixture, actor, ticket, captured
+
+
+@requires_git
+def test_job_detail_links_only_the_job_that_produced_the_evidence(workflow_web_env):
+    env = workflow_web_env
+    _, _, ticket, captured = _accepted_git_evidence(env)
+    # A second persisted job that never produced this artifact.
+    env.running_job("observer", "later-review-run")
+    diff_path = (
+        f"/{env.team_id}/workflows/{env.workflow_id}/tickets/{ticket.ref.ticket_id}"
+        f"/artifacts/{captured.artifact.value}/diff?source=job"
+    )
+
+    producer = env.client.get(f"/{env.team_id}/jobs/git-evidence-run")
+    reviewer = env.client.get(f"/{env.team_id}/jobs/later-review-run")
+
+    assert producer.status_code == 200
+    assert "Git evidence" in producer.text
+    assert diff_path in producer.text
+    assert f"/{env.team_id}/workflows/{env.workflow_id}/tickets/{ticket.ref.ticket_id}" in producer.text
+    assert reviewer.status_code == 200
+    assert captured.artifact.value not in reviewer.text
+
+
+@requires_git
+def test_job_detail_omits_evidence_that_was_never_accepted(workflow_web_env):
+    from flowgency.git_evidence.models import GitPublicationPolicy
+    from flowgency.tickets.git_evidence import GitCaptureRequest
+    from tests._git_evidence_helpers import configure_git_ticket, create_git_repository
+
+    env = workflow_web_env
+    fixture = create_git_repository(env.tmp_path / "source")
+    actor, ticket = configure_git_ticket(env, fixture, GitPublicationPolicy(mode="local"))
+    captured = env.service.capture_git_evidence(
+        actor,
+        ticket.version,
+        GitCaptureRequest(
+            transition_id="complete",
+            field_id="evidence",
+            base_commit=fixture.base_commit,
+            end_commit=fixture.end_commit,
+        ),
+        env.operation("capture", actor_name="builder"),
+    )
+
+    response = env.client.get(f"/{env.team_id}/jobs/git-evidence-run")
+
+    assert response.status_code == 200
+    assert captured.artifact.value not in response.text
+
+
+def test_an_unknown_job_has_no_evidence_page(workflow_web_env):
+    response = workflow_web_env.client.get("/newsletter/jobs/job-that-never-existed")
+
+    assert response.status_code == 404
+
 
 
 

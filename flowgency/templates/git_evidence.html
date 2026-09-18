@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}Committed changes - {{ team_name }}{% endblock %}
+
+{% block content %}
+<link rel="stylesheet" href="/static/git-evidence.css">
+<section class="git-evidence-page">
+  <a class="git-evidence-skip" href="#git-evidence-changes">Skip to changes</a>
+  <header class="git-evidence-head">
+    <div class="git-evidence-head-row">
+      <a class="git-evidence-back" href="{{ back_href }}">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.5 3 4.5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>{{ back_label }}</span>
+      </a>
+      <a class="git-evidence-download" href="{{ patch_href }}">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8M5 7l3 3 3-3M3 13h10" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Download patch</span>
+      </a>
+    </div>
+    <h1>Local commits</h1>
+    <dl class="git-evidence-meta">
+      <div><dt>Repository</dt><dd><code>{{ manifest.repository_id[:12] }}</code></dd></div>
+      <div><dt>Base</dt><dd><code>{{ manifest.base_commit[:12] }}</code></dd></div>
+      <div><dt>End</dt><dd><code>{{ manifest.end_commit[:12] }}</code></dd></div>
+      <div><dt>Local ref</dt><dd>{% if manifest.publication.publication_ref %}<code>{{ manifest.publication.publication_ref }}</code>{% else %}<span class="git-evidence-muted">Not restricted</span>{% endif %}</dd></div>
+      <div><dt>Commits</dt><dd>{{ manifest.commit_ids | length }}</dd></div>
+      <div><dt>Captured by</dt><dd>{{ manifest.agent_name }}</dd></div>
+      <div><dt>Captured at</dt><dd>{{ manifest.captured_at }}</dd></div>
+    </dl>
+  </header>
+
+  {% if preview.unavailable_reason %}
+  <p class="git-evidence-notice" role="status">{{ preview.unavailable_reason }}</p>
+  {% elif not preview.files %}
+  <p class="git-evidence-notice" role="status">No net changes between these commits.</p>
+  {% else %}
+  {% if preview.omitted %}
+  <p class="git-evidence-notice" role="status">Part of this patch is not shown here. The download contains the complete patch.</p>
+  {% endif %}
+  <nav class="git-evidence-nav" aria-label="Changed files">
+    {% for file in preview.files %}
+    <a href="#{{ file.anchor }}">{{ file.change.path }}</a>
+    {% endfor %}
+  </nav>
+  {% endif %}
+
+  <div id="git-evidence-changes">
+    {% for file in preview.files %}
+    <section class="git-evidence-file" id="{{ file.anchor }}" aria-label="{{ file.change.path }}">
+      <h2>{{ file.change.path }}</h2>
+      <p class="git-evidence-file-meta">
+        <span>{{ file.change.status }}</span>
+        {% if file.change.old_path %}<span>from {{ file.change.old_path }}</span>{% endif %}
+        {% if not file.change.binary %}<span class="git-evidence-added">+{{ file.change.lines_added }}</span><span class="git-evidence-removed">&minus;{{ file.change.lines_removed }}</span>{% endif %}
+      </p>
+      {% if file.change.submodule %}
+      <p class="git-evidence-notice">Submodule reference change. Download the patch to read it.</p>
+      {% elif file.change.binary %}
+      <p class="git-evidence-notice">Binary file change. Download the patch to read it.</p>
+      {% elif not file.lines %}
+      <p class="git-evidence-notice">{% if file.change.old_mode != file.change.new_mode %}File mode changed from {{ file.change.old_mode }} to {{ file.change.new_mode }}.{% else %}No lines are shown for this file. Download the patch to read it.{% endif %}</p>
+      {% else %}
+      <div class="git-diff-scroll" tabindex="0" aria-label="Diff for {{ file.change.path }}">
+        <table class="git-diff-table">
+          <thead><tr><th>Old</th><th>New</th><th>Change</th><th>Code</th></tr></thead>
+          <tbody>
+            {% for line in file.lines %}
+            <tr class="git-diff-{{ line.kind }}">
+              <td>{{ line.old_line if line.old_line is not none else '' }}</td>
+              <td>{{ line.new_line if line.new_line is not none else '' }}</td>
+              <td>{{ '+' if line.kind == 'added' else '-' if line.kind == 'removed' else '' }}</td>
+              <td><code>{{ line.text }}</code></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+    </section>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

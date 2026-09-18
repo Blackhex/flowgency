@@ -3,8 +3,12 @@
 {% set workflow_detail_page = workflow_detail_page|default(false) %}
 {% set current_ticket = detail.ticket %}
 {% set transitions = detail.current_definition.transitions | selectattr('from_state', 'equalto', current_ticket.state_id) | list %}
-{% macro render_value(field_type, value) -%}
-  {%- if field_type == "artifact" and value and value.kind == "id" -%}
+{% macro render_value(field_type, value, git_evidence=none) -%}
+  {%- if field_type == "artifact" and value and value.kind == "id" and git_evidence -%}
+    {%- set evidence_base = "/" ~ team ~ "/workflows/" ~ active_workflow_id ~ "/tickets/" ~ current_ticket.ref.ticket_id ~ "/artifacts/" ~ value.value -%}
+    <a class="workflow-value-link" href="{{ evidence_base }}/diff?source=ticket">View diff</a>
+    <a class="workflow-value-link" href="{{ evidence_base }}/patch">Download patch</a>
+  {%- elif field_type == "artifact" and value and value.kind == "id" -%}
     <a class="workflow-value-link" href="/{{ team }}/workflows/{{ active_workflow_id }}/artifacts/{{ value.value }}">Download retained file</a>
   {%- elif field_type == "artifact" and value and value.kind == "url" -%}
     <a class="workflow-value-link" href="{{ value.value }}" target="_blank" rel="noreferrer">{{ value.value }}</a>
@@ -188,7 +192,9 @@
         {% for field in output_fields %}
         <div>
           <dt>{{ field.label }}</dt>
-          <dd>{{ render_value(field.type, field.value) }}</dd>
+          <dd>{{ render_value(field.type, field.value, field.git_evidence) }}
+            {% if field.evidence_issue %}<span class="workflow-empty-value">{{ field.evidence_issue.message }}</span>{% endif %}
+          </dd>
         </div>
         {% endfor %}
       </dl>
@@ -294,11 +300,14 @@
         {% set field_def = event.data.transition_snapshot.field_defs[field_id] if event.data.transition_snapshot and event.data.transition_snapshot.field_defs and field_id in event.data.transition_snapshot.field_defs else none %}
         <div>
           <dt>{{ field_def.label if field_def else field_id }}</dt>
-          <dd>{{ render_value(field_def.type if field_def else 'text', value) }}</dd>
+          <dd>{{ render_value(field_def.type if field_def else 'text', value, event.git_outputs.get(field_id)) }}</dd>
         </div>
         {% endfor %}
       </dl>
       {% endif %}
+      {% for issue in event.evidence_issues %}
+      <p class="workflow-empty-value">{{ issue.message }}</p>
+      {% endfor %}
       {% if event.data.assessments %}
       {% for assessment in event.data.assessments %}
       <p>

@@ -5,6 +5,7 @@ from .agent_detail import router as agent_detail_router
 from .agent_permissions import router as agent_permissions_router
 from .agent_routines import router as agent_routines_router
 from .agents import router as agents_router
+from .git_evidence import router as git_evidence_router
 from .jobs import router as jobs_router
 from .tickets import router as tickets_router
 from .workflow_library import router as workflow_library_router
@@ -19,6 +20,7 @@ __all__ = [
     "agent_permissions_router",
     "agent_routines_router",
     "agents_router",
+    "git_evidence_router",
     "jobs_router",
     "tickets_router",
     "workflow_library_router",

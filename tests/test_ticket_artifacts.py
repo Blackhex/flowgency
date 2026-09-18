@@ -823,3 +823,63 @@ def test_oversized_evidence_manifest_is_rejected_not_truncated(workflow_env):
             captured_at=datetime(2026, 9, 18, tzinfo=timezone.utc),
             workspace=env.tmp_path,
         )
+
+
+@requires_git
+def test_reading_retained_evidence_needs_neither_git_nor_current_policy(
+    workflow_env, monkeypatch
+):
+    from flowgency.tickets import service as service_module
+    from flowgency.web.git_evidence import load_ticket_git_evidence
+
+    env = workflow_env
+    actor, ticket, request = _git_capture_env(env)
+    captured = env.service.capture_git_evidence(
+        actor, ticket.version, request, env.operation("capture", actor_name="builder")
+    )
+    env.service.transition(
+        actor,
+        captured.version,
+        env.transition_request(
+            outputs={"summary": "Committed result", "evidence": captured.artifact}
+        ),
+        env.operation("finish", actor_name="builder"),
+    )
+    expected = env.current_provider().read_artifact(ticket.ref, captured.artifact.value)
+    _restrict_policy(env)
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("a read must never open a repository")
+
+    monkeypatch.setattr(service_module, "capture_committed_range", refuse)
+
+    artifact, manifest = load_ticket_git_evidence(
+        env.service, env.user, ticket.ref, captured.artifact.value
+    )
+
+    assert artifact == expected
+    assert manifest.end_commit == request.end_commit
+    assert manifest.patch == captured_patch(expected)
+
+
+def captured_patch(artifact):
+    """The exact patch bytes a retained evidence envelope carries."""
+    import base64
+
+    return base64.b64decode(json.loads(artifact.content)["patch_b64"], validate=True)
+
+
+@requires_git
+def test_an_artifact_captured_but_never_submitted_is_not_an_accepted_output(workflow_env):
+    from flowgency.web.git_evidence import accepted_output_artifact_ids, captured_artifact_ids
+
+    env = workflow_env
+    actor, ticket, request = _git_capture_env(env)
+    captured = env.service.capture_git_evidence(
+        actor, ticket.version, request, env.operation("capture", actor_name="builder")
+    )
+
+    record = env.read(ticket.ref).record
+
+    assert captured.artifact.value in captured_artifact_ids(record)
+    assert accepted_output_artifact_ids(record) == ()

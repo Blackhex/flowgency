@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import json as json_module
@@ -15,6 +16,7 @@ from flowgency.tickets.models import TicketEvent, TicketRef, TicketRecord
 from flowgency.tickets.storages.local import LocalTicketStorage
 from flowgency.integrations.models import RuntimeCapabilities
 from flowgency.workflows.models import FieldUse, Precondition
+from tests._git_evidence_helpers import requires_git
 from tests._ticket_helpers import SEED_TIME, TicketRuntimeIntegration, storage_binding, ticket_record
 
 
@@ -625,6 +627,8 @@ def test_detail_snapshot_exposes_current_definition_fields_and_retained_audit_sn
                 "recorded_at": payload["fields"][0]["provenance"]["recorded_at"],
             },
             "is_output": False,
+            "git_evidence": None,
+            "evidence_issue": None,
         },
         {
             "id": "summary",
@@ -640,6 +644,8 @@ def test_detail_snapshot_exposes_current_definition_fields_and_retained_audit_sn
                 "recorded_at": payload["fields"][1]["provenance"]["recorded_at"],
             },
             "is_output": True,
+            "git_evidence": None,
+            "evidence_issue": None,
         },
         {
             "id": "evidence",
@@ -655,6 +661,8 @@ def test_detail_snapshot_exposes_current_definition_fields_and_retained_audit_sn
                 "recorded_at": payload["fields"][2]["provenance"]["recorded_at"],
             },
             "is_output": True,
+            "git_evidence": None,
+            "evidence_issue": None,
         },
     ]
     assert payload["current_definition"]["fields"][0]["label"] == "Review result"
@@ -665,7 +673,19 @@ def test_detail_snapshot_exposes_current_definition_fields_and_retained_audit_sn
         "kind": "id",
         "value": artifact.value,
     }
-    assert set(payload["history"][-1]) == {"id", "kind", "actor", "summary", "at", "data"}
+    assert set(payload["history"][-1]) == {
+        "id",
+        "kind",
+        "actor",
+        "summary",
+        "at",
+        "data",
+        "git_outputs",
+        "evidence_issues",
+    }
+    # An ordinary retained upload carries no verified Git evidence.
+    assert payload["history"][-1]["git_outputs"] == {}
+    assert payload["history"][-1]["evidence_issues"] == []
     serialized = json.dumps(payload)
     assert str(env.root_a) not in serialized
     assert "receipts" not in serialized
@@ -1398,3 +1418,426 @@ def test_http_repeat_transition_retains_each_accepted_output_in_its_own_history_
     page = env.client.get(path)
     assert page.status_code == 200
     assert "Second result" in page.text
+
+
+@requires_git
+def test_git_diff_download_is_retained_not_recomputed(workflow_web_env):
+    import base64
+    import json
+    from flowgency.git_evidence.models import GitPublicationPolicy
+    from flowgency.tickets.git_evidence import GitCaptureRequest
+    from tests._git_evidence_helpers import configure_git_ticket, create_git_repository
+
+    env = workflow_web_env
+    fixture = create_git_repository(env.tmp_path / "source")
+    actor, ticket = configure_git_ticket(env, fixture, GitPublicationPolicy(mode="local"))
+    captured = env.service.capture_git_evidence(
+        actor, ticket.version,
+        GitCaptureRequest(transition_id="complete", field_id="evidence", base_commit=fixture.base_commit, end_commit=fixture.end_commit),
+        env.operation("capture", actor_name="builder"),
+    )
+    env.service.transition(
+        actor, captured.version,
+        env.transition_request(outputs={"summary": "Committed result", "evidence": captured.artifact}),
+        env.operation("finish", actor_name="builder"),
+    )
+    retained = env.current_provider().read_artifact(ticket.ref, captured.artifact.value)
+    expected_patch = base64.b64decode(json.loads(retained.content)["patch_b64"], validate=True)
+    (fixture.root / "result.txt").write_bytes(b"unrelated later edit\n")
+    base_url = f"{env.base_path}/tickets/{ticket.ref.ticket_id}/artifacts/{captured.artifact.value}"
+    viewer = env.client.get(f"{base_url}/diff")
+    download = env.client.get(f"{base_url}/patch")
+    assert viewer.status_code == 200
+    assert "after" in viewer.text
+    assert "unrelated later edit" not in viewer.text
+    assert download.status_code == 200
+    assert download.content == expected_patch
+    assert download.headers["x-content-type-options"] == "nosniff"
+    assert "attachment" in download.headers["content-disposition"]
+
+
+def _git_evidence_ticket(env, *, name="source", commit=None):
+    """Start a real run on a ticket whose team points at a Git fixture."""
+    from flowgency.git_evidence.models import GitPublicationPolicy
+    from tests._git_evidence_helpers import (
+        configure_git_ticket,
+        create_git_repository,
+        git_command,
+    )
+
+    fixture = create_git_repository(env.tmp_path / name)
+    if commit is not None:
+        filename, content = commit
+        (fixture.root / filename).write_bytes(content)
+        git_command(fixture.root, "add", "--", filename)
+        git_command(fixture.root, "commit", "-m", "test: add reviewed content")
+        fixture = replace(
+            fixture,
+            end_commit=git_command(fixture.root, "rev-parse", "HEAD").decode().strip(),
+        )
+    actor, ticket = configure_git_ticket(env, fixture, GitPublicationPolicy(mode="local"))
+    return fixture, actor, ticket
+
+
+def _capture_evidence(env, fixture, actor, ticket):
+    from flowgency.tickets.git_evidence import GitCaptureRequest
+
+    return env.service.capture_git_evidence(
+        actor,
+        env.read(ticket.ref).version,
+        GitCaptureRequest(
+            transition_id="complete",
+            field_id="evidence",
+            base_commit=fixture.base_commit,
+            end_commit=fixture.end_commit,
+        ),
+        env.operation("capture", actor_name="builder"),
+    )
+
+
+def _accept_evidence(env, actor, captured):
+    env.service.transition(
+        actor,
+        captured.version,
+        env.transition_request(
+            outputs={"summary": "Committed result", "evidence": captured.artifact}
+        ),
+        env.operation("finish", actor_name="builder"),
+    )
+
+
+def _evidence_base(env, ticket, captured):
+    return (
+        f"{env.base_path}/tickets/{ticket.ref.ticket_id}"
+        f"/artifacts/{captured.artifact.value}"
+    )
+
+
+def _retained_patch(env, ticket, captured):
+    import base64
+
+    retained = env.current_provider().read_artifact(ticket.ref, captured.artifact.value)
+    return base64.b64decode(json_module.loads(retained.content)["patch_b64"], validate=True)
+
+
+def _artifact_file(env, captured):
+    return (
+        env.root_a
+        / env.team_id
+        / env.workflow_id
+        / "artifacts"
+        / f"{captured.artifact.value}.json"
+    )
+
+
+@requires_git
+def test_retained_evidence_outlives_refs_source_and_policy(workflow_web_env):
+    from flowgency.git_evidence.models import GitPublicationPolicy
+    from tests._git_evidence_helpers import git_command
+
+    env = workflow_web_env
+    fixture, actor, ticket = _git_evidence_ticket(env)
+    captured = _capture_evidence(env, fixture, actor, ticket)
+    _accept_evidence(env, actor, captured)
+    expected_patch = _retained_patch(env, ticket, captured)
+
+    git_command(fixture.root, "update-ref", "-d", "refs/heads/main")
+    snapshot = env.store.load()
+    env.store.patch(
+        snapshot.revision,
+        lambda raw: raw["teams"][env.team_id].__setitem__(
+            "git_publication",
+            GitPublicationPolicy(
+                mode="local", allowed_refs=("refs/heads/release/*",)
+            ).model_dump(mode="json"),
+        ),
+    )
+    fixture.root.rename(fixture.root.with_name("source-moved-away"))
+
+    base_url = _evidence_base(env, ticket, captured)
+    viewer = env.client.get(f"{base_url}/diff")
+    download = env.client.get(f"{base_url}/patch")
+    assert viewer.status_code == 200
+    assert "after" in viewer.text
+    assert download.content == expected_patch
+
+
+@requires_git
+def test_damaged_evidence_storage_is_reported_not_regenerated(workflow_web_env):
+    env = workflow_web_env
+    fixture, actor, ticket = _git_evidence_ticket(env)
+    captured = _capture_evidence(env, fixture, actor, ticket)
+    _accept_evidence(env, actor, captured)
+    base_url = _evidence_base(env, ticket, captured)
+    stored = _artifact_file(env, captured)
+    original = stored.read_bytes()
+
+    stored.write_bytes(b"not an artifact envelope")
+    corrupt = env.client.get(f"{base_url}/diff")
+    assert corrupt.status_code == 500
+
+    envelope = json_module.loads(original)
+    manifest = json_module.loads(base64.b64decode(envelope["content_b64"], validate=True))
+    manifest["patch_sha256"] = "0" * 64
+    envelope["content_b64"] = base64.b64encode(
+        json_module.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).decode("ascii")
+    stored.write_bytes(json_module.dumps(envelope, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+    tampered = env.client.get(f"{base_url}/patch")
+    assert tampered.status_code == 409
+    assert str(env.root_a) not in tampered.text
+
+    stored.write_bytes(original)
+    assert env.client.get(f"{base_url}/diff").status_code == 200
+
+
+@requires_git
+def test_an_untrusted_artifact_is_never_shown_as_git_evidence(workflow_web_env):
+    from flowgency.tickets.git_evidence import GIT_EVIDENCE_MEDIA_TYPE, GIT_EVIDENCE_FILENAME
+
+    env = workflow_web_env
+    fixture, actor, ticket = _git_evidence_ticket(env)
+    captured = _capture_evidence(env, fixture, actor, ticket)
+    _accept_evidence(env, actor, captured)
+    stored = _artifact_file(env, captured)
+    manifest_bytes = base64.b64decode(
+        json_module.loads(stored.read_bytes())["content_b64"], validate=True
+    )
+    # The same bytes and the same media type, uploaded as an ordinary artifact.
+    forged = RetainedArtifact.create(
+        GIT_EVIDENCE_FILENAME, GIT_EVIDENCE_MEDIA_TYPE, manifest_bytes + b" "
+    )
+    env.current_provider().put_artifact(ticket.ref, forged)
+
+    response = env.client.get(
+        f"{env.base_path}/tickets/{ticket.ref.ticket_id}/artifacts/{forged.digest}/diff"
+    )
+    assert response.status_code == 422
+
+
+@requires_git
+@pytest.mark.parametrize(
+    "case, expected",
+    [
+        ("wrong-team", 404),
+        ("wrong-workflow", 404),
+        ("wrong-ticket", 404),
+        ("traversal", 403),
+        ("unknown-source", 422),
+    ],
+)
+def test_git_evidence_viewer_refuses_foreign_or_unsafe_references(
+    workflow_web_env, case, expected
+):
+    env = workflow_web_env
+    fixture, actor, ticket = _git_evidence_ticket(env)
+    captured = _capture_evidence(env, fixture, actor, ticket)
+    _accept_evidence(env, actor, captured)
+    ticket_id = ticket.ref.ticket_id
+    artifact_id = captured.artifact.value
+    paths = {
+        "wrong-team": f"/support/workflows/board-a/tickets/{ticket_id}/artifacts/{artifact_id}/diff",
+        "wrong-workflow": f"/{env.team_id}/workflows/board-z/tickets/{ticket_id}/artifacts/{artifact_id}/diff",
+        "wrong-ticket": f"{env.base_path}/tickets/ticket-absent/artifacts/{artifact_id}/diff",
+        "traversal": f"{env.base_path}/tickets/{ticket_id}/artifacts/%2E%2E%5C%2E%2E%5Cconfig.yaml/diff",
+        "unknown-source": f"{_evidence_base(env, ticket, captured)}/diff?source=https://evil.example",
+    }
+
+    response = env.client.get(paths[case])
+
+    assert response.status_code == expected
+    assert str(env.root_a) not in response.text
+
+
+@requires_git
+def test_a_linked_evidence_envelope_is_refused_rather_than_followed(workflow_web_env):
+    env = workflow_web_env
+    fixture, actor, ticket = _git_evidence_ticket(env)
+    captured = _capture_evidence(env, fixture, actor, ticket)
+    _accept_evidence(env, actor, captured)
+    stored = _artifact_file(env, captured)
+    elsewhere = env.tmp_path / "elsewhere.json"
+    elsewhere.write_bytes(stored.read_bytes())
+    stored.unlink()
+    try:
+        stored.symlink_to(elsewhere)
+    except (OSError, NotImplementedError):
+        pytest.skip("creating a symlink requires privileges this host withholds")
+
+    response = env.client.get(f"{_evidence_base(env, ticket, captured)}/diff")
+
+    assert response.status_code == 403
+    assert str(env.tmp_path) not in response.text
+
+
+@requires_git
+def test_git_evidence_page_escapes_committed_markup(workflow_web_env):
+    env = workflow_web_env
+    hostile = b'<script>alert("evidence")</script>\n<button onclick="steal()">x</button>\n'
+    fixture, actor, ticket = _git_evidence_ticket(env, commit=("hostile.txt", hostile))
+    captured = _capture_evidence(env, fixture, actor, ticket)
+    _accept_evidence(env, actor, captured)
+
+    viewer = env.client.get(f"{_evidence_base(env, ticket, captured)}/diff")
+
+    assert viewer.status_code == 200
+    assert '<script>alert("evidence")</script>' not in viewer.text
+    assert '<button onclick="steal()">' not in viewer.text
+    assert "&lt;script&gt;alert(" in viewer.text
+    assert "&lt;button onclick=" in viewer.text
+
+
+@requires_git
+def test_preview_budget_never_truncates_the_download(workflow_web_env):
+    env = workflow_web_env
+    wide = "".join(f"generated line {index}\n" for index in range(5000)).encode("utf-8")
+    fixture, actor, ticket = _git_evidence_ticket(env, commit=("wide.txt", wide))
+    captured = _capture_evidence(env, fixture, actor, ticket)
+    _accept_evidence(env, actor, captured)
+    expected_patch = _retained_patch(env, ticket, captured)
+    base_url = _evidence_base(env, ticket, captured)
+
+    viewer = env.client.get(f"{base_url}/diff")
+    download = env.client.get(f"{base_url}/patch")
+
+    assert viewer.status_code == 200
+    assert "not shown here" in viewer.text
+    assert "generated line 4999" not in viewer.text
+    assert download.content == expected_patch
+    assert b"generated line 4999" in download.content
+
+
+@requires_git
+@pytest.mark.parametrize(
+    "name, content",
+    [
+        ("blob.bin", b"\x00\x01\x02\xffbinary payload\n"),
+        ("tail.txt", b"no trailing newline"),
+    ],
+)
+def test_awkward_committed_content_downloads_byte_exactly(
+    workflow_web_env, name, content
+):
+    env = workflow_web_env
+    fixture, actor, ticket = _git_evidence_ticket(env, commit=(name, content))
+    captured = _capture_evidence(env, fixture, actor, ticket)
+    _accept_evidence(env, actor, captured)
+    expected_patch = _retained_patch(env, ticket, captured)
+    base_url = _evidence_base(env, ticket, captured)
+
+    viewer = env.client.get(f"{base_url}/diff")
+    download = env.client.get(f"{base_url}/patch")
+
+    assert viewer.status_code == 200
+    assert download.content == expected_patch
+    assert download.headers["content-type"] == "application/octet-stream"
+    assert download.headers["content-disposition"].endswith('.patch"')
+
+
+@requires_git
+def test_captured_evidence_is_viewable_before_it_is_ever_submitted(workflow_web_env):
+    env = workflow_web_env
+    fixture, actor, ticket = _git_evidence_ticket(env)
+    captured = _capture_evidence(env, fixture, actor, ticket)
+
+    viewer = env.client.get(f"{_evidence_base(env, ticket, captured)}/diff")
+    payload = env.client.get(
+        f"{env.base_path}/tickets/{ticket.ref.ticket_id}/snapshot"
+    ).json()
+
+    assert viewer.status_code == 200
+    rows = {row["id"]: row for row in payload["fields"]}
+    assert rows["evidence"]["value"] is None
+    assert rows["evidence"]["git_evidence"] is None
+    assert all(
+        not event["git_outputs"]
+        for event in payload["history"]
+    )
+
+
+@requires_git
+def test_verified_evidence_links_from_current_fields_and_history(workflow_web_env):
+    env = workflow_web_env
+    fixture, actor, ticket = _git_evidence_ticket(env)
+    captured = _capture_evidence(env, fixture, actor, ticket)
+    _accept_evidence(env, actor, captured)
+    base_url = _evidence_base(env, ticket, captured)
+
+    payload = env.client.get(
+        f"{env.base_path}/tickets/{ticket.ref.ticket_id}/snapshot"
+    ).json()
+    page = env.client.get(f"{env.base_path}/tickets/{ticket.ref.ticket_id}")
+
+    rows = {row["id"]: row for row in payload["fields"]}
+    assert rows["evidence"]["git_evidence"]["artifact_id"] == captured.artifact.value
+    assert rows["evidence"]["git_evidence"]["end_commit"] == fixture.end_commit
+    assert rows["evidence"]["git_evidence"]["job_id"] == "git-evidence-run"
+    assert rows["evidence"]["git_evidence"]["publication_mode"] == "local"
+    assert rows["evidence"]["evidence_issue"] is None
+    accepted = [event for event in payload["history"] if event["git_outputs"]]
+    assert len(accepted) == 1
+    assert accepted[0]["git_outputs"]["evidence"]["artifact_id"] == captured.artifact.value
+    # The audited payload itself is unchanged by the projection.
+    assert accepted[0]["data"]["effective_outputs"]["evidence"] == {
+        "kind": "id",
+        "value": captured.artifact.value,
+    }
+    assert page.status_code == 200
+    assert f"{base_url}/diff?source=ticket" in page.text
+    assert f"{base_url}/patch" in page.text
+    assert "Download retained file" not in page.text
+
+
+def test_an_ordinary_artifact_keeps_its_plain_download_link(workflow_web_env):
+    env = workflow_web_env
+    env.publish_artifact_field_workflow()
+    actor = env.agent("builder", "ordinary-run")
+    ticket = env.create(values={"verdict": True, "summary": "Pending"})
+    env.service.start_work(
+        actor, ticket.version, env.operation("start", actor_name="builder")
+    )
+    published = env.service.publish_artifact(
+        actor,
+        env.read(ticket.ref).version,
+        "review.txt",
+        "text/plain",
+        b"ordinary bytes",
+    )
+    env.service.transition(
+        actor,
+        env.read(ticket.ref).version,
+        env.transition_request(outputs={"summary": "Done", "evidence": published}),
+        env.operation("finish", actor_name="builder"),
+    )
+
+    page = env.client.get(f"{env.base_path}/tickets/{ticket.ref.ticket_id}")
+    payload = env.client.get(
+        f"{env.base_path}/tickets/{ticket.ref.ticket_id}/snapshot"
+    ).json()
+
+    rows = {row["id"]: row for row in payload["fields"]}
+    assert rows["evidence"]["git_evidence"] is None
+    assert rows["evidence"]["evidence_issue"] is None
+    assert "Download retained file" in page.text
+    assert "View diff" not in page.text
+
+
+@requires_git
+def test_job_navigation_falls_back_to_the_ticket_when_the_job_is_gone(workflow_web_env):
+    env = workflow_web_env
+    fixture, actor, ticket = _git_evidence_ticket(env)
+    captured = _capture_evidence(env, fixture, actor, ticket)
+    _accept_evidence(env, actor, captured)
+    base_url = _evidence_base(env, ticket, captured)
+
+    from_job = env.client.get(f"{base_url}/diff?source=job")
+    assert from_job.status_code == 200
+    assert f"/{env.team_id}/jobs/git-evidence-run" in from_job.text
+
+    env.job_store.path(env.team_id, "git-evidence-run").unlink()
+    without_job = env.client.get(f"{base_url}/diff?source=job")
+
+    assert without_job.status_code == 200
+    assert f"/{env.team_id}/jobs/git-evidence-run" not in without_job.text
+    assert f"{env.base_path}/tickets/{ticket.ref.ticket_id}" in without_job.text
+    assert "after" in without_job.text
