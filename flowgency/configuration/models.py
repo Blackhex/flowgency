@@ -821,31 +821,6 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                         hint=f"Set teams.{team_name}.{field_name} relative to config.yaml.",
                     )
                 )
-        git_publication = team.get("git_publication")
-        if _is_mapping(git_publication):
-            remote = git_publication.get("remote")
-            if _is_mapping(remote):
-                from .paths import (
-                    validate_git_file_endpoint_candidate,
-                    validate_git_known_hosts_candidate,
-                )
-
-                if remote.get("known_hosts") is not None:
-                    issues.extend(
-                        validate_git_known_hosts_candidate(
-                            remote["known_hosts"],
-                            config_dir=config_path.parent,
-                            scope=f"teams.{team_name}",
-                        )
-                    )
-                url = remote.get("url")
-                if isinstance(url, str) and url.startswith("file:"):
-                    issues.extend(
-                        validate_git_file_endpoint_candidate(
-                            url,
-                            scope=f"teams.{team_name}",
-                        )
-                    )
         runtime = team.get("runtime") or {}
         issues.extend(_validate_team_runtime(runtime, f"teams.{team_name}"))
         workflow_issues, team_has_workflows = _validate_workflows(
@@ -1088,27 +1063,6 @@ def _resolve_permission_paths(owner_entry: dict[str, Any], workspace_path: Path)
     owner_entry["permissions"] = permissions
 
 
-def _resolve_git_publication_paths(owner_entry: dict[str, Any], config_dir: Path) -> None:
-    """Resolve a config-relative known_hosts value to an absolute Path.
-
-    ``_validate_raw_config`` has already rejected an unsafe lexical ancestor
-    or a missing/non-file target for ``known_hosts``, and a missing/non-directory
-    ``file:`` endpoint, before this ever runs. The ``file:`` endpoint URL itself
-    stays a string on ``GitRemotePolicy.url``; this function never touches it.
-    """
-    git_publication = owner_entry.get("git_publication")
-    if not _is_mapping(git_publication):
-        return
-    git_publication = dict(git_publication)
-    remote = git_publication.get("remote")
-    if _is_mapping(remote):
-        remote = dict(remote)
-        if remote.get("known_hosts") is not None:
-            remote["known_hosts"] = _path_from_config(remote["known_hosts"], config_dir)
-        git_publication["remote"] = remote
-    owner_entry["git_publication"] = git_publication
-
-
 def _prepare_for_model(raw: dict[str, Any], config_path: Path) -> dict[str, Any]:
     config_dir = config_path.parent.resolve()
     prepared = dict(raw)
@@ -1147,7 +1101,6 @@ def _prepare_for_model(raw: dict[str, Any], config_path: Path) -> dict[str, Any]
             resolved_team.get("runtime") or {}, workspace_root
         )
         _resolve_permission_paths(resolved_team, Path(workspace_path) if workspace_path else config_dir)
-        _resolve_git_publication_paths(resolved_team, config_dir)
         agents = {}
         for agent in resolved_team.get("agents") or []:
             if not isinstance(agent, dict):

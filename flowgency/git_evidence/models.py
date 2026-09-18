@@ -1,11 +1,9 @@
 """Pure Git evidence models – no filesystem, network, or Git access.
 
-These types declare how a team's tickets may be evidenced with Git content: a
-project either publishes evidence locally only, or to a single named remote
-under an explicit set of allowed refs. Construction validates shape and
-lexical safety only; resolving a config-relative ``known_hosts`` path against
-the config directory is the owning canonical-config boundary's job, not this
-module's.
+These types declare how a team's tickets may be evidenced with Git content.
+Flowgency verifies committed content locally only: a project either evidences
+any commit range its own repository can prove, or restricts evidence to a set
+of allowed local refs. Construction validates shape and lexical safety only.
 
 The capture value types below are plain frozen records describing what a
 bounded read produced. They carry no behaviour: `git.py` opens and validates a
@@ -22,54 +20,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
-from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, StrictStr, model_validator
 
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
-_TRANSPORT_HELPER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*::")
-_REMOTE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-_ALLOWED_URL_SCHEMES = {"https", "ssh", "file"}
-
-
-def _validate_remote_name(name: str) -> None:
-    if not _REMOTE_NAME_RE.match(name):
-        raise ValueError(
-            f"Remote name must be a safe Git config subsection: {name!r}"
-        )
-
-
-def _validate_remote_url(url: str, auth: str) -> None:
-    if _CONTROL_CHARS_RE.search(url):
-        raise ValueError("Remote URL must not contain control characters")
-    if _TRANSPORT_HELPER_RE.match(url):
-        raise ValueError("Remote URL must not use a transport helper form")
-    parsed = urlparse(url)
-    if parsed.scheme not in _ALLOWED_URL_SCHEMES:
-        raise ValueError(f"Unsupported Git remote transport: {parsed.scheme!r}")
-    if parsed.query or parsed.fragment:
-        raise ValueError("Remote URL must not contain a query or fragment")
-    if parsed.password is not None:
-        raise ValueError("Remote URL must not contain a password")
-    if parsed.scheme == "https":
-        if parsed.username is not None:
-            raise ValueError("HTTPS remote URL must not contain userinfo")
-        if auth == "ssh-agent":
-            raise ValueError("ssh-agent authentication requires an SSH remote URL")
-    elif parsed.scheme == "ssh":
-        if auth != "ssh-agent":
-            raise ValueError("SSH remote URL requires ssh-agent authentication")
-        if auth == "credential-manager":
-            raise ValueError("credential-manager authentication is HTTPS-only")
-    elif parsed.scheme == "file":
-        if auth != "anonymous":
-            raise ValueError("File remote endpoints are anonymous-only")
-        if parsed.netloc:
-            raise ValueError("File remote URL must not contain a host or UNC share")
-        if not parsed.path.startswith("/"):
-            raise ValueError("File remote URL must use an absolute path")
-    if auth == "credential-manager" and parsed.scheme != "https":
-        raise ValueError("credential-manager authentication is HTTPS-only")
 
 
 def _validate_ref(ref: str) -> None:
@@ -112,40 +66,13 @@ def _validate_ref(ref: str) -> None:
         raise ValueError(f"Ref must be under refs/heads/ or refs/tags/: {ref!r}")
 
 
-class GitRemotePolicy(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    name: StrictStr
-    url: StrictStr
-    auth: Literal["anonymous", "credential-manager", "ssh-agent"] = "anonymous"
-    known_hosts: Path | None = None
-
-    @model_validator(mode="after")
-    def _validate(self) -> "GitRemotePolicy":
-        _validate_remote_name(self.name)
-        _validate_remote_url(self.url, self.auth)
-        if self.auth == "ssh-agent" and self.known_hosts is None:
-            raise ValueError("ssh-agent authentication requires known_hosts")
-        if self.auth != "ssh-agent" and self.known_hosts is not None:
-            raise ValueError("known_hosts is only used with ssh-agent authentication")
-        return self
-
-
 class GitPublicationPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    mode: Literal["local", "remote"]
+    mode: Literal["local"]
     allowed_refs: tuple[StrictStr, ...] = ()
-    remote: GitRemotePolicy | None = None
 
     @model_validator(mode="after")
     def _validate(self) -> "GitPublicationPolicy":
-        if self.mode == "local":
-            if self.remote is not None:
-                raise ValueError("Local publication must not declare a remote")
-        else:
-            if self.remote is None:
-                raise ValueError("Remote publication requires a remote")
-            if not self.allowed_refs:
-                raise ValueError("Remote publication requires at least one allowed ref")
         if len(set(self.allowed_refs)) != len(self.allowed_refs):
             raise ValueError("allowed_refs must not contain duplicates")
         for ref in self.allowed_refs:
@@ -215,14 +142,8 @@ GIT_EVIDENCE_MESSAGES: dict[str, str] = {
     "git-evidence-publication-policy-missing": "No Git publication policy is configured for this team.",
     "git-evidence-publication-ref-required": "This publication policy requires an explicitly allowed ref.",
     "git-evidence-publication-ref-denied": "The requested publication ref is not allowed by this policy.",
-    "git-evidence-not-published": "The selected end commit is not published at the required ref.",
+    "git-evidence-not-published": "The selected end commit is not contained in the required local ref.",
     "git-evidence-verification-incomplete": "Publication could not be proven from the available history.",
-    "git-evidence-remote-misconfigured": "The configured remote does not match the approved publication endpoint.",
-    "git-evidence-remote-unreachable": "The approved publication endpoint could not be read.",
-    "git-evidence-remote-response-invalid": "The publication endpoint's ref advertisement could not be trusted.",
-    "git-evidence-credentials-denied": "This job may not use Git credentials for publication verification.",
-    "git-evidence-credential-helper-unavailable": "No trusted Git credential helper was found on the deployment path.",
-    "git-evidence-ssh-agent-unavailable": "No allowed SSH agent socket is available for publication verification.",
 }
 
 
@@ -315,12 +236,11 @@ class GitRefObservation:
 
 @dataclass(frozen=True)
 class GitPublicationReceipt:
-    """What was observed, where, and when – not a permanent membership claim."""
+    """What was observed locally, and when – not a claim about a remote."""
 
-    mode: Literal["local", "remote"]
+    mode: Literal["local"]
     policy_digest: str
     publication_ref: str | None
     ref_object_id: str | None
     observed_commit: str
     verified_at: datetime
-    remote_identity: str | None
