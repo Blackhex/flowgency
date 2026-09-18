@@ -233,6 +233,15 @@ Store the evidence through the existing immutable ticket-artifact boundary,
 with trusted metadata that generic uploads cannot forge. Do not duplicate the
 patch into job records, logs, or field text.
 
+Evidence is reusable anywhere on the same ticket, including another declared
+Git-change field or a later transition performed by a different reviewer. The
+capture's original transition and field record provenance and intent; they are
+not restrictions on subsequent same-ticket use. Capture still requires a valid
+current Git-change output target. Every later write must validate the artifact,
+same-ticket and repository/workspace binding, and applicable current policy.
+Keep the original producing job/agent unchanged when evidence is reused.
+This reuse rule was explicitly selected by the user on 2026-09-18.
+
 Later branch movement, repository edits, or unavailable commits must not alter
 the retained diff. A range with no net file changes can be represented honestly
 as such; requiring an artifact is not an implicit requirement to invent edits.
