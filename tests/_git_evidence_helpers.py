@@ -158,14 +158,14 @@ def launch_policy_for(env, agent_name: str):
     )
 
 
-def configure_git_ticket(env, fixture: GitTestRepository, policy, *, launch_policy=None):
-    """Point a real team at a Git fixture and start a real run on a ticket.
+def configure_git_workflow(env, fixture: GitTestRepository, policy) -> None:
+    """Point a real team at a Git fixture and require Git evidence on its output.
 
-    ``launch_policy`` overrides the snapshot the run was launched with, so a
-    denied launch-time policy can be exercised. Returns the running agent's
-    context and the started ticket view.
+    Configuration only. The caller keeps ownership of job authority, actor
+    identity, and how the run is started, so an in-process fixture and an
+    authenticated broker session can share one definition without sharing a
+    session model.
     """
-    from flowgency.tickets.access import TicketAccessRegistry
     from flowgency.workflows.models import WorkflowDefinition
 
     snapshot = env.store.load()
@@ -193,6 +193,18 @@ def configure_git_ticket(env, fixture: GitTestRepository, policy, *, launch_poli
         source.digest,
         WorkflowDefinition.model_validate(document),
     )
+
+
+def configure_git_ticket(env, fixture: GitTestRepository, policy, *, launch_policy=None):
+    """Point a real team at a Git fixture and start a real run on a ticket.
+
+    ``launch_policy`` overrides the snapshot the run was launched with, so a
+    denied launch-time policy can be exercised. Returns the running agent's
+    context and the started ticket view.
+    """
+    from flowgency.tickets.access import TicketAccessRegistry
+
+    configure_git_workflow(env, fixture, policy)
     authority = env.running_job(
         "builder",
         "git-evidence-run",

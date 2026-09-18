@@ -8,6 +8,7 @@ import socket
 import threading
 import urllib.error
 import urllib.request
+import uuid
 
 import httpx
 import pytest
@@ -731,45 +732,19 @@ def test_git_capture_command_parses_typed_fields_only(workflow_env):
 
 def test_broker_dispatches_git_capture_evidence_using_authenticated_actor(workflow_env, tmp_path):
     from flowgency.git_evidence.models import GitPublicationPolicy
-    from flowgency.workflows.models import WorkflowDefinition
-    from tests._git_evidence_helpers import create_git_repository, launch_policy_for
+    from tests._git_evidence_helpers import (
+        configure_git_workflow,
+        create_git_repository,
+        launch_policy_for,
+    )
 
     env = workflow_env
     fixture = create_git_repository(tmp_path / "repo")
-    policy = GitPublicationPolicy(mode="local", allowed_refs=())
+    configure_git_workflow(env, fixture, GitPublicationPolicy(mode="local", allowed_refs=()))
 
-    snapshot = env.store.load()
-
-    def configure(raw):
-        team = raw["teams"][env.team_id]
-        team["workspace_path"] = str(fixture.root)
-        team["git_publication"] = policy.model_dump(mode="json")
-
-    env.store.patch(snapshot.revision, configure)
-    env.publish_artifact_field_workflow()
-    source = env.library.inspect(env.blueprint_id)
-    document = source.definition.model_dump(mode="json")
-    for field in document["fields"]:
-        if field["id"] == "evidence":
-            field["artifact_format"] = "git-change"
-    for transition in document["transitions"]:
-        if transition["id"] == "complete":
-            for use in transition["outputs"]:
-                if use["field_id"] == "evidence":
-                    use["required"] = True
-    env.configuration_service.save_blueprint(
-        env.store.load().revision,
-        env.blueprint_id,
-        source.digest,
-        WorkflowDefinition.model_validate(document),
-    )
-
-    # A short job id keeps the private evidence-view scratch path (nested under
-    # the memory store's job/artifact tree) well inside Windows Git's path
-    # limits; this mirrors the job id every other git-evidence fixture uses.
     authority = env.running_job(
         "builder",
-        "git-evidence-run",
+        uuid.uuid4().hex,
         runtime_policy=launch_policy_for(env, "builder"),
     )
     # Real authorization comes only from the broker's own authenticated grant,
@@ -807,3 +782,122 @@ def test_broker_dispatches_git_capture_evidence_using_authenticated_actor(workfl
     assert len(capture_events) == 1
     assert capture_events[0].data["capture"]["agent_name"] == actor.agent_name
     assert capture_events[0].data["capture"]["job_id"] == actor.job_id
+
+
+def _forbid_git(monkeypatch) -> list[object]:
+    """Fail loudly if capture reaches Git; ``open_git_repository`` is its only door."""
+    import flowgency.tickets.service as service_module
+
+    invocations: list[object] = []
+
+    def refuse(*args, **kwargs):
+        invocations.append(args)
+        raise AssertionError("Git must not be invoked for a rejected capture request")
+
+    monkeypatch.setattr(service_module, "open_git_repository", refuse)
+    return invocations
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        pytest.param({"base_commit": "A" * 40}, id="uppercase-object-id"),
+        pytest.param({"base_commit": "abc1234"}, id="short-object-id"),
+        pytest.param({"end_commit": "HEAD~1"}, id="revision-expression"),
+        pytest.param({"end_commit": "b" * 64}, id="mixed-object-lengths"),
+        pytest.param({"publication_ref": "origin/main"}, id="ref-outside-refs"),
+        pytest.param({"publication_ref": "refs/heads/*"}, id="ref-pattern"),
+        pytest.param({"publication_ref": "refs/heads/topic..secret"}, id="ref-with-dotdot"),
+    ],
+)
+def test_broker_rejects_malformed_git_capture_request(workflow_env, monkeypatch, overrides):
+    env = workflow_env
+    invocations = _forbid_git(monkeypatch)
+    env.service.resolve_git_job = env.access_registry.resolve_context
+    ticket = env.create()
+    authority = env.running_job("builder", uuid.uuid4().hex)
+
+    payload = {
+        "version": ticket.version.model_dump(mode="json"),
+        "operation_id": "malformed-capture",
+        "transition_id": "complete",
+        "field_id": "evidence",
+        "base_commit": "a" * 40,
+        "end_commit": "b" * 40,
+    }
+    payload.update(overrides)
+    with env.broker_for(authority) as client:
+        result = client.call("capture_git_evidence", payload)
+
+    assert result["ok"] is False, result
+    assert result["error"]["code"] == "invalid-request"
+    body = json.dumps(result)
+    for rejected in overrides.values():
+        assert rejected not in body
+    assert invocations == []
+    assert env.read(ticket.ref).record.revision == ticket.version.revision
+    assert env.read(ticket.ref).record.events == ticket.record.events
+
+
+def test_broker_rejects_unauthenticated_git_capture_before_git(workflow_env, monkeypatch):
+    env = workflow_env
+    invocations = _forbid_git(monkeypatch)
+    env.service.resolve_git_job = env.access_registry.resolve_context
+    ticket = env.create()
+    authority = env.running_job("builder", uuid.uuid4().hex)
+
+    payload = {
+        "version": ticket.version.model_dump(mode="json"),
+        "operation_id": "unauthenticated-capture",
+        "transition_id": "complete",
+        "field_id": "evidence",
+        "base_commit": "a" * 40,
+        "end_commit": "b" * 40,
+    }
+    with TicketBroker(env.service, env.access_registry, authority=authority) as broker:
+        anonymous_status, anonymous_body = _raw_call(
+            broker.endpoint.url,
+            "capture_git_evidence",
+            payload,
+        )
+        wrong_token_status, wrong_token_body = _raw_call(
+            broker.endpoint.url,
+            "capture_git_evidence",
+            payload,
+            token="not-the-granted-token",
+        )
+
+    assert anonymous_status == 401
+    assert anonymous_body["ok"] is False
+    assert wrong_token_status == 403
+    assert wrong_token_body["ok"] is False
+    assert invocations == []
+    assert env.read(ticket.ref).record.revision == ticket.version.revision
+    assert env.read(ticket.ref).record.events == ticket.record.events
+
+
+def test_broker_rejects_cross_team_git_capture_before_git(workflow_env, monkeypatch):
+    env = workflow_env
+    invocations = _forbid_git(monkeypatch)
+    env.service.resolve_git_job = env.access_registry.resolve_context
+    ticket = env.create()
+    authority = env.running_job("builder", uuid.uuid4().hex)
+
+    foreign = ticket.version.model_dump(mode="json")
+    foreign["ref"]["team_id"] = "another-team"
+    payload = {
+        "version": foreign,
+        "operation_id": "cross-team-capture",
+        "transition_id": "complete",
+        "field_id": "evidence",
+        "base_commit": "a" * 40,
+        "end_commit": "b" * 40,
+    }
+    with env.broker_for(authority) as client:
+        result = client.call("capture_git_evidence", payload)
+
+    assert result["ok"] is False, result
+    assert result["error"]["code"] == "invalid-request"
+    assert invocations == []
+    assert env.read(ticket.ref).record.revision == ticket.version.revision
+    assert env.read(ticket.ref).record.events == ticket.record.events

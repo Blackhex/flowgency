@@ -133,13 +133,26 @@ class TicketGitCaptureCommand(BaseModel):
     publication_ref: StrictStr | None = None
 
     def request(self) -> GitCaptureRequest:
-        return GitCaptureRequest(
-            transition_id=self.transition_id,
-            field_id=self.field_id,
-            base_commit=self.base_commit,
-            end_commit=self.end_commit,
-            publication_ref=self.publication_ref,
-        )
+        # A malformed range or ref is caller data, not a server fault: convert it
+        # here so dispatch raises the safe invalid-request envelope instead of a
+        # redacted internal error. The message is fixed; only field locations
+        # travel, so no rejected string is ever reflected back.
+        try:
+            return GitCaptureRequest(
+                transition_id=self.transition_id,
+                field_id=self.field_id,
+                base_commit=self.base_commit,
+                end_commit=self.end_commit,
+                publication_ref=self.publication_ref,
+            )
+        except ValidationError as error:
+            raise InvalidTicketRequest(
+                "invalid-request",
+                "Capture needs two full lowercase Git object IDs of one object "
+                "format, and any publication ref must be an exact refs/heads/ "
+                "or refs/tags/ name",
+                issues=_safe_validation_issues(error, GitCaptureRequest),
+            ) from error
 
 
 class TicketArtifactPublishCommand(BaseModel):
