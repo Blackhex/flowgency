@@ -66,6 +66,37 @@ def test_rejected_transition_leaves_record_unchanged_and_report_is_separate(work
     ]
 
 
+def test_transition_rejects_type_invalid_output_and_leaves_record_unchanged(workflow_env):
+    env = workflow_env
+    ticket = env.create(values={"verdict": True})
+    actor = env.agent("builder", "run-a")
+    env.service.start_work(
+        actor,
+        ticket.version,
+        env.operation("start", actor_name=actor.agent_name),
+    )
+
+    before = env.read(ticket.ref).record
+    with pytest.raises(ContractError) as failure:
+        env.service.transition(
+            actor,
+            env.read(ticket.ref).version,
+            env.transition_request(outputs={"summary": 5}),
+            env.operation("complete", actor_name=actor.agent_name),
+        )
+    assert failure.value.code == "invalid-type"
+    assert failure.value.field_id == "summary"
+
+    after = env.read(ticket.ref).record
+    assert after == before
+    assert after.state_id == before.state_id
+    assert after.field_values == before.field_values
+    assert after.field_provenance == before.field_provenance
+    assert after.revision == before.revision
+    assert after.events == before.events
+    assert after.receipts == before.receipts
+
+
 def test_transition_commits_state_outputs_and_audit_snapshot(workflow_env):
     env = workflow_env
     ticket = env.create(values={"verdict": True})

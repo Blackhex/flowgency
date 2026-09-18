@@ -282,6 +282,20 @@ def test_research_close_requires_output_even_when_input_is_supplied():
     assert dict(accepted.effective_outputs) == {"conclusion": "Durable result"}
 
 
+def test_research_close_rejects_type_invalid_required_output():
+    from flowgency.setup_assets import workflow_example_root
+    from flowgency.workflows.models import ContractError
+    from flowgency.workflows.rules import evaluate_transition
+
+    definition = WorkflowLibrary(workflow_example_root()).inspect("research").definition
+    with pytest.raises(ContractError) as failure:
+        evaluate_transition(
+            definition, "close", "synthesizing", {}, {}, {"conclusion": 5}, (),
+        )
+    assert failure.value.code == "invalid-type"
+    assert failure.value.field_id == "conclusion"
+
+
 @pytest.mark.parametrize("relative", ["SKILL.md", "references/ticket-workflow-steps.md"])
 def test_packaged_ticket_guidance_matches_discovery_source(relative):
     packaged = copilot_discovery_root() / ".github/skills/flowgency-setup" / relative
