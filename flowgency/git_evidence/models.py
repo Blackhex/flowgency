@@ -1,4 +1,4 @@
-"""Pure Git publication policy models – no filesystem, network, or Git access.
+"""Pure Git evidence models – no filesystem, network, or Git access.
 
 These types declare how a team's tickets may be evidenced with Git content: a
 project either publishes evidence locally only, or to a single named remote
@@ -6,6 +6,10 @@ under an explicit set of allowed refs. Construction validates shape and
 lexical safety only; resolving a config-relative ``known_hosts`` path against
 the config directory is the owning canonical-config boundary's job, not this
 module's.
+
+The capture value types below are plain frozen records describing what a
+bounded read produced. They carry no behaviour: `git.py` opens and validates a
+repository, and `capture.py` fills these in from real Git output.
 """
 
 from __future__ import annotations
@@ -13,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
@@ -154,3 +159,88 @@ def git_policy_digest(policy: GitPublicationPolicy | None) -> str | None:
         policy.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+GitChangeStatus = Literal["added", "modified", "deleted", "renamed", "type-changed"]
+
+GIT_EVIDENCE_MESSAGES: dict[str, str] = {
+    "git-evidence-workspace-invalid": "The configured workspace is not a usable Git work tree.",
+    "git-evidence-not-a-repository": "The configured workspace is not a Git repository.",
+    "git-evidence-bare-repository": "A bare repository has no work tree to evidence.",
+    "git-evidence-worktree-unregistered": "The workspace is not a registered worktree of its repository.",
+    "git-evidence-unsafe-repository": "The repository uses object rewriting or alternates that capture cannot trust.",
+    "git-evidence-shallow-repository": "The repository history is incomplete, so the range cannot be proven.",
+    "git-evidence-scratch-invalid": "The evidence scratch location is unusable.",
+    "git-evidence-git-unavailable": "No trusted Git executable was found on the deployment path.",
+    "git-evidence-timeout": "The Git read exceeded its time budget.",
+    "git-evidence-command-failed": "A Git read did not complete successfully.",
+    "git-evidence-output-too-large": "The Git read produced more output than the evidence limit allows.",
+    "git-evidence-object-missing": "A selected commit is not available in this repository.",
+    "git-evidence-invalid-commit": "A selected commit is not a full object ID of this repository's format.",
+    "git-evidence-range-not-ancestor": "The base commit is not an ancestor of the end commit.",
+    "git-evidence-too-many-commits": "The selected range contains more commits than capture allows.",
+    "git-evidence-too-many-files": "The selected range changes more paths than capture allows.",
+    "git-evidence-unsupported-path": "A changed path could not be represented safely.",
+    "git-evidence-unsupported-change": "A change kind in the selected range is not supported.",
+    "git-evidence-path-denied": "A changed path is outside the actor's effective read permissions.",
+    "git-evidence-repository-changed": "The source repository changed while evidence was being read.",
+}
+
+
+class GitEvidenceError(Exception):
+    """A capture failure with a fixed public code and message.
+
+    Messages are drawn from a fixed table so raw Git stderr, absolute paths,
+    and environment values never reach a caller or a ticket.
+    """
+
+    def __init__(self, code: str, message: str | None = None) -> None:
+        if code not in GIT_EVIDENCE_MESSAGES:
+            raise ValueError(f"Unknown Git evidence code: {code!r}")
+        resolved = GIT_EVIDENCE_MESSAGES[code] if message is None else message
+        super().__init__(resolved)
+        self.code = code
+        self.message = resolved
+
+
+@dataclass(frozen=True)
+class GitRepository:
+    """A validated source repository plus its disposable read-only view."""
+
+    workspace: Path
+    source_git_dir: Path
+    common_dir: Path
+    object_view: Path
+    object_format: str
+    repository_id: str
+
+
+@dataclass(frozen=True)
+class GitCommitRange:
+    base_commit: str
+    end_commit: str
+
+
+@dataclass(frozen=True)
+class GitFileChange:
+    path: str
+    old_path: str | None
+    status: GitChangeStatus
+    lines_added: int
+    lines_removed: int
+    binary: bool
+    submodule: bool
+    old_mode: str
+    new_mode: str
+    old_object_id: str
+    new_object_id: str
+
+
+@dataclass(frozen=True)
+class GitRangeCapture:
+    repository_id: str
+    base_commit: str
+    end_commit: str
+    commit_ids: tuple[str, ...]
+    files: tuple[GitFileChange, ...]
+    patch: bytes

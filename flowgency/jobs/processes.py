@@ -6,7 +6,7 @@ import signal
 import subprocess
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal
 
@@ -16,6 +16,7 @@ RuntimeProcessOutcome = Literal[
     "timeout",
     "launch-failed",
     "containment-setup-failed",
+    "output-limit",
 ]
 
 
@@ -67,6 +68,39 @@ class CompletedRuntimeProcess:
     process_stop_evidence: ProcessStopEvidence
     outcome: RuntimeProcessOutcome = "exited"
     root_identity: RuntimeProcessIdentity | None = None
+    stdout_bytes: bytes | None = None
+    stderr_bytes: bytes | None = None
+    output_limit_exceeded: bool = False
+
+
+class _OutputBudget:
+    """One byte budget shared by both reader threads of a supervised process.
+
+    A per-stream limit would let a process emit twice the caller's cap, so the
+    budget is combined and overflow is signalled once for the whole process.
+    """
+
+    def __init__(self, limit: int) -> None:
+        self._remaining = max(0, limit)
+        self._lock = threading.Lock()
+        self.exceeded = threading.Event()
+
+    def take(self, chunk: bytes) -> bytes:
+        with self._lock:
+            if len(chunk) <= self._remaining:
+                self._remaining -= len(chunk)
+                return chunk
+            kept = chunk[: self._remaining]
+            self._remaining = 0
+        self.exceeded.set()
+        return kept
+
+
+@dataclass
+class _OutputCapture:
+    budget: _OutputBudget | None = None
+    stdout: list[bytes] = field(default_factory=list)
+    stderr: list[bytes] = field(default_factory=list)
 
 
 ProcessIdentityState = Literal["alive", "exited", "reused", "unknown"]
@@ -370,25 +404,42 @@ def run_supervised(
     env: dict[str, str],
     timeout: int,
     lifecycle: RuntimeProcessLifecycle,
+    output_limit_bytes: int | None = None,
+    retain_output_bytes: bool = False,
 ) -> CompletedRuntimeProcess:
     start = time.monotonic()
+    capture = _OutputCapture(
+        budget=None if output_limit_bytes is None else _OutputBudget(output_limit_bytes)
+    )
     if os.name == "nt":
-        return _run_supervised_windows(
+        result = _run_supervised_windows(
             argv,
             cwd=cwd,
             env=env,
             timeout=timeout,
             lifecycle=lifecycle,
             start=start,
+            capture=capture,
         )
-    return _run_supervised_posix(
-        argv,
-        cwd=cwd,
-        env=env,
-        timeout=timeout,
-        lifecycle=lifecycle,
-        start=start,
-    )
+    else:
+        result = _run_supervised_posix(
+            argv,
+            cwd=cwd,
+            env=env,
+            timeout=timeout,
+            lifecycle=lifecycle,
+            start=start,
+            capture=capture,
+        )
+    if capture.budget is not None and capture.budget.exceeded.is_set():
+        result = replace(result, output_limit_exceeded=True)
+    if retain_output_bytes:
+        result = replace(
+            result,
+            stdout_bytes=b"".join(capture.stdout),
+            stderr_bytes=b"".join(capture.stderr),
+        )
+    return result
 
 
 def _remaining_seconds(deadline: float) -> float:
@@ -417,13 +468,18 @@ def _decode(chunks: list[bytes]) -> str:
     return b"".join(chunks).decode("utf-8", errors="replace")
 
 
-def _reader(stream, sink: list[bytes]) -> None:
+def _reader(stream, sink: list[bytes], budget: _OutputBudget | None = None) -> None:
     try:
         while True:
             chunk = stream.read(65536)
             if not chunk:
                 return
-            sink.append(chunk)
+            if budget is None:
+                sink.append(chunk)
+                continue
+            kept = budget.take(chunk)
+            if kept:
+                sink.append(kept)
     finally:
         stream.close()
 
@@ -498,6 +554,33 @@ def _posix_completed_result(
     )
 
 
+def _posix_group_reason(
+    group_status: Literal["empty", "active", "unknown", "reused"],
+) -> str:
+    if group_status == "unknown":
+        return "group-state-unavailable"
+    if group_status == "reused":
+        return "group-identity-unavailable"
+    return "descendants-still-running"
+
+
+def _terminate_owned_posix_group(
+    group_identity: OwnedPosixProcessGroup,
+    process: subprocess.Popen[bytes],
+) -> Literal["empty", "active", "unknown", "reused"]:
+    """Kill the whole owned group, not only the root, and confirm it is gone."""
+    signal_status = _signal_owned_posix_group(group_identity, _POSIX_KILL_SIGNAL)
+    if signal_status == "unavailable":
+        return "unknown"
+    if signal_status == "signaled":
+        group_status = _owned_posix_group_status(group_identity, time.monotonic() + 5)
+    else:
+        group_status = "empty"
+    if _reap_posix_root(process, timeout=5) is None:
+        return "active"
+    return group_status
+
+
 def _run_supervised_posix(
     argv: list[str] | tuple[str, ...],
     *,
@@ -506,7 +589,9 @@ def _run_supervised_posix(
     timeout: int,
     lifecycle: RuntimeProcessLifecycle,
     start: float,
+    capture: _OutputCapture | None = None,
 ) -> CompletedRuntimeProcess:
+    capture = capture if capture is not None else _OutputCapture()
     try:
         process = subprocess.Popen(
             list(argv),
@@ -534,10 +619,14 @@ def _run_supervised_posix(
         )
 
     identity = read_process_identity(process.pid)
-    stdout_chunks: list[bytes] = []
-    stderr_chunks: list[bytes] = []
-    stdout_thread = threading.Thread(target=_reader, args=(process.stdout, stdout_chunks), daemon=True)
-    stderr_thread = threading.Thread(target=_reader, args=(process.stderr, stderr_chunks), daemon=True)
+    stdout_chunks: list[bytes] = capture.stdout
+    stderr_chunks: list[bytes] = capture.stderr
+    stdout_thread = threading.Thread(
+        target=_reader, args=(process.stdout, stdout_chunks, capture.budget), daemon=True
+    )
+    stderr_thread = threading.Thread(
+        target=_reader, args=(process.stderr, stderr_chunks, capture.budget), daemon=True
+    )
     stdout_thread.start()
     stderr_thread.start()
     group_identity = _capture_posix_group_identity(process.pid)
@@ -564,6 +653,24 @@ def _run_supervised_posix(
     deadline = start + timeout
     root_exited = False
     while _remaining_seconds(deadline) > 0:
+        if capture.budget is not None and capture.budget.exceeded.is_set():
+            group_status = _terminate_owned_posix_group(group_identity, process)
+            confirmed = group_status == "empty" and identity is not None
+            return _posix_completed_result(
+                process=process,
+                lifecycle=lifecycle,
+                start=start,
+                stdout_chunks=stdout_chunks,
+                stderr_chunks=stderr_chunks,
+                stdout_thread=stdout_thread,
+                stderr_thread=stderr_thread,
+                outcome="output-limit",
+                exit_code=125,
+                confirmed=confirmed,
+                reason="output-limit" if confirmed else _posix_group_reason(group_status),
+                root_identity=identity,
+                drain_deadline=_drain_deadline(),
+            )
         if _observe_posix_root_exit(process, deadline) is not None:
             root_exited = True
         group_status = _owned_posix_group_status(group_identity, time.monotonic())
@@ -747,6 +854,59 @@ def _join_reader_threads(*threads, deadline: float) -> bool:
     return all_done
 
 
+def _windows_stop_result(
+    *,
+    job_handle,
+    process_handle,
+    stdout_thread,
+    stderr_thread,
+    stdout_chunks: list[bytes],
+    stderr_chunks: list[bytes],
+    lifecycle: RuntimeProcessLifecycle,
+    start: float,
+    identity: RuntimeProcessIdentity | None,
+    outcome: RuntimeProcessOutcome = "timeout",
+    exit_code: int = 124,
+    stopped_reason: str = "timeout",
+) -> CompletedRuntimeProcess:
+    import contextlib as _contextlib
+    import win32event
+    import win32job
+
+    with _contextlib.suppress(Exception):
+        win32job.TerminateJobObject(job_handle, exit_code)
+    with _contextlib.suppress(Exception):
+        win32event.WaitForSingleObject(process_handle, 5000)
+    wait_deadline = time.monotonic() + 5
+    job_status = _job_exit_status(job_handle, wait_deadline)
+    readers_done = _join_reader_threads(stdout_thread, stderr_thread, deadline=wait_deadline)
+    if job_status == "empty" and readers_done:
+        confirmed = True
+        reason = stopped_reason
+    elif job_status == "unknown":
+        confirmed = False
+        reason = "job-accounting-unavailable"
+    elif job_status == "active":
+        confirmed = False
+        reason = "job-active-processes"
+    else:
+        confirmed = False
+        reason = "io-drain-incomplete"
+    return CompletedRuntimeProcess(
+        exit_code=exit_code,
+        stdout=_decode(stdout_chunks),
+        stderr=_decode(stderr_chunks),
+        duration_seconds=time.monotonic() - start,
+        process_stop_evidence=_evidence(
+            lifecycle,
+            confirmed=confirmed,
+            reason=reason,
+        ),
+        outcome=outcome,
+        root_identity=identity,
+    )
+
+
 def _windows_timeout_result(
     *,
     job_handle,
@@ -759,43 +919,39 @@ def _windows_timeout_result(
     start: float,
     identity: RuntimeProcessIdentity | None,
 ) -> CompletedRuntimeProcess:
-    import contextlib as _contextlib
+    return _windows_stop_result(
+        job_handle=job_handle,
+        process_handle=process_handle,
+        stdout_thread=stdout_thread,
+        stderr_thread=stderr_thread,
+        stdout_chunks=stdout_chunks,
+        stderr_chunks=stderr_chunks,
+        lifecycle=lifecycle,
+        start=start,
+        identity=identity,
+    )
+
+
+def _windows_wait_for_stop(
+    process_handle,
+    deadline: float,
+    budget: _OutputBudget | None,
+) -> Literal["exited", "timeout", "output-limit"]:
     import win32con
     import win32event
-    import win32job
 
-    with _contextlib.suppress(Exception):
-        win32job.TerminateJobObject(job_handle, 124)
-    with _contextlib.suppress(Exception):
-        win32event.WaitForSingleObject(process_handle, 5000)
-    wait_deadline = time.monotonic() + 5
-    job_status = _job_exit_status(job_handle, wait_deadline)
-    readers_done = _join_reader_threads(stdout_thread, stderr_thread, deadline=wait_deadline)
-    if job_status == "empty" and readers_done:
-        confirmed = True
-        reason = "timeout"
-    elif job_status == "unknown":
-        confirmed = False
-        reason = "job-accounting-unavailable"
-    elif job_status == "active":
-        confirmed = False
-        reason = "job-active-processes"
-    else:
-        confirmed = False
-        reason = "io-drain-incomplete"
-    return CompletedRuntimeProcess(
-        exit_code=124,
-        stdout=_decode(stdout_chunks),
-        stderr=_decode(stderr_chunks),
-        duration_seconds=time.monotonic() - start,
-        process_stop_evidence=_evidence(
-            lifecycle,
-            confirmed=confirmed,
-            reason=reason,
-        ),
-        outcome="timeout",
-        root_identity=identity,
-    )
+    if budget is None:
+        if win32event.WaitForSingleObject(process_handle, _remaining_millis(deadline)) == win32con.WAIT_TIMEOUT:
+            return "timeout"
+        return "exited"
+    while True:
+        if budget.exceeded.is_set():
+            return "output-limit"
+        remaining = _remaining_millis(deadline)
+        if win32event.WaitForSingleObject(process_handle, min(50, remaining)) != win32con.WAIT_TIMEOUT:
+            return "exited"
+        if remaining <= 0:
+            return "output-limit" if budget.exceeded.is_set() else "timeout"
 
 
 def _open_pipe_reader(read_handle):
@@ -813,6 +969,7 @@ def _run_supervised_windows(
     timeout: int,
     lifecycle: RuntimeProcessLifecycle,
     start: float,
+    capture: _OutputCapture | None = None,
 ) -> CompletedRuntimeProcess:
     import msvcrt
     import pywintypes
@@ -824,6 +981,7 @@ def _run_supervised_windows(
     import win32process
     import win32security
 
+    capture = capture if capture is not None else _OutputCapture()
     deadline = start + timeout
     job_handle = None
     process_handle = None
@@ -832,8 +990,8 @@ def _run_supervised_windows(
     stderr_write = None
     stdout_reader = None
     stderr_reader = None
-    stdout_chunks: list[bytes] = []
-    stderr_chunks: list[bytes] = []
+    stdout_chunks: list[bytes] = capture.stdout
+    stderr_chunks: list[bytes] = capture.stderr
     stdout_thread = None
     stderr_thread = None
     identity = None
@@ -925,8 +1083,12 @@ def _run_supervised_windows(
                 root_identity=identity,
             )
 
-        stdout_thread = threading.Thread(target=_reader, args=(stdout_reader, stdout_chunks), daemon=True)
-        stderr_thread = threading.Thread(target=_reader, args=(stderr_reader, stderr_chunks), daemon=True)
+        stdout_thread = threading.Thread(
+            target=_reader, args=(stdout_reader, stdout_chunks, capture.budget), daemon=True
+        )
+        stderr_thread = threading.Thread(
+            target=_reader, args=(stderr_reader, stderr_chunks, capture.budget), daemon=True
+        )
         stdout_thread.start()
         stderr_thread.start()
 
@@ -936,7 +1098,8 @@ def _run_supervised_windows(
         stdout_write = None
         stderr_write = None
 
-        if win32event.WaitForSingleObject(process_handle, _remaining_millis(deadline)) == win32con.WAIT_TIMEOUT:
+        stop_reason = _windows_wait_for_stop(process_handle, deadline, capture.budget)
+        if stop_reason == "timeout":
             return _windows_timeout_result(
                 job_handle=job_handle,
                 process_handle=process_handle,
@@ -947,6 +1110,21 @@ def _run_supervised_windows(
                 lifecycle=lifecycle,
                 start=start,
                 identity=identity,
+            )
+        if stop_reason == "output-limit":
+            return _windows_stop_result(
+                job_handle=job_handle,
+                process_handle=process_handle,
+                stdout_thread=stdout_thread,
+                stderr_thread=stderr_thread,
+                stdout_chunks=stdout_chunks,
+                stderr_chunks=stderr_chunks,
+                lifecycle=lifecycle,
+                start=start,
+                identity=identity,
+                outcome="output-limit",
+                exit_code=125,
+                stopped_reason="output-limit",
             )
 
         exit_code = win32process.GetExitCodeProcess(process_handle)

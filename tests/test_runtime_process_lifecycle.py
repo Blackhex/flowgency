@@ -748,6 +748,108 @@ def test_run_supervised_posix_timeout_kills_group_after_root_exit(tmp_path: Path
     assert result.process_stop_evidence.reason == "timeout"
 
 
+def test_run_supervised_returns_exact_raw_bytes_when_retention_requested(tmp_path: Path):
+    binary_child = [sys.executable, "-c", "import os; os.write(1, bytes([0, 255, 10]))"]
+
+    result = run_supervised(
+        binary_child,
+        cwd=tmp_path,
+        env=os.environ.copy(),
+        timeout=10,
+        lifecycle=RuntimeProcessLifecycle(job_id="job-raw", generation="gen-raw"),
+        retain_output_bytes=True,
+    )
+
+    assert result.exit_code == 0
+    assert result.outcome == "exited"
+    assert result.stdout_bytes == bytes([0, 255, 10])
+    assert result.stderr_bytes == b""
+    assert result.output_limit_exceeded is False
+    assert result.process_stop_evidence.confirmed is True
+
+
+def test_run_supervised_output_limit_truncates_and_kills_process_tree(tmp_path: Path):
+    native_python, native_env = _native_python_launch()
+    root_script = _write_script(
+        tmp_path / "oversized_root.py",
+        "import os\n"
+        "import subprocess\n"
+        "import sys\n"
+        "import time\n"
+        "python = sys.argv[1]\n"
+        "pid_file, ready = sys.argv[2], sys.argv[3]\n"
+        "env = os.environ.copy()\n"
+        "if sys.platform == 'win32': env['__PYVENV_LAUNCHER__'] = sys.executable\n"
+        "subprocess.Popen([python, '-c', 'import os,pathlib,sys,time; pathlib.Path(sys.argv[1]).write_text(str(os.getpid()), encoding=\"utf-8\"); pathlib.Path(sys.argv[2]).write_text(\"ready\", encoding=\"utf-8\"); time.sleep(120)', pid_file, ready], close_fds=False, env=env)\n"
+        "while not os.path.exists(ready):\n"
+        "    time.sleep(0.02)\n"
+        "time.sleep(0.5)\n"
+        "os.write(1, b'x' * (2 * 1024 * 1024))\n"
+        "time.sleep(120)\n",
+    )
+    pid_file = tmp_path / "oversized-descendant.pid"
+    ready = tmp_path / "oversized-ready.txt"
+    captured, capture_thread = _capture_windows_identity_when_ready(ready, pid_file, timeout=15)
+
+    try:
+        started = time.monotonic()
+        result = run_supervised(
+            [native_python, str(root_script), native_python, str(pid_file), str(ready)],
+            cwd=tmp_path,
+            env=native_env,
+            timeout=20,
+            lifecycle=RuntimeProcessLifecycle(job_id="job-limit", generation="gen-limit"),
+            output_limit_bytes=1024,
+            retain_output_bytes=True,
+        )
+        elapsed = time.monotonic() - started
+        capture_thread.join(timeout=5)
+        assert not capture_thread.is_alive()
+        descendant_identity = captured.get("identity")
+        assert isinstance(descendant_identity, RuntimeProcessIdentity)
+
+        assert result.output_limit_exceeded is True
+        assert result.outcome == "output-limit"
+        assert elapsed < 20
+        assert result.stdout_bytes is not None and result.stderr_bytes is not None
+        assert len(result.stdout_bytes) + len(result.stderr_bytes) <= 1024
+        assert set(result.stdout_bytes) <= {ord("x")}
+        assert result.process_stop_evidence.confirmed is True
+        assert result.process_stop_evidence.reason == "output-limit"
+        _wait_for_process_exit(descendant_identity, timeout=10)
+    finally:
+        handle = captured.get("handle")
+        if handle is not None:
+            handle.Close()
+        if capture_thread.is_alive():
+            capture_thread.join(timeout=0.1)
+
+
+def test_run_supervised_without_output_options_keeps_existing_behavior(tmp_path: Path):
+    child = [
+        sys.executable,
+        "-c",
+        "import sys; sys.stdout.write('plain-out'); sys.stderr.write('plain-err')",
+    ]
+
+    result = run_supervised(
+        child,
+        cwd=tmp_path,
+        env=os.environ.copy(),
+        timeout=10,
+        lifecycle=RuntimeProcessLifecycle(job_id="job-plain", generation="gen-plain"),
+    )
+
+    assert result.exit_code == 0
+    assert result.outcome == "exited"
+    assert result.stdout == "plain-out"
+    assert result.stderr == "plain-err"
+    assert result.stdout_bytes is None
+    assert result.stderr_bytes is None
+    assert result.output_limit_exceeded is False
+    assert result.process_stop_evidence.confirmed is True
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Kill-on-close ownership is Windows-specific")
 def test_windows_owner_death_kills_job_tree(tmp_path: Path):
     native_python, native_env = _native_python_launch()
