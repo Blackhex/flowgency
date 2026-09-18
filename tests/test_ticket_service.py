@@ -883,7 +883,7 @@ def test_later_review_job_may_reuse_the_original_agents_evidence(workflow_env):
     from flowgency.tickets.git_evidence import GitEvidenceManifest
     from tests._git_evidence_helpers import (
         capture_request,
-        launched_with_effective_policy,
+        launch_policy_for,
     )
 
     env = workflow_env
@@ -898,8 +898,8 @@ def test_later_review_job_may_reuse_the_original_agents_evidence(workflow_env):
         actor, result.version, env.operation("end", actor_name="builder")
     )
 
-    authority = launched_with_effective_policy(
-        env, env.running_job("builder", "review-run"), "builder"
+    authority = env.running_job(
+        "builder", "review-run", runtime_policy=launch_policy_for(env, "builder")
     )
     registry = TicketAccessRegistry(env.job_store)
     reviewer = registry.open(authority).context
@@ -924,6 +924,140 @@ def test_later_review_job_may_reuse_the_original_agents_evidence(workflow_env):
     manifest = GitEvidenceManifest.model_validate_json(retained.content)
     assert manifest.job_id == actor.job_id
     assert reviewer.job_id != actor.job_id
+
+
+def _publish_second_evidence_field(env) -> None:
+    """Declare a second Git-change field, written only by a later transition."""
+    from flowgency.workflows.models import WorkflowDefinition
+
+    source = env.library.inspect(env.blueprint_id)
+    document = source.definition.model_dump(mode="json")
+    evidence = next(field for field in document["fields"] if field["id"] == "evidence")
+    document["fields"].append(
+        dict(evidence, id="review_evidence", label="Review evidence")
+    )
+    document["states"].append(
+        {"id": "verified", "name": "Verified", "color": "#7ad7bf"}
+    )
+    complete = next(
+        transition for transition in document["transitions"] if transition["id"] == "complete"
+    )
+    document["transitions"].append(
+        dict(
+            complete,
+            id="verify",
+            name="Verify",
+            from_state="done",
+            to_state="verified",
+            inputs=[],
+            outputs=[
+                dict(complete["outputs"][0], field_id="review_evidence", required=True)
+            ],
+            preconditions=[],
+            criteria=[],
+        )
+    )
+    env.configuration_service.save_blueprint(
+        env.store.load().revision,
+        env.blueprint_id,
+        source.digest,
+        WorkflowDefinition.model_validate(document),
+    )
+
+
+@requires_git
+def test_captured_evidence_is_reusable_on_another_field_and_later_transition(
+    workflow_env,
+):
+    from flowgency.tickets.access import TicketAccessRegistry
+    from flowgency.tickets.errors import TicketEvidenceInvalid
+    from flowgency.tickets.git_evidence import (
+        GIT_EVIDENCE_FILENAME,
+        GIT_EVIDENCE_MEDIA_TYPE,
+        GitEvidenceManifest,
+    )
+    from tests._git_evidence_helpers import capture_request, launch_policy_for
+
+    env = workflow_env
+    fixture, actor, ticket = _git_ticket(env)
+    _publish_second_evidence_field(env)
+    result = env.service.capture_git_evidence(
+        actor,
+        env.read(ticket.ref).version,
+        capture_request(fixture),
+        env.operation("capture", actor_name="builder"),
+    )
+    env.service.transition(
+        actor,
+        result.version,
+        env.transition_request(
+            outputs={"summary": "Committed result", "evidence": result.artifact}
+        ),
+        env.operation("complete-with-evidence", actor_name="builder"),
+    )
+    env.service.end_work(
+        actor, env.read(ticket.ref).version, env.operation("end", actor_name="builder")
+    )
+
+    authority = env.running_job(
+        "builder", "verify-run", runtime_policy=launch_policy_for(env, "builder")
+    )
+    reviewer = TicketAccessRegistry(env.job_store).open(authority).context
+    env.service.start_work(
+        reviewer,
+        env.read(ticket.ref).version,
+        env.operation("verify-start", actor_name="reviewer"),
+    )
+
+    accepted = env.service.transition(
+        reviewer,
+        env.read(ticket.ref).version,
+        env.transition_request(
+            transition_id="verify", outputs={"review_evidence": result.artifact}
+        ),
+        env.operation("verify", actor_name="reviewer"),
+    )
+
+    assert accepted.ticket.state_id == "verified"
+    assert accepted.ticket.field_values["review_evidence"] == result.artifact
+    assert accepted.ticket.field_provenance["review_evidence"].job_id == reviewer.job_id
+    assert accepted.ticket.field_provenance["evidence"].job_id == actor.job_id
+    assert reviewer.job_id != actor.job_id
+    captured = next(
+        event
+        for event in accepted.ticket.events
+        if event.kind == "git-evidence-captured"
+    )
+    assert captured.data["capture"]["transition_id"] == "complete"
+    assert captured.data["capture"]["field_id"] == "evidence"
+    assert captured.data["capture"]["job_id"] == actor.job_id
+    content = env.current_provider().read_artifact(
+        ticket.ref, result.artifact.value
+    ).content
+    assert GitEvidenceManifest.model_validate_json(content).job_id == actor.job_id
+
+    foreign = env.create(title="Foreign", values={"verdict": True, "summary": "Foreign"})
+    env.service.start_work(
+        reviewer, foreign.version, env.operation("foreign-start", actor_name="reviewer")
+    )
+    uploaded = env.service.publish_artifact(
+        reviewer,
+        env.read(foreign.ref).version,
+        GIT_EVIDENCE_FILENAME,
+        GIT_EVIDENCE_MEDIA_TYPE,
+        content,
+    )
+    before = env.read(foreign.ref).record
+    with pytest.raises(TicketEvidenceInvalid):
+        env.service.transition(
+            reviewer,
+            env.read(foreign.ref).version,
+            env.transition_request(
+                outputs={"summary": "Borrowed", "evidence": uploaded}
+            ),
+            env.operation("foreign-transition", actor_name="reviewer"),
+        )
+    assert env.read(foreign.ref).record == before
 
 
 @requires_git
@@ -1012,3 +1146,109 @@ def test_creation_cannot_cite_git_evidence(workflow_env):
                 "evidence": ArtifactRef(kind="id", value="a" * 64),
             }
         )
+
+
+def _stored_artifacts(env, ref) -> list:
+    directory = env.current_provider()._artifact_path(ref, "a" * 64).parent
+    return sorted(directory.glob("*")) if directory.exists() else []
+
+
+def _assert_capture_left_nothing(env, ticket, before, operation, workspace_snapshot):
+    from tests._git_evidence_helpers import snapshot_repository
+
+    record = env.read(ticket.ref).record
+    assert record == before
+    assert all(event.kind != "git-evidence-captured" for event in record.events)
+    assert env.current_provider().receipt(ticket.ref, operation) is None
+    assert _stored_artifacts(env, ticket.ref) == []
+    workspace = env.store.load().config.teams[env.team_id].workspace_path
+    assert snapshot_repository(workspace) == workspace_snapshot
+
+
+@requires_git
+def test_capture_is_denied_when_the_launch_policy_cannot_read_a_selected_path(
+    workflow_env,
+):
+    from flowgency.git_evidence.models import GitPublicationPolicy
+    from flowgency.jobs.models import RuntimePolicySnapshot
+    from flowgency.tickets.errors import TicketForbidden
+    from tests._git_evidence_helpers import (
+        capture_request,
+        configure_git_ticket,
+        create_git_repository,
+        snapshot_repository,
+    )
+
+    env = workflow_env
+    fixture = create_git_repository(env.tmp_path / "source")
+    denied_launch = RuntimePolicySnapshot(
+        timeout=30,
+        mode="unrestricted",
+        rules=(
+            {"path": None, "tools": None},
+            {"path": str(fixture.root / "result.txt"), "tools": ["search"]},
+        ),
+    )
+    actor, ticket = configure_git_ticket(
+        env,
+        fixture,
+        GitPublicationPolicy(mode="local"),
+        launch_policy=denied_launch,
+    )
+    before = env.read(ticket.ref).record
+    before_source = snapshot_repository(fixture.root)
+    operation = env.operation("denied-launch-capture", actor_name="builder")
+
+    with pytest.raises(TicketForbidden) as denied:
+        env.service.capture_git_evidence(
+            actor, ticket.version, capture_request(fixture), operation
+        )
+
+    assert denied.value.code == "git-evidence-path-denied"
+    _assert_capture_left_nothing(env, ticket, before, operation, before_source)
+
+
+@requires_git
+def test_capture_is_denied_when_the_current_policy_cannot_read_a_selected_path(
+    workflow_env,
+):
+    from flowgency.tickets.errors import TicketForbidden
+    from tests._git_evidence_helpers import (
+        GitTestRepository,
+        capture_request,
+        git_command,
+        snapshot_repository,
+    )
+
+    env = workflow_env
+    fixture, actor, ticket = _git_ticket(env)
+    nested = fixture.root / "docs"
+    nested.mkdir()
+    (nested / "note.txt").write_bytes(b"noted\n")
+    git_command(fixture.root, "add", "--", "docs/note.txt")
+    git_command(fixture.root, "commit", "-m", "test: add a nested note")
+    end_commit = git_command(fixture.root, "rev-parse", "HEAD").decode().strip()
+    ranged = GitTestRepository(fixture.root, fixture.base_commit, end_commit)
+
+    snapshot = env.store.load()
+    env.store.patch(
+        snapshot.revision,
+        lambda raw: raw["teams"][env.team_id].__setitem__(
+            "permissions",
+            {
+                "mode": "unrestricted",
+                "rules": [{"tools": None}, {"path": str(nested), "tools": ["search"]}],
+            },
+        ),
+    )
+    before = env.read(ticket.ref).record
+    before_source = snapshot_repository(fixture.root)
+    operation = env.operation("denied-current-capture", actor_name="builder")
+
+    with pytest.raises(TicketForbidden) as refused:
+        env.service.capture_git_evidence(
+            actor, ticket.version, capture_request(ranged), operation
+        )
+
+    assert refused.value.code == "git-evidence-path-denied"
+    _assert_capture_left_nothing(env, ticket, before, operation, before_source)

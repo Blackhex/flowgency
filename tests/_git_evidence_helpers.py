@@ -148,35 +148,22 @@ def capture_request(fixture: GitTestRepository, **overrides):
     return GitCaptureRequest(**payload)
 
 
-def launched_with_effective_policy(env, authority, agent_name: str):
-    """Record the launch-time policy a real launcher would have snapshotted.
-
-    ``WorkflowTestEnv.running_job`` stores a placeholder restricted policy with
-    no rules, which grants nothing, so capture would be denied for a reason no
-    real launch produces. The job file is rewritten through the real job APIs.
-    """
-    from dataclasses import replace
-
+def launch_policy_for(env, agent_name: str):
+    """The launch-time snapshot a real launcher would have taken for an agent."""
     from flowgency.configuration.effective import resolve_effective_policy
     from flowgency.jobs.models import RuntimePolicySnapshot
-    from flowgency.jobs.store import read_job, write_job
 
-    record = read_job(authority.path)
-    policy = resolve_effective_policy(env.store.load().config, env.team_id, agent_name)
-    spec = replace(
-        record.spec, runtime_policy=RuntimePolicySnapshot.from_effective_policy(policy)
-    )
-    updated = replace(record, spec=spec, authority_digest=spec.immutable_digest())
-    write_job(authority.path, updated)
-    return env.job_store.reference(
-        env.team_id, record.spec.job_id, updated.authority_digest
+    return RuntimePolicySnapshot.from_effective_policy(
+        resolve_effective_policy(env.store.load().config, env.team_id, agent_name)
     )
 
 
-def configure_git_ticket(env, fixture: GitTestRepository, policy):
+def configure_git_ticket(env, fixture: GitTestRepository, policy, *, launch_policy=None):
     """Point a real team at a Git fixture and start a real run on a ticket.
 
-    Returns the running agent's context and the started ticket view.
+    ``launch_policy`` overrides the snapshot the run was launched with, so a
+    denied launch-time policy can be exercised. Returns the running agent's
+    context and the started ticket view.
     """
     from flowgency.tickets.access import TicketAccessRegistry
     from flowgency.workflows.models import WorkflowDefinition
@@ -206,8 +193,11 @@ def configure_git_ticket(env, fixture: GitTestRepository, policy):
         source.digest,
         WorkflowDefinition.model_validate(document),
     )
-    authority = env.running_job("builder", "git-evidence-run")
-    authority = launched_with_effective_policy(env, authority, "builder")
+    authority = env.running_job(
+        "builder",
+        "git-evidence-run",
+        runtime_policy=launch_policy or launch_policy_for(env, "builder"),
+    )
     registry = TicketAccessRegistry(env.job_store)
     actor = registry.open(authority).context
     env.service.validate_agent_context = registry.validate_context

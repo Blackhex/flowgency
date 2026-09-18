@@ -334,7 +334,13 @@ class WorkflowTestEnv:
         ).storage
         return resolve_storage(binding, clock=self._clock)
 
-    def running_job(self, agent: str, job_id: str) -> JobAuthorityRef:
+    def running_job(
+        self,
+        agent: str,
+        job_id: str,
+        *,
+        runtime_policy: RuntimePolicySnapshot | None = None,
+    ) -> JobAuthorityRef:
         snapshot = self.store.load()
         team = snapshot.config.teams[self.team_id]
         spec = JobSpec(
@@ -360,7 +366,8 @@ class WorkflowTestEnv:
             skill=None,
             skill_arguments=(),
             task_input="Run task safely",
-            runtime_policy=RuntimePolicySnapshot(timeout=30, mode="restricted"),
+            runtime_policy=runtime_policy
+            or RuntimePolicySnapshot(timeout=30, mode="restricted"),
             memory=MemoryBinding(
                 selector={"scope": "agent"},
                 canonical_json='{"agent":"%s","scope":"agent","team":"%s","version":1}' % (agent, self.team_id),

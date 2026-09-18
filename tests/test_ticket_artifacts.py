@@ -577,6 +577,116 @@ def test_git_capture_commits_nothing_when_the_ticket_or_session_moves(
     assert all(event.kind != "git-evidence-captured" for event in revoked.events)
 
 
+def _deny_workspace_reads(env):
+    """Narrow the effective policy so the workspace is searchable, not readable."""
+    workspace = str(env.store.load().config.teams[env.team_id].workspace_path)
+    snapshot = env.store.load()
+    env.store.patch(
+        snapshot.revision,
+        lambda raw: raw["teams"][env.team_id].__setitem__(
+            "permissions",
+            {
+                "mode": "unrestricted",
+                "rules": [{"tools": None}, {"path": workspace, "tools": ["search"]}],
+            },
+        ),
+    )
+
+
+@requires_git
+def test_git_capture_rejects_reads_narrowed_while_the_capture_is_in_flight(
+    workflow_env, monkeypatch
+):
+    from flowgency.tickets import service as service_module
+    from flowgency.tickets.errors import TicketForbidden
+    from tests._git_evidence_helpers import snapshot_repository
+
+    env = workflow_env
+    actor, ticket, request = _git_capture_env(env)
+    before = env.read(ticket.ref).record
+    workspace = env.store.load().config.teams[env.team_id].workspace_path
+    before_source = snapshot_repository(workspace)
+    original = service_module.capture_committed_range
+
+    def narrow(*args, **kwargs):
+        captured = original(*args, **kwargs)
+        _deny_workspace_reads(env)
+        return captured
+
+    monkeypatch.setattr(service_module, "capture_committed_range", narrow)
+    operation = env.operation("narrowed-capture", actor_name="builder")
+    with pytest.raises(TicketForbidden) as denied:
+        env.service.capture_git_evidence(actor, ticket.version, request, operation)
+
+    assert denied.value.code == "git-evidence-path-denied"
+    assert env.read(ticket.ref).record == before
+    assert env.current_provider().receipt(ticket.ref, operation) is None
+    assert snapshot_repository(workspace) == before_source
+
+
+@requires_git
+def test_git_capture_rejects_a_policy_changed_while_the_capture_is_in_flight(
+    workflow_env, monkeypatch
+):
+    from flowgency.tickets import service as service_module
+    from flowgency.tickets.errors import TicketConflict
+
+    env = workflow_env
+    actor, ticket, request = _git_capture_env(env)
+    before = env.read(ticket.ref).record
+    original = service_module.capture_committed_range
+
+    def restrict(*args, **kwargs):
+        captured = original(*args, **kwargs)
+        _restrict_policy(env)
+        return captured
+
+    monkeypatch.setattr(service_module, "capture_committed_range", restrict)
+    operation = env.operation("policy-raced-capture", actor_name="builder")
+    with pytest.raises(TicketConflict):
+        env.service.capture_git_evidence(actor, ticket.version, request, operation)
+
+    assert env.read(ticket.ref).record == before
+    assert env.current_provider().receipt(ticket.ref, operation) is None
+
+
+@requires_git
+def test_replayed_capture_separates_corrupt_receipts_from_programming_errors(
+    workflow_env, monkeypatch
+):
+    from flowgency.tickets import git_evidence as git_evidence_module
+
+    env = workflow_env
+    actor, ticket, request = _git_capture_env(env)
+    operation = env.operation("capture", actor_name="builder")
+    captured = env.service.capture_git_evidence(
+        actor, ticket.version, request, operation
+    )
+
+    def defect(*args, **kwargs):
+        raise RuntimeError("programming defect")
+
+    monkeypatch.setattr(
+        git_evidence_module.GitCaptureReceipt,
+        "model_validate",
+        staticmethod(defect),
+    )
+    with pytest.raises(RuntimeError):
+        env.service.capture_git_evidence(actor, ticket.version, request, operation)
+    monkeypatch.undo()
+
+    path = env.current_provider()._ticket_path(ticket.ref)
+    stored = path.read_text(encoding="utf-8")
+    corrupted = stored.replace(
+        f"artifact_id: {captured.artifact.value}", "artifact_id: not-a-digest"
+    )
+    assert corrupted != stored
+    path.write_text(corrupted, encoding="utf-8")
+
+    with pytest.raises(TicketCorrupt):
+        env.service.capture_git_evidence(actor, ticket.version, request, operation)
+
+
 @requires_git
 def test_one_job_captures_each_ticket_against_its_own_identity(workflow_env):
     from flowgency.tickets.git_evidence import GitEvidenceManifest

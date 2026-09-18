@@ -8,10 +8,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from pydantic import ValidationError
+
 from flowgency.configuration.effective import resolve_effective_policy
 from flowgency.configuration.issues import ValidationFailed
 from flowgency.configuration.store import ConfigSnapshot, ConfigStore
-from flowgency.git_evidence.capture import capture_committed_range
+from flowgency.git_evidence.capture import authorize_changed_paths, capture_committed_range
 from flowgency.git_evidence.git import CAPTURE_TIMEOUT_SECONDS, open_git_repository
 from flowgency.git_evidence.models import (
     GitCommitRange,
@@ -620,7 +622,7 @@ class TicketService:
             )
         try:
             receipt = GitCaptureReceipt.model_validate(event.data.get("capture"))
-        except Exception as error:
+        except ValidationError as error:
             raise TicketCorrupt(
                 "corrupt-record",
                 "Ticket capture receipt is not readable",
@@ -830,6 +832,21 @@ class TicketService:
                 raise evidence_error(TicketConflict, "git-evidence-workspace-changed")
             if current.policy != plan.policy:
                 raise evidence_error(TicketConflict, "git-evidence-policy-changed")
+            # Read permissions can narrow while the unlocked read runs, so the
+            # captured paths are authorized again under today's policies.
+            try:
+                authorize_changed_paths(
+                    (
+                        path
+                        for entry in manifest.files
+                        for path in (entry.path, entry.old_path)
+                        if path is not None
+                    ),
+                    workspace=current.workspace,
+                    policies=current.policies,
+                )
+            except GitEvidenceError as error:
+                raise _git_evidence_failure(error) from error
             _, snapshot_def = self._resolve_definition(binding, snapshot=snapshot)
             now = self.clock()
             event_id = uuid.uuid4().hex

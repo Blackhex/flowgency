@@ -255,7 +255,14 @@ class GitEvidenceManifest(BaseModel):
 
 
 class GitCaptureReceipt(BaseModel):
-    """The trusted event payload: identity and checks only, never content."""
+    """The trusted event payload: identity and checks only, never content.
+
+    ``transition_id`` and ``field_id`` record what the capture was intended
+    for. They are provenance, not a restriction: verified evidence may be
+    written to any declared Git-change field of the same ticket, by any later
+    transition or job, while identity, integrity, workspace and policy checks
+    stay in force.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     artifact_id: StrictStr

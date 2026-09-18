@@ -11,6 +11,7 @@ before any patch byte is produced.
 from __future__ import annotations
 
 from pathlib import Path, PurePosixPath
+from typing import Iterable
 
 from flowgency.git_evidence.git import (
     MAX_PATCH_BYTES,
@@ -215,6 +216,21 @@ def _under(path: Path, root: Path) -> bool:
     except ValueError:
         return False
     return True
+
+
+def authorize_changed_paths(
+    paths: Iterable[str],
+    *,
+    workspace: Path,
+    policies: tuple[EffectiveRuntimePolicy, ...],
+) -> None:
+    """Re-authorize already-captured paths without reading the repository.
+
+    Permissions can narrow while an unlocked capture runs, so the paths the
+    read produced are authorized again before anything is committed.
+    """
+    for text in paths:
+        _authorize_path(text, workspace=workspace, policies=policies)
 
 
 def _commit_ids(
