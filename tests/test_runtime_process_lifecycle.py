@@ -13,6 +13,8 @@ import pytest
 from flowgency.jobs.processes import (
     OwnedPosixProcessGroup,
     RuntimeProcessLifecycle,
+    _OutputBudget,
+    _OutputCapture,
     _run_supervised_posix,
     _owned_posix_group_state,
     _posix_process_identity_state,
@@ -823,6 +825,62 @@ def test_run_supervised_output_limit_truncates_and_kills_process_tree(tmp_path: 
             handle.Close()
         if capture_thread.is_alive():
             capture_thread.join(timeout=0.1)
+
+
+def test_posix_output_limit_reports_missing_root_identity_not_live_descendants(
+    monkeypatch, tmp_path: Path
+):
+    # The owned group is provably empty; only the root's identity is missing, so
+    # the stop reason must not claim descendants are still running.
+    fake_process = _FakePosixProcess(4321)
+    fake_process.allow_reap = True
+
+    monkeypatch.setattr(
+        "flowgency.jobs.processes.subprocess.Popen",
+        lambda *args, **kwargs: fake_process,
+    )
+    monkeypatch.setattr(
+        "flowgency.jobs.processes.read_process_identity",
+        lambda pid: None,
+    )
+    monkeypatch.setattr(
+        "flowgency.jobs.processes._capture_posix_group_identity",
+        lambda pid: OwnedPosixProcessGroup(
+            leader=RuntimeProcessIdentity(pid=pid, created_at="leader-created"),
+            process_group_id=pid,
+            session_id=pid,
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "flowgency.jobs.processes._signal_owned_posix_group",
+        lambda group_identity, sig: "signaled",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "flowgency.jobs.processes._owned_posix_group_status",
+        lambda group_identity, deadline: "empty",
+        raising=False,
+    )
+    capture = _OutputCapture(budget=_OutputBudget(1))
+    assert capture.budget is not None
+    capture.budget.take(b"oversized")
+
+    result = _run_supervised_posix(
+        [sys.executable, "ignored.py"],
+        cwd=tmp_path,
+        env=os.environ.copy(),
+        timeout=5,
+        lifecycle=RuntimeProcessLifecycle(
+            job_id="job-limit-identity", generation="gen-limit-identity"
+        ),
+        start=time.monotonic(),
+        capture=capture,
+    )
+
+    assert result.outcome == "output-limit"
+    assert result.process_stop_evidence.confirmed is False
+    assert result.process_stop_evidence.reason == "root-identity-unavailable"
 
 
 def test_run_supervised_without_output_options_keeps_existing_behavior(tmp_path: Path):

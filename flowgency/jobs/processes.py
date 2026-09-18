@@ -561,6 +561,9 @@ def _posix_group_reason(
         return "group-state-unavailable"
     if group_status == "reused":
         return "group-identity-unavailable"
+    if group_status == "empty":
+        # The group is provably gone; only the root's identity was unreadable.
+        return "root-identity-unavailable"
     return "descendants-still-running"
 
 

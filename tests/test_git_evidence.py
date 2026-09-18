@@ -8,7 +8,9 @@ Git against isolated ``tmp_path`` repositories built by
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
+import os
 import shutil
 import subprocess
 import sys
@@ -69,6 +71,14 @@ def _capture(root: Path, base: str, end: str, scratch: Path, *, policies=UNRESTR
             lifecycle=lifecycle,
             deadline=time.monotonic() + 120,
         )
+
+
+@contextlib.contextmanager
+def _source_unchanged(root: Path):
+    """Assert a capture attempt left every source byte and ref exactly as it was."""
+    before = snapshot_repository(root)
+    yield
+    assert snapshot_repository(root) == before
 
 
 def test_local_git_policy_needs_no_remote():
@@ -437,10 +447,11 @@ def test_capture_rejects_a_commit_the_repository_does_not_have(tmp_path):
 @requires_git
 def test_capture_rejects_a_non_ancestor_range(tmp_path):
     fixture = create_git_repository(tmp_path / "repo")
-    with pytest.raises(GitEvidenceError) as failure:
-        _capture(
-            fixture.root, fixture.end_commit, fixture.base_commit, tmp_path / "scratch"
-        )
+    with _source_unchanged(fixture.root):
+        with pytest.raises(GitEvidenceError) as failure:
+            _capture(
+                fixture.root, fixture.end_commit, fixture.base_commit, tmp_path / "scratch"
+            )
     assert failure.value.code == "git-evidence-range-not-ancestor"
 
 
@@ -477,8 +488,9 @@ def test_capture_stops_at_the_changed_path_limit(tmp_path, monkeypatch):
 def test_capture_stops_when_the_patch_exceeds_its_byte_budget(tmp_path, monkeypatch):
     fixture = create_git_repository(tmp_path / "repo")
     monkeypatch.setattr(capture_module, "MAX_PATCH_BYTES", 64)
-    with pytest.raises(GitEvidenceError) as failure:
-        _capture(fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch")
+    with _source_unchanged(fixture.root):
+        with pytest.raises(GitEvidenceError) as failure:
+            _capture(fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch")
     assert failure.value.code == "git-evidence-output-too-large"
 
 
@@ -518,7 +530,7 @@ def test_run_git_bytes_refuses_to_start_past_its_deadline(tmp_path):
     assert failure.value.code == "git-evidence-timeout"
 
 
-def _completed(outcome, *, exit_code=0):
+def _completed(outcome, *, exit_code=0, stdout=b"", stderr=b""):
     return CompletedRuntimeProcess(
         exit_code=exit_code,
         stdout="",
@@ -528,8 +540,8 @@ def _completed(outcome, *, exit_code=0):
             job_id="capture-test", generation="generation-a", confirmed=True, reason=outcome
         ),
         outcome=outcome,
-        stdout_bytes=b"",
-        stderr_bytes=b"",
+        stdout_bytes=stdout,
+        stderr_bytes=stderr,
     )
 
 
@@ -575,17 +587,18 @@ def test_capture_requires_read_permission_for_every_selected_path(tmp_path):
         ),
     )
     lifecycle = RuntimeProcessLifecycle(job_id="capture-test", generation="generation-b")
-    with open_git_repository(
-        fixture.root, scratch_root=tmp_path / "scratch", lifecycle=lifecycle
-    ) as repository:
-        with pytest.raises(GitEvidenceError) as failure:
-            capture_committed_range(
-                repository,
-                GitCommitRange(fixture.base_commit, fixture.end_commit),
-                policies=(policy,),
-                lifecycle=lifecycle,
-                deadline=time.monotonic() + 120,
-            )
+    with _source_unchanged(fixture.root):
+        with open_git_repository(
+            fixture.root, scratch_root=tmp_path / "scratch", lifecycle=lifecycle
+        ) as repository:
+            with pytest.raises(GitEvidenceError) as failure:
+                capture_committed_range(
+                    repository,
+                    GitCommitRange(fixture.base_commit, fixture.end_commit),
+                    policies=(policy,),
+                    lifecycle=lifecycle,
+                    deadline=time.monotonic() + 120,
+                )
     assert failure.value.code == "git-evidence-path-denied"
 
 
@@ -853,12 +866,63 @@ def test_hostile_source_configuration_neither_runs_nor_redirects_the_read(tmp_pa
         encoding="utf-8",
     )
 
+    before = snapshot_repository(fixture.root)
+    # Ordinary Git work against this source really does run the hostile
+    # fsmonitor command, including the parity snapshot above, so clear the
+    # marker right before the capture: only the capture may be accused.
+    marker.unlink(missing_ok=True)
+
     captured = _capture(
         fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch"
     )
+
+    assert not marker.exists()
     assert [change.path for change in captured.files] == ["result.txt"]
     assert b"+after" in captured.patch
+    assert snapshot_repository(fixture.root) == before
+
+
+@requires_git
+def test_source_hooks_never_run_during_a_capture(tmp_path):
+    fixture = create_git_repository(tmp_path / "repo")
+    marker = tmp_path / "hook-ran.txt"
+    hooks = tmp_path / "hostile-hooks"
+    hooks.mkdir()
+    for name in (
+        "pre-commit",
+        "post-index-change",
+        "post-checkout",
+        "pre-auto-gc",
+        "fsmonitor-watchman",
+        "proc-receive",
+    ):
+        hook = hooks / name
+        hook.write_text(
+            f'#!/bin/sh\necho ran > "{marker.as_posix()}"\nexit 0\n',
+            encoding="utf-8",
+            newline="\n",
+        )
+        hook.chmod(0o755)
+    git_command(fixture.root, "config", "core.hooksPath", str(hooks))
+
+    # Positive control: these hooks really do run for an ordinary Git operation.
+    (fixture.root / "hooked.txt").write_bytes(b"hooked\n")
+    git_command(fixture.root, "add", "--", "hooked.txt")
+    git_command(fixture.root, "commit", "-m", "test: exercise the hook")
+    assert marker.read_text(encoding="utf-8").strip() == "ran"
+    end = git_command(fixture.root, "rev-parse", "HEAD").decode().strip()
+
+    before = snapshot_repository(fixture.root)
+    # The parity snapshot itself touches the source index, which is exactly the
+    # kind of ordinary Git work that may fire a hook; clear it right before the
+    # capture so the sentinel can only accuse the capture.
+    marker.unlink(missing_ok=True)
+
+    captured = _capture(fixture.root, fixture.base_commit, end, tmp_path / "scratch")
+
     assert not marker.exists()
+    assert [change.path for change in captured.files] == ["hooked.txt", "result.txt"]
+    assert snapshot_repository(fixture.root) == before
 
 
 @requires_git
@@ -882,7 +946,7 @@ def test_git_subprocess_environment_drops_inherited_git_variables(tmp_path, monk
     monkeypatch.setenv("GIT_TRACE", "1")
     monkeypatch.setenv("GIT_ASKPASS", "python")
     session = tmp_path / "session"
-    env = git_module._git_environment(session)
+    env = git_module._git_environment(session, forbidden_roots=(session,))
     assert not any(
         name in env for name in ("GIT_SSH_COMMAND", "GIT_CONFIG_COUNT", "GIT_TRACE", "GIT_ASKPASS")
     )
@@ -892,3 +956,153 @@ def test_git_subprocess_environment_drops_inherited_git_variables(tmp_path, monk
     assert env["GIT_NO_LAZY_FETCH"] == "1"
     assert env["GIT_OPTIONAL_LOCKS"] == "0"
     assert env["HOME"] == str(session / "home")
+
+
+def test_child_path_drops_every_untrusted_root_not_only_the_session(tmp_path, monkeypatch):
+    # Git looks its own helpers up on the child PATH, so the entries it may
+    # search must be the same forbidden-root set the executable lookup uses.
+    workspace = tmp_path / "repo"
+    scratch = tmp_path / "scratch"
+    session = scratch / "git-evidence-session"
+    trusted = tmp_path / "deployment-bin"
+    for directory in (workspace / "tools", scratch / "helpers", session, trusted):
+        directory.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv(
+        "PATH",
+        os.pathsep.join(
+            [
+                str(workspace / "tools"),
+                str(scratch / "helpers"),
+                str(session),
+                "relative/bin",
+                str(trusted),
+            ]
+        ),
+    )
+
+    roots = git_module._untrusted_roots(workspace, session)
+    env = git_module._git_environment(session, forbidden_roots=roots)
+
+    assert [Path(entry) for entry in env["PATH"].split(os.pathsep) if entry] == [
+        trusted.resolve()
+    ]
+
+
+@requires_git
+def test_capture_child_path_never_offers_the_workspace_or_scratch_root(tmp_path, monkeypatch):
+    fixture = create_git_repository(tmp_path / "repo")
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    observed: list[str] = []
+    real_run_supervised = git_module.run_supervised
+
+    def recording(argv, **kwargs):
+        observed.append(kwargs["env"]["PATH"])
+        return real_run_supervised(argv, **kwargs)
+
+    monkeypatch.setattr(git_module, "run_supervised", recording)
+    monkeypatch.setenv(
+        "PATH", os.pathsep.join([str(fixture.root), str(scratch), os.environ["PATH"]])
+    )
+
+    captured = _capture(fixture.root, fixture.base_commit, fixture.end_commit, scratch)
+
+    assert [change.path for change in captured.files] == ["result.txt"]
+    assert observed
+    for value in observed:
+        for entry in (Path(part) for part in value.split(os.pathsep) if part):
+            assert not entry.is_relative_to(fixture.root)
+            assert not entry.is_relative_to(scratch)
+
+
+@requires_git
+def test_git_reads_reserve_a_bounded_stderr_allowance_beyond_the_stdout_limit(
+    tmp_path, monkeypatch
+):
+    # A patch that exactly fills its byte budget must not be rejected because
+    # Git also printed a harmless warning.
+    fixture = create_git_repository(tmp_path / "repo")
+    lifecycle = _lifecycle()
+    recorded: dict[str, object] = {}
+    with open_git_repository(
+        fixture.root, scratch_root=tmp_path / "scratch", lifecycle=lifecycle
+    ) as repository:
+
+        def fake_run(argv, **kwargs):
+            recorded.update(kwargs)
+            return _completed("exited", stdout=b"x" * 64, stderr=b"warning: noisy\n")
+
+        monkeypatch.setattr(git_module, "run_supervised", fake_run)
+        data = run_git_bytes(
+            repository,
+            ("cat-file", "-t", fixture.end_commit),
+            lifecycle=lifecycle,
+            deadline=time.monotonic() + 30,
+            output_limit=64,
+        )
+    assert data == b"x" * 64
+    assert recorded["output_limit_bytes"] == 64 + git_module.STDERR_ALLOWANCE_BYTES
+
+
+@requires_git
+@pytest.mark.parametrize("stream", ["stdout", "stderr"])
+def test_git_reads_bound_each_stream_even_without_a_combined_overflow(
+    tmp_path, monkeypatch, stream
+):
+    fixture = create_git_repository(tmp_path / "repo")
+    lifecycle = _lifecycle()
+    oversized = {
+        "stdout": {"stdout": b"x" * 65},
+        "stderr": {"stderr": b"y" * (git_module.STDERR_ALLOWANCE_BYTES + 1)},
+    }[stream]
+    with open_git_repository(
+        fixture.root, scratch_root=tmp_path / "scratch", lifecycle=lifecycle
+    ) as repository:
+        monkeypatch.setattr(
+            git_module,
+            "run_supervised",
+            lambda argv, **kwargs: _completed("exited", **oversized),
+        )
+        with pytest.raises(GitEvidenceError) as failure:
+            run_git_bytes(
+                repository,
+                ("cat-file", "-t", fixture.end_commit),
+                lifecycle=lifecycle,
+                deadline=time.monotonic() + 30,
+                output_limit=64,
+            )
+    assert failure.value.code == "git-evidence-output-too-large"
+
+
+@requires_git
+def test_a_read_that_exactly_fills_its_stdout_limit_is_accepted(tmp_path):
+    fixture = create_git_repository(tmp_path / "repo")
+    lifecycle = _lifecycle()
+    arguments = ("cat-file", "-p", fixture.end_commit)
+    with open_git_repository(
+        fixture.root, scratch_root=tmp_path / "scratch", lifecycle=lifecycle
+    ) as repository:
+        exact = run_git_bytes(
+            repository,
+            arguments,
+            lifecycle=lifecycle,
+            deadline=time.monotonic() + 30,
+            output_limit=64 * 1024,
+        )
+        at_limit = run_git_bytes(
+            repository,
+            arguments,
+            lifecycle=lifecycle,
+            deadline=time.monotonic() + 30,
+            output_limit=len(exact),
+        )
+        with pytest.raises(GitEvidenceError) as failure:
+            run_git_bytes(
+                repository,
+                arguments,
+                lifecycle=lifecycle,
+                deadline=time.monotonic() + 30,
+                output_limit=len(exact) - 1,
+            )
+    assert at_limit == exact
+    assert failure.value.code == "git-evidence-output-too-large"

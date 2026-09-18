@@ -28,6 +28,10 @@ GIT_COMMAND_TIMEOUT_SECONDS = 30
 CAPTURE_TIMEOUT_SECONDS = 120
 METADATA_OUTPUT_LIMIT_BYTES = 1024 * 1024
 MAX_PATCH_BYTES = 640 * 1024
+# Diagnostics Git writes alongside a read (rename-limit or advice warnings) get
+# their own bounded room, so a patch that exactly fills its byte budget is not
+# rejected because of a harmless warning.
+STDERR_ALLOWANCE_BYTES = 64 * 1024
 
 _SUPPORTED_OBJECT_FORMATS = {"sha1", "sha256"}
 
@@ -107,14 +111,22 @@ def resolve_trusted_executable(name: str, *, forbidden_roots: tuple[Path, ...]) 
     raise GitEvidenceError("git-evidence-git-unavailable")
 
 
-def _git_environment(session: Path) -> dict[str, str]:
+def _untrusted_roots(workspace: Path, session: Path) -> tuple[Path, ...]:
+    """Roots no trusted executable may come from: the source workspace, this
+    capture's private session, and the whole scratch root that contains it."""
+    return (workspace, session, session.parent)
+
+
+def _git_environment(session: Path, *, forbidden_roots: tuple[Path, ...]) -> dict[str, str]:
     home = session / "home"
     temp = session / "temp"
     env = {
         name: os.environ[name] for name in _INHERITED_ENV_NAMES if name in os.environ
     }
+    # Git searches this PATH for its own helpers, so it must exclude exactly the
+    # roots the executable lookup refuses, not only the private session.
     env["PATH"] = os.pathsep.join(
-        str(entry) for entry in _deployment_path_entries((session,))
+        str(entry) for entry in _deployment_path_entries(forbidden_roots)
     )
     env["HOME"] = str(home)
     env["USERPROFILE"] = str(home)
@@ -161,7 +173,7 @@ def _run_git_raw(
             env=env,
             timeout=max(1, math.ceil(remaining)),
             lifecycle=lifecycle,
-            output_limit_bytes=output_limit,
+            output_limit_bytes=output_limit + STDERR_ALLOWANCE_BYTES,
             retain_output_bytes=True,
         )
     except FileNotFoundError:
@@ -172,7 +184,12 @@ def _run_git_raw(
         raise GitEvidenceError("git-evidence-timeout")
     if result.outcome != "exited":
         raise GitEvidenceError("git-evidence-command-failed")
-    return result.exit_code, result.stdout_bytes or b""
+    stdout = result.stdout_bytes or b""
+    # The supervisor's cap is deliberately the combined one; each stream is then
+    # held to its own share so neither can spend the other's budget.
+    if len(stdout) > output_limit or len(result.stderr_bytes or b"") > STDERR_ALLOWANCE_BYTES:
+        raise GitEvidenceError("git-evidence-output-too-large")
+    return result.exit_code, stdout
 
 
 def _validated_workspace(workspace: Path) -> Path:
@@ -340,9 +357,11 @@ def open_git_repository(
         for directory in (session / "home" / "config", session / "temp"):
             directory.mkdir(parents=True, exist_ok=True)
         executable = resolve_trusted_executable(
-            "git", forbidden_roots=(validated_workspace, session)
+            "git", forbidden_roots=_untrusted_roots(validated_workspace, session)
         )
-        env = _git_environment(session)
+        env = _git_environment(
+            session, forbidden_roots=_untrusted_roots(validated_workspace, session)
+        )
 
         if _source_config_value(
             "core.bare",
@@ -415,14 +434,13 @@ def run_git_exit_code(
     output_limit: int,
 ) -> tuple[int, bytes]:
     session = repository.object_view.parent
-    executable = resolve_trusted_executable(
-        "git", forbidden_roots=(repository.workspace, session)
-    )
+    forbidden_roots = _untrusted_roots(repository.workspace, session)
+    executable = resolve_trusted_executable("git", forbidden_roots=forbidden_roots)
     return _run_git_raw(
         executable,
         ("--git-dir", str(repository.object_view), *arguments),
         cwd=repository.object_view,
-        env=_git_environment(session),
+        env=_git_environment(session, forbidden_roots=forbidden_roots),
         lifecycle=lifecycle,
         deadline=deadline,
         output_limit=output_limit,
