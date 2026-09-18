@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+import yaml
 
 from flowgency.jobs.store import read_job, write_job
 from flowgency.tickets.errors import TicketConflict, TicketForbidden
@@ -278,14 +279,32 @@ def test_start_work_rejects_other_run_when_another_job_is_pending(ticket_job_env
     assert live.pending_run.job_id == handle.job_id
 
 
-def test_ticket_job_task_input_states_the_transition_result_contract(ticket_job_env):
+def test_ticket_job_task_input_lets_a_consumer_discover_required_outputs(ticket_job_env):
+    """Boundary test: a consumer reading the durable job's task_input must be
+    able to (a) read result guidance before the serialized ticket/definition
+    blocks, and (b) derive the ticket's actual required outputs by parsing the
+    embedded workflow definition, rather than trusting hard-coded prose."""
     env = ticket_job_env
     ticket = env.create_assigned("builder")
 
     handle = env.coordinator.submit(env.user, ticket.version, "run-request")
     record = env.jobs.read(handle)
+    view = env.read(ticket.ref)
+    task_input = record.spec.task_input
 
-    assert "Required outputs must be supplied in outputs." in record.spec.task_input
-    assert "Inputs are attempt-only context" in record.spec.task_input
-    assert "reports and logs do not save outputs." in record.spec.task_input
-    assert "Accepted outputs and state commit together." in record.spec.task_input
+    ticket_marker = task_input.index("## Current ticket")
+    definition_marker = task_input.index("## Current workflow definition")
+    preamble = task_input[:ticket_marker].strip()
+    assert preamble
+    assert ticket_marker < definition_marker
+
+    workflow_yaml = task_input.split("## Current workflow definition", 1)[1]
+    workflow_yaml = workflow_yaml.split("```yaml", 1)[1].split("```", 1)[0]
+    embedded_definition = yaml.safe_load(workflow_yaml)
+    embedded_transition = next(
+        t for t in embedded_definition["transitions"] if t["id"] == "complete"
+    )
+    expected_transition = view.definition.transition("complete")
+    assert {
+        use["field_id"] for use in embedded_transition["outputs"] if use["required"]
+    } == {use.field_id for use in expected_transition.outputs if use.required}
