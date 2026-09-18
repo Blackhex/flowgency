@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let any workflow require immutable evidence of committed Git changes, verified against its project's publication policy, and expose the retained patch through a read-only line-by-line viewer.
+**Goal:** Let any workflow require immutable evidence of locally committed Git changes, checked against optional local-ref restrictions, and expose the retained patch through a read-only line-by-line viewer.
 
-**Architecture:** Add an optional artifact format to generic field definitions and an explicit team/workspace publication policy to canonical configuration. A trusted capture operation resolves job authority, produces a bounded immutable artifact from explicit commit endpoints, and records a capture audit receipt; transitions accept that artifact only after validating its receipt and current policy. Render retained bytes and provenance, never a diff recomputed from today's workspace.
+**Architecture:** Add an optional artifact format to generic field definitions and an explicit team/workspace local commit/ref policy to canonical configuration. A trusted capture operation resolves job authority, produces a bounded immutable artifact from explicit commit endpoints, and records a capture audit receipt; transitions accept that artifact only after validating its receipt and current policy. Render retained bytes and provenance, never a diff recomputed from today's workspace. No remote-publication verification or credential handling is part of capture.
 
 **Tech Stack:** Python >=3.11, Git CLI, Pydantic >=2.8,<3, FastAPI/Jinja2, existing Local ticket storage, `unidiff>=0.7.5,<0.8` for unified-diff parsing, pytest, Playwright, and existing vanilla JavaScript.
 
@@ -15,14 +15,15 @@
 - "Capture proves the selected Git content and its association with the submitting agent, not exclusive human or agent authorship of every included commit."
 - "Runtime does not parse prose instructions or infer a requirement from the presence of an `origin` remote."
 - "If no applicable policy is configured, a Git-evidence request fails with an actionable configuration error; ordinary workflows remain unaffected."
-- "Authentication or network failure cannot silently downgrade to local mode."
+- "Flowgency verifies committed content locally only."
+- "Do not contact remotes, verify pushes, fetch missing objects, select SSH agents, invoke credential helpers, or add authentication/remote-endpoint configuration for evidence capture."
 - "A workflow blueprint must work for both local-only and remotely published projects without hard-coded remote names or branches."
 - "Do not manufacture evidence by committing, rebasing, merging, or pushing on the agent's behalf."
 - "No PR integration, patch application, or code editing is part of the read-only viewer."
 - "Do not duplicate the patch into job records, logs, or field text."
 - "Capture must also respect the actor's effective read permissions and workspace boundary for selected source paths."
 - "Reject a disallowed range rather than silently producing a partial diff."
-- "Git publication and ticket persistence are separate operations; do not claim a transaction spanning a remote server and the local ticket store."
+- "Git commits and ticket persistence are separate operations."
 - "Existing definitions and ordinary artifact fields retain their behavior without conversion."
 - Retain `MAX_RETAINED_ARTIFACT_BYTES = 1 * 1024 * 1024`; the complete evidence envelope must fit this existing cap. Do not raise limits for all ordinary uploads.
 - No live configuration edits, ticket backfills, old-job reconstruction, real agent launches, automatic permission grants, or modifications to `build/lib`.
@@ -33,6 +34,14 @@
 ## Prerequisite and Scope
 
 Source specification: `docs/superpowers/specs/2026-09-18-workflow-transition-outputs-design.md`, revised in `e6e52e9` and approved by the user's writing-plans request.
+
+Scope revision approved on 2026-09-18 and recorded in specification commit
+`c816124`: "Do not validate the remote publication." Tasks 1-2 are already
+complete. Task 3 removes the unshipped remote verifier and remote-only policy
+introduced before this ruling, then completes local verification. Tasks 4-7 use
+only the revised contracts below. Historical task reports remain evidence of
+what ran, not authority to restore remote checks. Project instructions may still
+require an agent to push; capture neither performs nor verifies that action.
 
 Execute `docs/superpowers/plans/2026-09-18-workflow-transition-outputs.md` first. Its projection and generic authoring contract are prerequisites; its full-suite baseline and review records remain applicable if execution is continuous. If execution resumes after branch changes, rerun the baseline before making changes.
 
@@ -48,7 +57,7 @@ No mockup has been approved and no normative asset directory exists. This plan s
 | New `flowgency/git_evidence/models.py` | Pure policy, range, evidence, receipt, and limit types |
 | New `flowgency/git_evidence/git.py` | Bounded Git subprocess execution, repository identity, and safe NUL-delimited parsing |
 | New `flowgency/git_evidence/capture.py` | Committed range selection, read-permission checks, manifest and patch construction |
-| New `flowgency/git_evidence/publication.py` | Explicit local/remote policy verification in disposable metadata storage |
+| New `flowgency/git_evidence/publication.py` | Local commit/ref policy verification in disposable metadata storage |
 | New `flowgency/tickets/git_evidence.py` | Capture receipts and accepted-artifact verification at the ticket boundary |
 | `flowgency/configuration/models.py`, `flowgency/configuration/patches.py` | Canonical optional policy and revision-checked policy patch |
 | `flowgency/workflows/models.py`, `forms.py`, `editing.py`, `configuration.py` | Optional artifact format, authoring round trips, policy/workspace context fence |
@@ -62,7 +71,7 @@ No mockup has been approved and no normative asset directory exists. This plan s
 | `flowgency/templates/_ticket_inspector.html`, `flowgency/templates/job_detail.html` | Links from outputs, historical outputs, and exact producing jobs |
 | `flowgency/static/workflow-editor.js`, `flowgency/templates/workflow_blueprint.html` | Artifact format selection within existing controls |
 | `pyproject.toml`, `kb/data-formats.md`, `kb/configuration.md`, setup skill sources | Parser dependency and user/agent authoring contract |
-| New `tests/test_git_evidence.py` and `tests/_git_evidence_helpers.py` | Isolated Git fixtures, range/permission/publication tests |
+| New `tests/test_git_evidence.py` and `tests/_git_evidence_helpers.py` | Isolated Git fixtures, range/permission/local-ref tests |
 | Existing config/workflow/ticket tests; new `tests/ui/git_evidence.spec.ts` | Authority, persistence, protocol, UI, and packaging gates |
 
 Keep Git and ticket service code separated by typed inputs/results. Do not put subprocess or network work into Pydantic validators, Jinja templates, or `evaluate_transition`. Do not change the Local storage port: existing `put_artifact`, `read_artifact`, `apply`, and operation receipts are sufficient.
@@ -73,15 +82,15 @@ These are concrete implementation choices within the approved design:
 
 1. `FieldDefinition.artifact_format: Literal["git-change"] | None = None`. Only `type="artifact"` may set it. An omitted format is an ordinary artifact.
 2. `TeamConfig.git_publication: GitPublicationPolicy | None = None`. It describes the existing `workspace_path`, not a second workspace or auto-discovered Git root.
-3. Publication modes are `local` and `remote`. Allowed ref restrictions are exact `refs/heads/...` / `refs/tags/...` values or a single trailing `/*` prefix pattern; empty restrictions are allowed only in local mode.
-4. A remote policy pins a remote alias and credential-free endpoint. Read-only verification supports approved HTTPS, SSH, and explicitly configured local bare-repository endpoints. File endpoints are useful for isolated tests and are still explicitly approved paths, not caller-controlled URLs.
-5. Authentication modes are `anonymous`, `credential-manager`, and `ssh-agent`; no arbitrary helper command, shell fragment, private key, password, token, or URL password is accepted in configuration or tool input. SSH uses an explicit existing `known_hosts` path and noninteractive strict host verification. Credentialed modes must also satisfy the existing job Git-credential eligibility boundary.
+3. The only publication mode is `local`. Allowed local-ref restrictions are exact `refs/heads/...` / `refs/tags/...` values or a single trailing `/*` prefix pattern; empty restrictions are allowed.
+4. `GitPublicationPolicy` contains only `mode: Literal["local"]` and `allowed_refs: tuple[StrictStr, ...] = ()`, with `extra="forbid"`. Reject remote mode and remote/authentication fields; do not silently discard them or retain a dormant transport branch.
+5. Evidence capture never discovers or contacts a remote, invokes credential helpers or SSH, reads authentication material, or grants credentials. Project push obligations stay in project instructions. Retain existing runtime credential-withholding behavior unchanged for other operations.
 6. Capture accepts full lowercase hexadecimal Git object IDs of one repository's object format, not revision expressions. Git resolves them to commit objects and verifies ancestry. `publication_ref` is optional only for an unrestricted local policy; otherwise it must match the configured allowlist.
 7. Use a canonical JSON manifest as the retained artifact's content, with the exact patch encoded as strict base64. Media type: `application/vnd.flowgency.git-change+json`. Download decodes the exact patch as `application/octet-stream` with an attachment filename ending `.patch`.
 8. Trust is established by a `git-evidence-captured` audit event written only by the capture service. Media type, extension, caller-provided JSON, and field names never establish trust.
 9. Capture increments ticket revision and records an operation receipt but changes no state, field, assignment, or active-run ownership. Agents use the returned current ticket version for the subsequent transition.
 10. Working limits: 512 commits, 1,024 changed paths, 30 seconds per Git subprocess, 120 seconds total per capture, 640 KiB of patch bytes, and 1 MiB for the complete retained manifest. Preview at most 200 KiB of patch data and 2,000 diff lines; provide the entire retained patch download. Limit failures are explicit, never silently incomplete evidence.
-11. Remote verification observes an approved remote ref with `ls-remote` but never fetches into the source repository or a mirror. If the remote tip differs from the selected end and the local graph cannot prove ancestry, return `git-evidence-verification-incomplete`. An authorized workflow may refresh its repository separately and retry; this tool does not perform that work.
+11. Local-ref verification retains the observed ref object and peeled commit IDs. If the local graph cannot prove ancestry because objects are missing, return `git-evidence-verification-incomplete`. Never fetch. `GitPublicationReceipt.mode` is `Literal["local"]` and it has no remote identity. The viewer labels the evidence `Local commits` and never claims a verified push.
 
 ### Task 1: Add the Generic Artifact Format and Project Policy
 
@@ -94,7 +103,7 @@ These are concrete implementation choices within the approved design:
 
 **Interfaces:**
 - Consumes: `FieldDefinition`, `DraftField`, `TeamConfig`, `ConfigStore.patch`, `ConfigSnapshot`, and `WorkflowBinding`.
-- Produces: `GitRemotePolicy`, `GitPublicationPolicy`, `git_policy_digest(policy: GitPublicationPolicy | None) -> str | None` in `flowgency/git_evidence/models.py`.
+- Produces: `GitPublicationPolicy`, `git_policy_digest(policy: GitPublicationPolicy | None) -> str | None` in `flowgency/git_evidence/models.py`.
 - Produces: `patch_team_git_publication(store: ConfigStore, expected_revision: str, team_id: str, policy: GitPublicationPolicy | None) -> ConfigSnapshot` in `configuration/patches.py`.
 - Produces: optional `artifact_format` on field models and editor drafts, and optional `git_publication` on the parsed team model. Missing policy remains missing.
 
@@ -154,43 +163,36 @@ Import `model_serializer` from Pydantic in the owning file; this method belongs 
 - [ ] **Step 3: Define and test explicit publication policies.** Add pure models with these exact fields:
 
 ```python
-class GitRemotePolicy(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    name: StrictStr
-    url: StrictStr
-    auth: Literal["anonymous", "credential-manager", "ssh-agent"] = "anonymous"
-    known_hosts: Path | None = None
-
-
 class GitPublicationPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    mode: Literal["local", "remote"]
+    mode: Literal["local"]
     allowed_refs: tuple[StrictStr, ...] = ()
-    remote: GitRemotePolicy | None = None
 ```
 
-Add validators: `local` forbids `remote`; `remote` requires a remote and nonempty `allowed_refs`; duplicate refs are rejected. Validate full ref syntax, rejecting controls, backslash, `..`, `@{`, `:`, wildcard except final `/*`, empty components, `.lock` suffixes, and malformed `refs/heads/` or `refs/tags/` names. Validate remote alias as a safe single Git config subsection and URL via `urllib.parse`, not a regex-only URL parser. Reject query/fragment, passwords, HTTPS userinfo, relative file paths, unknown transports, and shell/helper URL forms. SSH may contain only a username, requires `ssh-agent` plus `known_hosts`, and never accepts a password. `credential-manager` is HTTPS-only; file endpoints are anonymous-only.
+Reject duplicate refs. Validate full ref syntax, rejecting controls, backslash, `..`, `@{`, `:`, wildcard except final `/*`, empty components, `.lock` suffixes, and malformed `refs/heads/` or `refs/tags/` names. Remote mode and every additional remote/authentication field are invalid. Do not add URL, known-hosts, SSH-agent, or credential-manager validators.
 
-Resolve config-owned `known_hosts` and file endpoint paths against the config directory through existing canonical path validation, retaining lexical reparse checks. Model construction does not touch the network, invoke Git, or read secrets. Canonical digest uses `json.dumps(policy.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))` and SHA-256; `None` returns `None`.
+Model construction performs no IO. Canonical digest uses `json.dumps(policy.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))` and SHA-256; `None` returns `None`. Task 3 removes remote-only normalization/path validators created under the superseded contract; ordinary path validation remains unchanged.
 
 ```python
 def test_local_git_policy_needs_no_remote():
     from flowgency.git_evidence.models import GitPublicationPolicy
 
     policy = GitPublicationPolicy(mode="local")
-    assert policy.remote is None
     assert policy.allowed_refs == ()
 
 
-def test_remote_git_policy_cannot_omit_publication_destination():
+def test_remote_git_policy_is_not_supported():
     from pydantic import ValidationError
     from flowgency.git_evidence.models import GitPublicationPolicy
 
     with pytest.raises(ValidationError):
-        GitPublicationPolicy(mode="remote")
+        GitPublicationPolicy.model_validate({
+            "mode": "remote", "allowed_refs": ["refs/heads/main"],
+            "remote": {"name": "origin", "url": "https://example.invalid/project.git"},
+        })
 ```
 
-Place these pure tests in the new `tests/test_git_evidence.py` file (created with this task). Run `python -m pytest tests/test_git_evidence.py -k policy -q` after adding each validation group. Include table-driven invalid URLs/refs and an ordinary team whose policy remains `None`.
+    Place these pure tests in the new `tests/test_git_evidence.py` file (created with this task). Run `python -m pytest tests/test_git_evidence.py -k policy -q` after adding each validation group. Include table-driven invalid refs/unsupported fields and an ordinary team whose policy remains `None`.
 
 - [ ] **Step 4: Add a revision-checked canonical policy patch and context fence.**
 
@@ -412,7 +414,7 @@ Use sentinel scripts to prove hostile diff helpers, hooks, fsmonitor, SSH comman
 
 Run: `python -m pytest tests/test_git_evidence.py tests/test_runtime_process_lifecycle.py -q`.
 
-- [ ] **Step 6: Commit and review the subprocess/read boundary before adding remote verification.**
+- [ ] **Step 6: Commit and review the subprocess/read boundary before local-ref verification.**
 
 ```powershell
 git add flowgency/git_evidence/models.py flowgency/git_evidence/git.py flowgency/git_evidence/capture.py flowgency/jobs/processes.py tests/_git_evidence_helpers.py tests/test_git_evidence.py tests/test_runtime_process_lifecycle.py
@@ -421,24 +423,31 @@ git commit -m "feat(evidence): capture bounded committed git diffs"
 
 Review subprocess containment, exact bytes, denied paths, linked worktrees, no ambient config authority, no silent empty success, and unchanged ordinary runtime supervision. This is a security-sensitive review gate.
 
-### Task 3: Verify Project-Defined Publication Without Mutating Git
+### Task 3: Restrict Verification to Local Commits and Refs
 
 **Files:**
-- Create: `flowgency/git_evidence/publication.py`.
+- Modify: `flowgency/git_evidence/publication.py` (already created under the superseded remote contract).
 - Modify: `flowgency/git_evidence/models.py`, `flowgency/git_evidence/git.py`.
-- Test: `tests/test_git_evidence.py`, `tests/_git_evidence_helpers.py`.
+- Modify: `flowgency/configuration/models.py`, `flowgency/configuration/paths.py` only where Task 1 added remote-only plumbing.
+- Test: `tests/test_git_evidence.py`, `tests/_git_evidence_helpers.py`, `tests/test_config_patches.py`, `tests/test_workflow_configuration.py`, and existing config tests owning the removed remote path validators.
 
 **Interfaces:**
-- Consumes: Task 1's `GitPublicationPolicy`, Task 2's `GitRepository`, `GitRangeCapture`, supervised runner, and a trusted boolean credential-eligibility decision.
+- Consumes: Task 1's revised local-only `GitPublicationPolicy`, Task 2's `GitRepository`, `GitRangeCapture`, and supervised runner. No credential-eligibility argument remains.
 - Produces: frozen `GitRefObservation(ref_object_id: str, commit_id: str)` in `models.py`, preserving annotated-tag identity separately from its peeled commit.
-- Produces: frozen `GitPublicationReceipt(mode: Literal["local", "remote"], policy_digest: str, publication_ref: str | None, ref_object_id: str | None, observed_commit: str, verified_at: datetime, remote_identity: str | None)`.
-- Produces: `verify_publication(repository: GitRepository, captured: GitRangeCapture, policy: GitPublicationPolicy, *, publication_ref: str | None, credentials_allowed: bool, lifecycle: RuntimeProcessLifecycle, deadline: float, now: datetime) -> GitPublicationReceipt`.
+- Produces: frozen `GitPublicationReceipt(mode: Literal["local"], policy_digest: str, publication_ref: str | None, ref_object_id: str | None, observed_commit: str, verified_at: datetime)`.
+- Produces: `verify_publication(repository: GitRepository, captured: GitRangeCapture, policy: GitPublicationPolicy | None, *, publication_ref: str | None, lifecycle: RuntimeProcessLifecycle, deadline: float, now: datetime) -> GitPublicationReceipt`.
 - Produces: `resolve_publication_ref(repository: GitRepository, ref_name: str, *, lifecycle: RuntimeProcessLifecycle, deadline: float) -> GitRefObservation`, using a validated source ref and returning its full ref object and peeled commit IDs.
 
-- [ ] **Step 1: Add the local-only regression and implement the no-network path.**
+- [ ] **Step 1: Regress rejection of the superseded remote contract.**
+
+Add the valid-under-old-code remote example from Task 1 as a rejection test, plus `mode: local` with each unsupported `remote`, `auth`, `known_hosts`, and agent-endpoint field. Exercise a real revision-checked config patch and assert the file is unchanged after invalid policy. Run `python -m pytest tests/test_git_evidence.py tests/test_config_patches.py -k policy -q` before removing support; record the real failures without converting the old remote-success tests into false RED evidence.
+
+Keep the `git_publication` entry and local policy digest/context fence. Remove `GitRemotePolicy`, remote-only config parsing/path validators, obsolete error codes, adapter functions used only for remote config/transport, and the remote verifier/authentication constructors. Preserve shared ref/object validation, repository isolation, trusted Git executable selection, byte budgets, and ordinary config/path behavior. Do not retain ignored credential arguments, `remote_identity=None` compatibility fields, or dormant transport branches in this unshipped feature. Rerun the new rejection tests immediately after the first implementation edit.
+
+- [ ] **Step 2: Complete and exercise the local-only verifier.**
 
 ```python
-def test_local_publication_does_not_query_a_remote(monkeypatch, tmp_path):
+def test_local_publication_accepts_unpushed_commits(tmp_path):
     import time
     from datetime import datetime, timezone
     from flowgency.git_evidence import publication
@@ -451,9 +460,6 @@ def test_local_publication_does_not_query_a_remote(monkeypatch, tmp_path):
 
     fixture = create_git_repository(tmp_path / "repo")
     lifecycle = RuntimeProcessLifecycle(job_id="capture-test", generation="local-only")
-    def reject_remote(*arguments, **keywords):
-        pytest.fail("Local policy attempted remote verification")
-    monkeypatch.setattr(publication, "observe_remote_ref", reject_remote)
     with open_git_repository(fixture.root, scratch_root=tmp_path / "scratch", lifecycle=lifecycle) as repository:
         deadline = time.monotonic() + 120
         captured = capture_committed_range(
@@ -462,64 +468,33 @@ def test_local_publication_does_not_query_a_remote(monkeypatch, tmp_path):
         )
         receipt = publication.verify_publication(
             repository, captured, GitPublicationPolicy(mode="local"),
-            publication_ref=None, credentials_allowed=False,
+            publication_ref=None,
             lifecycle=lifecycle, deadline=deadline, now=datetime.now(timezone.utc),
         )
     assert receipt.mode == "local"
-    assert receipt.remote_identity is None
     assert receipt.observed_commit == fixture.end_commit
 ```
 
-Define `observe_remote_ref(repository: GitRepository, remote: GitRemotePolicy, ref_name: str, *, credentials_allowed: bool, lifecycle: RuntimeProcessLifecycle, deadline: float) -> GitRefObservation` in `publication.py` before using it. Run `python -m pytest tests/test_git_evidence.py -k local_publication -q`, then implement local verification. If restricted refs exist, require a matching supplied ref, resolve/peel it safely, and prove the end is reachable. Without ref restrictions the verified commit range is sufficient and `ref_object_id` is `None`.
+Run `python -m pytest tests/test_git_evidence.py -k local_publication -q`. If restricted refs exist, require a matching supplied ref, resolve/peel it safely, and prove the end is reachable. Without ref restrictions the verified commit range is sufficient and `ref_object_id` is `None`. With an explicit allowed ref, record its object and peeled commit IDs. An incomplete graph yields `git-evidence-verification-incomplete`; a complete graph disproving ancestry yields `git-evidence-not-published`, with a fixed message describing a local-ref mismatch rather than an unverified push. Missing policy remains an actionable configuration error.
 
-- [ ] **Step 2: Add a real isolated remote fixture and prove publication is observed, not inferred.**
+- [ ] **Step 3: Prove transport independence and immutable local observations.**
 
-Extend the helper with `create_bare_remote(root: Path) -> Path`, running `git init --bare --initial-branch=main` only in `tmp_path`. Configure that path as the fixture repository's `origin`. Build policy with its absolute `file:` URI and allowed ref `refs/heads/main`. Test verification before and after the fixture explicitly pushes; capture itself must never push.
+Use real temporary repositories for allowed/disallowed heads, trailing-prefix allowlists, lightweight/annotated tags, packed refs, missing refs/objects, ancestor versus unrelated end commits, and absent policy. Preserve source bytes/refs/status before and after verification. Cover unsupported symbolic/reparse refs with explicit errors rather than reading outside the authorized repository.
 
-```python
-remote = create_bare_remote(tmp_path / "remote.git")
-git_command(fixture.root, "remote", "add", "origin", str(remote))
-policy = GitPublicationPolicy(
-    mode="remote", allowed_refs=("refs/heads/main",),
-    remote=GitRemotePolicy(name="origin", url=remote.as_uri()),
-)
-git_command(fixture.root, "push", "origin", f"{fixture.base_commit}:refs/heads/main")
-```
+On an otherwise successful fixture, change remote URLs, stale tracking refs, source credential-helper and `core.sshCommand` settings, and ambient SSH/credential variables. Local verification must still succeed without invoking those programs or a transport subcommand. Use controlled sentinel helpers/runner observation with a positive control, never user credentials, an actual network server, or the live origin. Compare the same receipt with a fixed `now` value. A receipt remains unchanged when the local ref moves later; a future capture observes its new local state. Do not replace behavioral checks with greps for absent implementation names.
 
-Use `verify_publication` with the same typed arguments as the local test and expect `git-evidence-not-published` while only the base is published. Push the end and expect the returned `observed_commit` to equal that exact object ID. Move a local `refs/remotes/origin/main` to the end without pushing and prove it cannot make the failing case pass. Advance the remote with another known commit and prove ancestor publication succeeds. If a newly observed remote tip is absent locally, expect `git-evidence-verification-incomplete`, not a fetch or local-mode fallback.
+Remove superseded remote-success/transport-quoting tests and remote-only fixture helpers. Retain local/capture/path safety coverage. Any test that already passes is regression evidence, not a manufactured pre-change failure.
 
-- [ ] **Step 3: Implement the remote path with a pinned endpoint and strict authentication boundaries.**
+- [ ] **Step 4: Run the affected slice and commit.**
 
-Validate the source repository's configured alias using non-including raw config reads; require exactly one normalized fetch URL matching the policy's approved endpoint. Never let `insteadOf`, an extra fetch URL, `.git/config` credential helpers, or an agent argument choose the destination. Resolve remote observation in the clean temporary Git context using:
-
-For an explicitly configured local bare remote, normalize an absolute native fetch path and its equivalent `file:` URI to the same canonical path after lexical/reparse validation. Reject relative paths and network-host `file:` URLs rather than silently broadening the destination.
-
-```python
-remote_args = ("ls-remote", "--exit-code", "--refs", approved_url, approved_ref)
-```
-
-Use exact ref matching on the response and validate the full object ID. For tags use one observation without `--refs`, requesting both `approved_ref` and `approved_ref + "^{}"`; validate and retain both advertised object IDs. A lightweight tag has the same ref and commit ID. Do not treat an annotated tag-object hash as a commit. Bound output and total elapsed time. Disable HTTP redirects; do not follow a redirect to a different server. File URLs must refer to the approved absolute bare repository and pass the same lexical/reparse checks, never a caller-selected path.
-
-Use anonymous transport by default. Explicit `credential-manager` mode enables only the installed, trusted Git Credential Manager executable, `credential.useHttpPath=true`, and noninteractive operation; do not accept a command string or inherit helper configuration. Explicit `ssh-agent` mode uses the configured known-hosts file, `BatchMode=yes`, `StrictHostKeyChecking=yes`, an empty SSH config, and the explicitly allowed agent socket. No prompt, host-key acceptance, private-key file discovery, fallback identity, or password input is permitted. Reject credentialed verification when `credentials_allowed` is false. These policies authorize read-only verification of that destination only, not arbitrary network or workspace permissions.
-
-If observed commit equals end, the publication proof is direct. Otherwise prove `end` is an ancestor of the observed commit in the local object view. An incomplete/shallow/missing graph yields `git-evidence-verification-incomplete`; a complete graph disproving ancestry yields `git-evidence-not-published`. Never fetch, update refs, rely on cached tracking refs, or push. Receipt records the observed ref/commit/time and a credential-free remote identity plus policy digest.
-
-- [ ] **Step 4: Test failures and immutable receipt semantics.**
-
-Parameterize remote alias retargeting, different branch, malformed advertisement, multiple URL ambiguity, bad credentials, unreachable endpoint, redirect, timeout, host-key failure, disallowed ref, and missing policy. Use fake runner responses for HTTPS/SSH failures and a real local bare remote for Git reachability; do not contact the user's `origin`. Assert no secret appears in exception text, result JSON, or repr.
-
-After a successful receipt, move the remote and verify the stored receipt still describes its original observation. Its meaning is publication at capture time, not permanent membership. A future capture observes new state; reading an existing artifact does not contact any remote.
-
-Run: `python -m pytest tests/test_git_evidence.py -q`.
-
-- [ ] **Step 5: Commit and review the publication boundary.**
+Run `python -m pytest tests/test_git_evidence.py tests/test_config_patches.py tests/test_workflow_configuration.py tests/test_config.py tests/test_config_normalization.py tests/test_config_store.py -q`, plus the existing file that owns the removed raw path-validation tests. Run the local Git evidence slice in the retained WSL venv as a portability check; no dependency/bootstrap repetition is needed. No full-suite run belongs to this task.
 
 ```powershell
-git add flowgency/git_evidence/models.py flowgency/git_evidence/git.py flowgency/git_evidence/publication.py tests/test_git_evidence.py tests/_git_evidence_helpers.py
-git commit -m "feat(evidence): verify project git publication"
+git add flowgency/git_evidence flowgency/configuration tests/test_git_evidence.py tests/_git_evidence_helpers.py tests/test_config_patches.py tests/test_workflow_configuration.py
+git commit -m "refactor(evidence): keep verification local"
 ```
 
-Review that local mode never enters remote code, remote mode never downgrades, no workspace refs change, observed ref identity is pinned, and authenticated read-only work cannot borrow credentials withheld from its job.
+Stage only files changed for this task, including any affected existing config tests. Review removal of all unshipped remote policy/transport plumbing, unchanged unrelated credential boundaries, local receipt semantics, ref confinement, no source mutations, and regression coverage. The earlier remote quoting/agent-source findings are resolved by removing those paths, not by adding endpoint configuration or repairing authentication.
 
 ### Task 4: Bind Captures to Trusted Ticket Receipts and Enforce Them
 
@@ -621,7 +596,7 @@ Expected before implementation: missing capture API, not a live runtime dependen
 
 Use strict, frozen Pydantic models with `extra="forbid"`. The manifest has `schema_version: Literal[1]`, `repository_id`, `workspace_identity`, `base_commit`, `end_commit`, `commit_ids`, `files`, `patch_b64`, `patch_sha256`, `team_id`, `workflow_id`, `ticket_id`, `binding_id`, `agent_name`, `job_id`, `captured_at`, `policy_digest`, a sanitized `policy_snapshot`, and `publication: GitPublicationReceipt`.
 
-`workspace_identity` is the SHA-256 of the platform-normalized configured workspace path, not the exposed raw path. `policy_snapshot` contains only mode, allowed refs, sanitized remote identity, and authentication profile name; no credentials, local credential-file paths, or environment. `repository_id` is Task 2's stable authorized-repository identity. Enforce full-object/digest syntax, timezone-aware timestamps, counts, strict base64, decoded patch length, and exact `patch_sha256`. Check total canonical JSON length with `RetainedArtifact.create`; return an artifact-too-large error rather than truncating.
+`workspace_identity` is the SHA-256 of the platform-normalized configured workspace path, not the exposed raw path. `policy_snapshot` contains only `mode: local` and allowed local refs; no remote identity, authentication profile, credential paths, or environment. `repository_id` is Task 2's stable authorized-repository identity. Enforce full-object/digest syntax, timezone-aware timestamps, counts, strict base64, decoded patch length, and exact `patch_sha256`. Check total canonical JSON length with `RetainedArtifact.create`; return an artifact-too-large error rather than truncating.
 
 The event's `data["capture"]` contains a strict `GitCaptureReceipt`: `artifact_id`, `repository_id`, `workspace_identity`, `policy_digest`, `workflow_digest`, `context_digest`, intended `transition_id`, intended `field_id`, `agent_name`, and `job_id`. The outer event supplies its ID and timestamp. It intentionally duplicates only identity/check fields, not patch bytes, commit lists, or the full manifest. Generic upload/report/update commands cannot submit this event kind or shape.
 
@@ -640,11 +615,11 @@ artifact = RetainedArtifact.create(
 
 Refactor `TicketAccessRegistry.validate_context` minimally into `resolve_context`, retaining all existing team/job/session, immutable-digest, running-state, and run-fingerprint checks under the same job lock. Add a return of the validated `JobRecord`; the old method continues to return `None`.
 
-The capture API requires an authenticated agent and active ticket ownership. Preflight a current ticket/workflow/config snapshot, confirm the requested transition is available from the current state, and confirm its requested output is an artifact with `artifact_format="git-change"`. Reject missing policy. Resolve the actual running job via the injected registry, and require its `workspace_root` to match current team configuration. Check both its launch-time policy and current effective policy for reads. Credentialed remote access additionally requires `grants_write_on` at the workspace root in both policies, preserving the existing credential-withholding boundary.
+The capture API requires an authenticated agent and active ticket ownership. Preflight a current ticket/workflow/config snapshot, confirm the requested transition is available from the current state, and confirm its requested output is an artifact with `artifact_format="git-change"`. Reject missing policy. Resolve the actual running job via the injected registry, and require its `workspace_root` to match current team configuration. Check both its launch-time policy and current effective policy for reads. Capture uses no credentials and adds no workspace-write eligibility gate; preserve existing credential-withholding behavior elsewhere unchanged.
 
 Before expensive work, consult the existing provider operation receipt after validating identity/session/team/binding. A matching replay returns the saved artifact and capture version without calling Git or contacting a remote. A reused operation ID with different request digest conflicts. Do not reject a genuine accepted replay solely because a later policy/definition changed; keep access and binding checks in force.
 
-Release config/ticket locks during bounded Git and remote reads. Use a private scratch path under the job store's canonical artifact area, validate its confinement, and create a distinct capture generation. Call Tasks 2-3 and construct the retained artifact. Then reacquire the existing workflow/config mutation guard, revalidate session, assignment, revision, definition digest, context digest, workspace and policy, and perform `provider.apply`. Inside its mutation callback, store the immutable artifact and append the trusted event. The artifact and ticket use separate existing locks: do not take them in reverse order elsewhere. A failed ticket write may leave an unreferenced immutable blob but must never leave an accepted output or success receipt.
+Release config/ticket locks during bounded local Git reads. Use a private scratch path under the job store's canonical artifact area, validate its confinement, and create a distinct capture generation. Call Tasks 2-3 without credential or remote arguments and construct the retained artifact. Then reacquire the existing workflow/config mutation guard, revalidate session, assignment, revision, definition digest, context digest, workspace and policy, and perform `provider.apply`. Inside its mutation callback, store the immutable artifact and append the trusted event. The artifact and ticket use separate existing locks: do not take them in reverse order elsewhere. A failed ticket write may leave an unreferenced immutable blob but must never leave an accepted output or success receipt.
 
 Construct `GitCaptureResult` from the committed operation result and its capture event's stored digests. A version conflict after capture discards the proposed event; do not force a transition or retry with a guessed new version. Wire `registry.resolve_context` into both `web/dependencies.py` and `_ticket_runtime` in `jobs/execution.py`. Recovery-only constructors may leave capture disabled because they never issue capture operations.
 
@@ -661,7 +636,7 @@ Call this validator for non-null Git-format field values in:
 - creation values, which cannot cite a receipt on a not-yet-existing ticket and therefore reject non-null Git evidence;
 - other existing field-writing paths found by code-usage lookup, without changing ordinary artifact behavior.
 
-Map failures consistently: missing/config-changed policy and stale versions use `TicketConflict` (409); denied paths, credentials, or cross-ticket identity use `TicketForbidden` (403); missing stored artifacts use `TicketNotFound` (404); capture/artifact limits use `TicketTooLarge` (413); invalid ranges, forged/untrusted receipts, and semantic evidence mismatches use `TicketEvidenceInvalid` (422); unavailable Git/network/verification graph uses `StorageUnavailable` (503). Corrupt persisted storage retains its existing corruption error. Pass only fixed public messages and codes, never raw Git stderr or raw rejected credentials. All failures occur before the state/field mutation commits.
+Map failures consistently: missing/config-changed policy and stale versions use `TicketConflict` (409); denied paths or cross-ticket identity use `TicketForbidden` (403); missing stored artifacts use `TicketNotFound` (404); capture/artifact limits use `TicketTooLarge` (413); invalid ranges, forged/untrusted receipts, and semantic evidence mismatches use `TicketEvidenceInvalid` (422); unavailable Git/local verification graph uses `StorageUnavailable` (503). Corrupt persisted storage retains its existing corruption error. Pass only fixed public messages and codes, never raw Git stderr. All failures occur before the state/field mutation commits.
 
 ```python
 class TicketEvidenceInvalid(TicketStorageError):
@@ -749,7 +724,7 @@ test('git artifact format survives authoring and reload', async ({ page }) => {
   await page.goto('/admin/workflow-library/blueprints/delivery');
   await openTransitions(page);
   await page.getByLabel('Add output', { exact: true }).click();
-  await page.getByLabel('New field label').fill('Published implementation');
+    await page.getByLabel('New field label').fill('Committed implementation');
   await page.getByLabel('New field type').selectOption('artifact');
   await page.getByLabel('New artifact format').selectOption('git-change');
   await page.getByRole('button', { name: 'Create and add', exact: true }).click();
@@ -757,7 +732,7 @@ test('git artifact format survives authoring and reload', async ({ page }) => {
   await saveEditor(page);
   await page.reload();
   const payload = await readEditorPayload(page);
-  const field = payload.draft.fields.find((row: { label: string }) => row.label === 'Published implementation');
+    const field = payload.draft.fields.find((row: { label: string }) => row.label === 'Committed implementation');
   expect(field.type).toBe('artifact');
   expect(field.artifact_format).toBe('git-change');
   await openTransitions(page);
@@ -771,9 +746,9 @@ Run this test before the JavaScript edit to observe the absent control, then aft
 
 - [ ] **Step 3: Teach setup and agents the generic Git-evidence sequence.**
 
-Document the actual new tool signature, its returned artifact/version, explicit commit endpoint selection, and two separate actions: perform project-authorized commit/publication work, then capture and submit evidence. Explain that capture does not commit, push, fetch, or make unrelated commits attributable to a ticket. A report, an uploaded patch, and a remote web URL are not substitutes for a Git-format result.
+Document the actual new tool signature, its returned artifact/version, explicit commit endpoint selection, and two separate actions: perform project-authorized commit work (and push separately if project instructions require it), then capture and submit local evidence. Explain that capture does not commit, push, fetch, verify a push, or make unrelated commits attributable to a ticket. A report, an uploaded patch, and a remote web URL are not substitutes for a Git-format result.
 
-In setup's definition process, ask whether each produced artifact requires Git evidence. For code-producing projects, propose the corresponding output format and project-local publication policy for approval. Do not add a required Git field to every shipped Software delivery or Research transition. Preserve the user's existing live configured library/config; setup writes only through its normal approved flow.
+In setup's definition process, ask whether each produced artifact requires Git evidence. For code-producing projects, propose the corresponding output format and local commit/ref policy for approval. Remote push obligations remain instructions, not evidence configuration. Do not add a required Git field to every shipped Software delivery or Research transition. Preserve the user's existing live configured library/config; setup writes only through its normal approved flow.
 
 Show these exact canonical examples in `kb/configuration.md` and a commented example in `config.yaml.example`:
 
@@ -785,12 +760,8 @@ git_publication:
 
 ```yaml
 git_publication:
-  mode: remote
+    mode: local
   allowed_refs: [refs/heads/main, 'refs/heads/feature/*']
-  remote:
-    name: origin
-    url: https://example.invalid/project.git
-    auth: anonymous
 ```
 
 Show a generic artifact field, independent of workflow/agent names:
@@ -798,14 +769,14 @@ Show a generic artifact field, independent of workflow/agent names:
 ```yaml
 fields:
   - id: implementation
-    label: Published implementation
+    label: Committed implementation
     type: artifact
     artifact_format: git-change
 ```
 
-Document exact policy authentication options, no implicit credential grant, noninteractive SSH host checks, `known_hosts` ownership, the missing-local-graph error, and snapshot-at-verification-time semantics. Runtime never parses the constitution directly. Update package-owned and discovery skill copies and retain wheel/parity tests.
+Document the local-only schema, optional ref restrictions, missing-local-graph error, and local snapshot-at-verification-time semantics. There are no remote/authentication options and no verified-push status. Runtime never parses the constitution directly. Update the package-owned skill source reached by the discovery symlink and retain wheel/parity tests.
 
-Execution preflight ruling, approved by the user on 2026-09-18: do not add exact-text guidance assertions. Use the policy, service, and tool tests to prove local-only support, explicit approved destinations, and failure without policy. Use isolated consumer exercises under the writing-skills workflow to verify that a local-only project does not trigger a push, a remote-policy project selects its approved ref, and absent policy leads to a configuration blocker rather than an invented grant. Provide typed mocked tool responses only; no live project tools or user agents. Retain prompts, observed tool payloads, and outcomes in the task report. Packaging parity proves delivery of those instructions, not their behavioral effect.
+Execution preflight ruling, approved by the user on 2026-09-18: do not add exact-text guidance assertions. Use policy, service, and tool tests to prove local support, approved local refs, rejection of remote/authentication configuration, and failure without policy. Use isolated consumer exercises under the writing-skills workflow to verify that a local-only project does not trigger a push, a project requiring push in its instructions does not invent a remote verification tool/config field, and absent policy leads to a configuration blocker rather than an invented grant. Provide typed mocked tool responses only; no live project tools or user agents. Retain prompts, observed tool payloads, and outcomes in the task report. Packaging parity proves delivery of those instructions, not their behavioral effect.
 
 - [ ] **Step 4: Run adapters, authoring, and packaged-guide gates; commit and review.**
 
@@ -814,7 +785,7 @@ python -m pytest tests/test_ticket_mcp.py tests/test_ticket_http_transport.py te
 node ./node_modules/@playwright/test/cli.js test tests/ui/workflow_library.spec.ts
 ```
 
-Stage only the files in this task. Commit implementation/adapters with `feat(workflows): expose git evidence authoring`; commit user-facing documentation separately with `docs(workflows): explain git evidence publication`. Review the tool allowlist/schema, no caller-controlled authority, preserved required flags, and parity between documented and implemented policy fields.
+Stage only the files in this task. Commit implementation/adapters with `feat(workflows): expose git evidence authoring`; commit user-facing documentation separately with `docs(workflows): explain committed git evidence`. Review the tool allowlist/schema, no caller-controlled authority, preserved required flags, and parity between documented and implemented policy fields.
 
 ### Task 6: Render Immutable Diffs and Link Their Exact Provenance
 
@@ -908,7 +879,7 @@ Register the new router through the app's existing registration pattern. Do not 
 
 - [ ] **Step 4: Build the unified-diff page using escaped semantic HTML.**
 
-Use the existing application shell and Lucide icons. The page is an unframed work surface, with compact repository/revision/publication metadata, file navigation, download action, and one diff section per file. Use indexed anchors such as `change-0`; do not place raw paths in DOM IDs.
+Use the existing application shell and Lucide icons. The page is an unframed work surface, with compact repository/revision/local-ref metadata, file navigation, download action, and one diff section per file. Label the evidence `Local commits` and never show a remote-publication status. Use indexed anchors such as `change-0`; do not place raw paths in DOM IDs.
 
 ```jinja2
 <nav aria-label="Changed files">
@@ -942,7 +913,7 @@ Use Jinja autoescaping; no `safe`, raw HTML from the parser, or syntax highlight
 
 - [ ] **Step 5: Add verified links to current fields, History, and producing Job Detail.**
 
-In the shared ticket detail projection, verify each distinct candidate artifact at most once per request and cache by artifact ID within that ticket. Derive summaries from retained manifests and receipts without checking today's remote or requiring today's policy. Attach safe `evidence_issue` values to failures so one bad artifact does not erase other ticket fields. Keep audit `data` unmodified; populate `git_outputs` separately for accepted transitions' artifact output values. A prior ordinary artifact can still be shown with its ordinary download behavior when no trusted Git receipt exists; it must not receive a verified label.
+In the shared ticket detail projection, verify each distinct candidate artifact at most once per request and cache by artifact ID within that ticket. Derive summaries from retained manifests and receipts without Git/network work or requiring today's policy. Attach safe `evidence_issue` values to failures so one bad artifact does not erase other ticket fields. Keep audit `data` unmodified; populate `git_outputs` separately for accepted transitions' artifact output values. A prior ordinary artifact can still be shown with its ordinary download behavior when no trusted Git receipt exists; it must not receive a verified label.
 
 Extend `render_value(field_type, value, git_evidence=None)` so a verified evidence value shows `View diff` and `Download patch`; ordinary artifacts retain their existing links. Use the current field summary for Overview and each event's summary map for History. After a format declaration is removed, a valid captured historical output can still link from its trusted receipt. Do not synthesize current field values from that history.
 
@@ -1072,13 +1043,13 @@ Include only this fixture's reviewed snapshots if the existing screenshot conven
 | Requirement | Tasks |
 | --- | --- |
 | Generic fields, required/optional output roles, latest value and historical output retention | Foundation Tasks 1-3 |
-| Optional Git artifact contract and project-defined local/remote policy | 1, 5 |
+| Optional Git artifact contract and project-defined local commit/ref policy | 1, 3, 5 |
 | Exact committed ranges, no dirty-file inference, bounded Git execution | 2 |
-| Explicit remote destination/authentication and observed publication | 3 |
+| Offline local-ref checks; no remote verification or authentication configuration | 3 |
 | Permission, path, job, session, ticket, and policy binding | 2, 3, 4 |
 | Trusted artifacts, no generic-upload spoofing, atomicity, replay, and concurrent changes | 4, 5 |
 | Immutable bytes after ref/repository changes, historical policy receipts | 4, 6 |
 | Viewer/download/current/History/exact-job navigation | 6, 7 |
 | Binary/submodule/empty/oversized/malicious content and accessible responsive UI | 2, 6, 7 |
-| Setup sources, constitution-derived policy, packaged examples/docs | 5, 7 |
+| Setup sources, explicit local-ref policy, project push instructions kept separate, packaged examples/docs | 5, 7 |
 | No backfills, live-data edits, automatic commits/pushes, or permission widening | Every task and whole-feature review |
