@@ -810,6 +810,49 @@ def test_open_refuses_to_write_its_private_view_into_the_workspace(tmp_path):
     assert failure.value.code == "git-evidence-scratch-invalid"
 
 
+def _job_scratch_root(tmp_path: Path, job_id: str, *, depth_padding: int = 0) -> Path:
+    """The scratch root a real job hands capture: the job's own artifact area."""
+    root = tmp_path / "memory" / ".jobs" / "newsletter" / "artifacts" / job_id
+    if depth_padding:
+        root = root / ("d" * depth_padding)
+    return root / "git-evidence"
+
+
+@requires_git
+def test_capture_works_from_a_deep_artifact_root_with_a_normal_job_id(tmp_path):
+    """A 32-hex job id under a deep data root is ordinary, not a fixture luxury."""
+    fixture = create_git_repository(tmp_path / "repo")
+    scratch = _job_scratch_root(tmp_path, "5adf2d3ec7a84811a0197c48dfab2310")
+    scratch.mkdir(parents=True, exist_ok=True)
+
+    captured = _capture(fixture.root, fixture.base_commit, fixture.end_commit, scratch)
+
+    assert captured.commit_ids == (fixture.end_commit,)
+    assert [change.path for change in captured.files] == ["result.txt"]
+
+
+@requires_git
+def test_deeper_than_the_platform_supports_names_the_scratch_location(tmp_path):
+    """Unsupported depth fails as a scratch problem, not a phantom missing object."""
+    fixture = create_git_repository(tmp_path / "repo")
+    padding = max(
+        0,
+        git_module._MAX_WORKING_DIRECTORY_CHARS
+        - len(str(_job_scratch_root(tmp_path, "a" * 32)))
+        + 1,
+    )
+    if padding == 0:
+        pytest.skip("this platform has no reachable working-directory ceiling here")
+    scratch = _job_scratch_root(tmp_path, "a" * 32, depth_padding=padding)
+
+    with pytest.raises(GitEvidenceError) as failure:
+        with open_git_repository(
+            fixture.root, scratch_root=scratch, lifecycle=_lifecycle()
+        ):
+            pass
+    assert failure.value.code == "git-evidence-scratch-invalid"
+
+
 @requires_git
 def test_hostile_source_configuration_neither_runs_nor_redirects_the_read(tmp_path):
     fixture = create_git_repository(tmp_path / "repo")

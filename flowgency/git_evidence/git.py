@@ -35,6 +35,13 @@ STDERR_ALLOWANCE_BYTES = 64 * 1024
 
 _SUPPORTED_OBJECT_FORMATS = {"sha1", "sha256"}
 
+# A process cannot be started with a working directory longer than this, and the
+# private view is read from inside itself. Measured on Windows: CreateProcess
+# accepts 258 characters and rejects 259 with ERROR_DIRECTORY. An authorized but
+# very deep job artifact root therefore has a real ceiling, and it must be named
+# as such rather than surfacing later as a missing object or an unavailable Git.
+_MAX_WORKING_DIRECTORY_CHARS = 258 if os.name == "nt" else 4000
+
 # Only these inherited names survive into a Git subprocess. An allowlist is the
 # only way to be sure no credential, tracing, pager, SSH, or GIT_CONFIG_*
 # injection variable reaches Git, since new ones are added over time.
@@ -164,6 +171,12 @@ def _run_git_raw(
         "core.fsmonitor=false",
         "-c",
         "core.hooksPath=",
+        # The private view lives under the job's own artifact root, which may
+        # legitimately be deeper than Windows' default path budget. Without this
+        # Git refuses to create its own object directories there; it changes no
+        # authority, only which path API Git uses for its own files.
+        "-c",
+        "core.longpaths=true",
         *arguments,
     ]
     try:
@@ -176,6 +189,10 @@ def _run_git_raw(
             output_limit_bytes=output_limit + STDERR_ALLOWANCE_BYTES,
             retain_output_bytes=True,
         )
+    except NotADirectoryError:
+        # The working directory exceeded what this platform can start a process
+        # in. Report the scratch location, not a phantom missing Git.
+        raise GitEvidenceError("git-evidence-scratch-invalid") from None
     except FileNotFoundError:
         raise GitEvidenceError("git-evidence-git-unavailable") from None
     if result.output_limit_exceeded:
@@ -351,8 +368,13 @@ def open_git_repository(
     source_git_dir, common_dir = _resolve_git_directories(validated_workspace)
     _reject_untrusted_object_sources(common_dir)
 
-    session = scratch / f"git-evidence-{uuid.uuid4().hex}"
+    # The parent directory is already the scratch root for this job's evidence,
+    # so the session needs only its own unique name; the shorter it is, the more
+    # of the platform's path budget stays available to Git inside the view.
+    session = scratch / uuid.uuid4().hex
     object_view = session / "view.git"
+    if len(str(object_view)) > _MAX_WORKING_DIRECTORY_CHARS:
+        raise GitEvidenceError("git-evidence-scratch-invalid")
     try:
         for directory in (session / "home" / "config", session / "temp"):
             directory.mkdir(parents=True, exist_ok=True)
@@ -438,7 +460,11 @@ def run_git_exit_code(
     executable = resolve_trusted_executable("git", forbidden_roots=forbidden_roots)
     return _run_git_raw(
         executable,
-        ("--git-dir", str(repository.object_view), *arguments),
+        # The view is named relatively from its own directory. Git holds an
+        # explicit --git-dir to its PATH_MAX budget, which a deep but authorized
+        # job artifact root exhausts long before the filesystem does; naming it
+        # "." keeps the authority exactly where it was, inside the job's area.
+        ("--git-dir", ".", *arguments),
         cwd=repository.object_view,
         env=_git_environment(session, forbidden_roots=forbidden_roots),
         lifecycle=lifecycle,
