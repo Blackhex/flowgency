@@ -39,10 +39,10 @@ transitions:
     name: Submit for review
     from_state: in-progress
     to_state: review
-    inputs:
+    inputs: []
+    outputs:
       - field_id: notes
-        required: false
-    outputs: []
+        required: true
     preconditions: []
     criteria:
       - id: work-complete
@@ -54,9 +54,9 @@ transitions:
     inputs:
       - field_id: approved
         required: true
+    outputs:
       - field_id: review-notes
         required: true
-    outputs: []
     preconditions:
       - field_id: approved
         operator: equals
@@ -66,9 +66,9 @@ transitions:
     name: Return to in progress
     from_state: review
     to_state: in-progress
-    inputs:
+    inputs: []
+    outputs:
       - field_id: review-notes
         required: true
-    outputs: []
     preconditions: []
     criteria: []

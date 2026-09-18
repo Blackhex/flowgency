@@ -276,3 +276,16 @@ def test_start_work_rejects_other_run_when_another_job_is_pending(ticket_job_env
     assert live.active_run is None
     assert live.pending_run is not None
     assert live.pending_run.job_id == handle.job_id
+
+
+def test_ticket_job_task_input_states_the_transition_result_contract(ticket_job_env):
+    env = ticket_job_env
+    ticket = env.create_assigned("builder")
+
+    handle = env.coordinator.submit(env.user, ticket.version, "run-request")
+    record = env.jobs.read(handle)
+
+    assert "Required outputs must be supplied in outputs." in record.spec.task_input
+    assert "Inputs are attempt-only context" in record.spec.task_input
+    assert "reports and logs do not save outputs." in record.spec.task_input
+    assert "Accepted outputs and state commit together." in record.spec.task_input

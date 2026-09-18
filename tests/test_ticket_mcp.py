@@ -46,6 +46,9 @@ def test_mcp_http_lifecycle_persists_mid_run(workflow_env):
                         "ticket_artifact_publish",
                     )
                     catalog = {tool.name: tool for tool in tools.tools}
+                    for name in ("ticket_transition", "ticket_report", "ticket_update"):
+                        assert catalog[name].description
+                        assert catalog[name].description.strip()
                     _assert_response_schema(catalog["ticket_create"].output_schema)
                     _assert_required_properties(
                         catalog["ticket_create"].input_schema,

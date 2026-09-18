@@ -374,6 +374,8 @@ Propose named workflow instances that match the team's work streams. For each pr
 
 Shipped reusable blueprints — including `software-delivery` and `research` from `references/ticket-workflow-steps.md` — have stable IDs that configured instances may reference. Do not generate IDs for the user to name; generate stable hidden IDs for both custom user blueprint definitions and configured workflow instances from approved display names.
 
+When proposing or reviewing a custom workflow blueprint definition, ask what each transition consumes as input, what it produces as durable output, which produced values are required, and whether a transition intentionally produces no results. This applies to every transition in every blueprint; do not assume a transition must always declare an output.
+
 For each approved workflow instance, write it under `teams.<team-id>.workflows`:
 
 ```yaml

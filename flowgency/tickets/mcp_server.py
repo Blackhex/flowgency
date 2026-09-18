@@ -144,6 +144,11 @@ def register_remaining_ticket_tools(server: MCPServer, caller: TicketToolCaller)
         description: str | None = None,
         field_values: dict[str, FieldValue] | None = None,
     ) -> TicketToolResponse:
+        """Explicitly edit ticket title, description, or field values without a transition.
+
+        This is a direct field edit, not a substitute for submitting a required
+        transition output through ticket_transition.
+        """
         return _call(
             caller,
             "update_ticket",
@@ -165,6 +170,11 @@ def register_remaining_ticket_tools(server: MCPServer, caller: TicketToolCaller)
         message: str,
         assessments: tuple[CriterionAssessment, ...] = (),
     ) -> TicketToolResponse:
+        """Record an informational note. Does not mutate ticket fields or state.
+
+        Use this to report a blocker or progress. It never satisfies a required
+        transition output; submit durable results through ticket_transition instead.
+        """
         return _call(
             caller,
             "report_ticket",
@@ -187,6 +197,11 @@ def register_remaining_ticket_tools(server: MCPServer, caller: TicketToolCaller)
         outputs: dict[str, FieldValue] = {},
         assessments: tuple[CriterionAssessment, ...] = (),
     ) -> TicketToolResponse:
+        """Advance a ticket with its declared inputs, durable outputs, and assessments.
+
+        Required outputs must be supplied in outputs. Inputs are attempt-only context;
+        reports and logs do not save outputs. Accepted outputs and state commit together.
+        """
         return _call(
             caller,
             "transition_ticket",

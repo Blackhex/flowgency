@@ -40,9 +40,9 @@ transitions:
     inputs:
       - field_id: approved
         required: true
+    outputs:
       - field_id: review-notes
         required: true
-    outputs: []
     preconditions:
       - field_id: approved
         operator: equals
@@ -92,7 +92,9 @@ Each entry declares an `id`, a `label`, and a `type`. The types are `text`, `num
 | `preconditions` | yes | Field checks that must hold before the transition |
 | `criteria` | yes | Agent criteria requiring a qualitative assessment |
 
-A `Precondition` names an input `field_id`, an `operator` (`equals`, `not_equals`, or `is_present`), and a comparison `value` for the equality operators. Its `field_id` must be declared as an input of the same transition. An `AgentCriterion` has an `id` and a `description`; there is no separate `evidence_required` flag. When a transition carries criteria, the agent must submit a `CriterionAssessment` (`criterion_id`, `satisfied`, non-blank `reasoning`, and `supporting_fields`) for each one. Required inputs and each criterion assessment are enforced; only an accepted transition changes ticket state.
+A `Precondition` names an input `field_id`, an `operator` (`equals`, `not_equals`, or `is_present`), and a comparison `value` for the equality operators. Its `field_id` must be declared as an input of the same transition. An `AgentCriterion` has an `id` and a `description`; there is no separate `evidence_required` flag. When a transition carries criteria, the agent must submit a `CriterionAssessment` (`criterion_id`, `satisfied`, non-blank `reasoning`, and `supporting_fields`) for each one. Required inputs, required outputs, and each criterion assessment are enforced; only an accepted transition changes ticket state.
+
+A transition's `outputs` are the durable results it records; declaring an output as `required: true` blocks the transition until the agent supplies it, while an optional output may be omitted entirely without blocking. Accepted output values are written to the same canonical `field_values` a ticket already carries — there is no separate output-only store — so a later transition can read an earlier one's durable result as ordinary field state. The board Overview shows the latest saved value of each field; History additionally preserves the outputs an earlier accepted transition recorded together with that transition's original context, so an earlier result is never overwritten in the historical record even after a field is later changed again. Not every transition needs to declare an output; a transition with no durable result to record simply omits `outputs`.
 
 ## Artifact References
 

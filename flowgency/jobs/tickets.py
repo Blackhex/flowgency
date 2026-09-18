@@ -882,6 +882,8 @@ def _ticket_task_input(view: TicketView) -> str:
         "Use the live ticket tools to inspect the current ticket state from the project, "
         "re-evaluate the workflow contract below against the actual repository, and continue the work. "
         "Do not rely on any stale earlier snapshot.\n\n"
+        "Required outputs must be supplied in outputs. Inputs are attempt-only context; "
+        "reports and logs do not save outputs. Accepted outputs and state commit together.\n\n"
         "## Current ticket\n"
         "```yaml\n"
         f"{ticket_yaml}\n"

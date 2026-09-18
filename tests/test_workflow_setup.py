@@ -6,6 +6,7 @@ import sysconfig
 from pathlib import Path
 from zipfile import ZipFile
 
+import pytest
 import yaml
 
 from flowgency.setup_assets import copilot_discovery_root
@@ -224,3 +225,65 @@ def test_skill_does_not_propose_workflow_instance_id_to_user():
     assert "stable hidden" in normalized, (
         "SKILL.md must state that stable hidden IDs are generated"
     )
+
+
+@pytest.mark.parametrize(
+    ("blueprint_id", "transition_id", "expected_outputs"),
+    [
+        ("research", "begin-synthesis", {"findings": True}),
+        ("research", "close", {"conclusion": True}),
+        ("software-delivery", "submit-review", {"notes": True}),
+        ("software-delivery", "approve", {"review-notes": True}),
+        ("software-delivery", "return-to-progress", {"review-notes": True}),
+    ],
+)
+def test_shipped_result_transitions_require_durable_outputs(
+    blueprint_id, transition_id, expected_outputs
+):
+    from flowgency.setup_assets import workflow_example_root
+
+    definition = WorkflowLibrary(workflow_example_root()).inspect(blueprint_id).definition
+    transition = definition.transition(transition_id)
+    assert {use.field_id: use.required for use in transition.outputs} == expected_outputs
+    assert not (set(expected_outputs) & {use.field_id for use in transition.inputs})
+
+
+def test_shipped_transitions_without_results_still_declare_no_outputs():
+    from flowgency.setup_assets import workflow_example_root
+
+    research = WorkflowLibrary(workflow_example_root()).inspect("research").definition
+    assert research.transition("start-exploration").outputs == ()
+    assert research.transition("reopen").outputs == ()
+
+    delivery = WorkflowLibrary(workflow_example_root()).inspect("software-delivery").definition
+    approve = delivery.transition("approve")
+    assert {use.field_id: use.required for use in approve.inputs} == {"approved": True}
+    assert approve.preconditions[0].field_id == "approved"
+    assert approve.preconditions[0].operator == "equals"
+    assert approve.preconditions[0].value is True
+
+
+def test_research_close_requires_output_even_when_input_is_supplied():
+    from flowgency.setup_assets import workflow_example_root
+    from flowgency.workflows.models import ContractError
+    from flowgency.workflows.rules import evaluate_transition
+
+    definition = WorkflowLibrary(workflow_example_root()).inspect("research").definition
+    with pytest.raises(ContractError) as failure:
+        evaluate_transition(
+            definition, "close", "synthesizing", {},
+            {"conclusion": "Attempt context only"}, {}, (),
+        )
+    assert failure.value.field_id == "conclusion"
+    accepted = evaluate_transition(
+        definition, "close", "synthesizing", {}, {},
+        {"conclusion": "Durable result"}, (),
+    )
+    assert dict(accepted.effective_outputs) == {"conclusion": "Durable result"}
+
+
+@pytest.mark.parametrize("relative", ["SKILL.md", "references/ticket-workflow-steps.md"])
+def test_packaged_ticket_guidance_matches_discovery_source(relative):
+    packaged = copilot_discovery_root() / ".github/skills/flowgency-setup" / relative
+    discovery = REPO_ROOT / ".github/skills/flowgency-setup" / relative
+    assert packaged.read_bytes() == discovery.read_bytes()

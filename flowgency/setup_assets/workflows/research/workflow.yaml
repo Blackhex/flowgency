@@ -41,10 +41,10 @@ transitions:
     name: Begin synthesis
     from_state: exploring
     to_state: synthesizing
-    inputs:
+    inputs: []
+    outputs:
       - field_id: findings
         required: true
-    outputs: []
     preconditions: []
     criteria:
       - id: sufficient-evidence
@@ -53,10 +53,10 @@ transitions:
     name: Close
     from_state: synthesizing
     to_state: closed
-    inputs:
+    inputs: []
+    outputs:
       - field_id: conclusion
         required: true
-    outputs: []
     preconditions: []
     criteria: []
   - id: reopen
