@@ -20,6 +20,7 @@ from flowgency.tickets.broker import MAX_BROKER_BODY_BYTES, TicketBroker
 
 
 TICKET_TOOL_NAMES = (
+    "ticket_capture_git_evidence",
     "workflows_list",
     "tickets_list",
     "ticket_get",
@@ -31,7 +32,6 @@ TICKET_TOOL_NAMES = (
     "ticket_end_work",
     "ticket_sign_off",
     "ticket_artifact_publish",
-    "ticket_capture_git_evidence",
 )
 
 

@@ -33,6 +33,7 @@ def test_mcp_http_lifecycle_persists_mid_run(workflow_env):
                     tools = await session.list_tools()
                     names = tuple(tool.name for tool in tools.tools)
                     assert names == (
+                        "ticket_capture_git_evidence",
                         "workflows_list",
                         "tickets_list",
                         "ticket_get",
@@ -44,7 +45,6 @@ def test_mcp_http_lifecycle_persists_mid_run(workflow_env):
                         "ticket_end_work",
                         "ticket_sign_off",
                         "ticket_artifact_publish",
-                        "ticket_capture_git_evidence",
                     )
                     catalog = {tool.name: tool for tool in tools.tools}
                     for name in ("ticket_transition", "ticket_report", "ticket_update", "ticket_capture_git_evidence"):
@@ -160,6 +160,48 @@ def test_mcp_http_lifecycle_persists_mid_run(workflow_env):
     asyncio.run(exercise())
 
 
+def test_mcp_git_capture_rejects_an_unknown_field_at_runtime(workflow_env):
+    """A closed schema must be enforced, not merely published."""
+    env = workflow_env
+    env.publish_artifact_field_workflow()
+    ticket = env.create(values={"verdict": True, "summary": "Pending"})
+
+    async def exercise() -> None:
+        authority = env.running_job("builder", "run-schema")
+        with TicketBroker(env.service, env.access_registry, authority=authority) as broker:
+            launch = build_ticket_tool_launch(broker.endpoint)
+            client = httpx2.AsyncClient(headers=dict(launch.headers))
+            async with streamable_http_client(launch.url, http_client=client) as (
+                read_stream,
+                write_stream,
+            ):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    rejected = await session.call_tool(
+                        "ticket_capture_git_evidence",
+                        {
+                            "version": ticket.version.model_dump(mode="json"),
+                            "operation_id": "schema-capture",
+                            "transition_id": "complete",
+                            "field_id": "evidence",
+                            "base_commit": "a" * 40,
+                            "end_commit": "b" * 40,
+                            "workspace_path": "C:/outside",
+                        },
+                    )
+                    assert rejected.is_error is True
+                    assert rejected.structured_content is None
+                    rendered = "".join(
+                        getattr(block, "text", "") for block in rejected.content
+                    )
+                    assert "C:/outside" not in rendered
+
+    asyncio.run(exercise())
+    record = env.current_provider().read(ticket.ref)
+    assert record.revision == ticket.version.revision
+    assert all(event.kind != "git-evidence-captured" for event in record.events)
+
+
 def _assert_required_properties(schema: Mapping[str, object] | None, required: tuple[str, ...]) -> None:
     assert schema is not None
     assert schema.get("type") == "object"
@@ -261,7 +303,7 @@ def _assert_artifact_schema(schema: Mapping[str, object] | None) -> None:
 
 def _assert_git_capture_schema(schema: Mapping[str, object] | None) -> None:
     resolved = _resolve_schema(schema, schema)
-    _assert_object_schema(
+    _assert_closed_object_schema(
         schema,
         resolved,
         ("version", "operation_id", "transition_id", "field_id", "base_commit", "end_commit"),

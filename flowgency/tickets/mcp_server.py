@@ -4,7 +4,8 @@ from collections.abc import Awaitable, Callable
 
 from mcp.server import MCPServer
 from mcp.server.context import ServerRequestContext
-from pydantic import BaseModel
+from mcp.server.mcpserver.tools import Tool
+from pydantic import BaseModel, ConfigDict
 
 from flowgency.tickets.models import TicketRef, TicketToolResponse, TicketVersion
 from flowgency.tickets.protocol import (
@@ -71,8 +72,73 @@ def _payload(command: BaseModel) -> dict[str, object]:
     return payload
 
 
+def _closed_tool(fn) -> Tool:
+    """Build a registered tool whose argument schema is closed and enforced.
+
+    The SDK derives a tool's argument model from its flat signature and leaves
+    that model open, so an unrecognized argument is dropped in silence and the
+    published schema admits it. Subclassing the derived model with
+    ``extra="forbid"`` and reassigning it — which ``FuncMetadata`` documents as
+    read live — closes both at once: the published schema gains
+    ``additionalProperties: false`` and a call carrying an unknown field is
+    rejected rather than quietly trimmed. The signature itself is untouched.
+    """
+    tool = Tool.from_function(fn, structured_output=True)
+    arg_model = tool.fn_metadata.arg_model
+    closed = type(
+        arg_model.__name__,
+        (arg_model,),
+        {"model_config": ConfigDict(extra="forbid")},
+    )
+    tool.fn_metadata.arg_model = closed
+    tool.parameters = closed.model_json_schema(by_alias=True)
+    return tool
+
+
+def _git_capture_tool(caller: TicketToolCaller):
+    def ticket_capture_git_evidence(
+        version: TicketVersion,
+        operation_id: str,
+        transition_id: str,
+        field_id: str,
+        base_commit: str,
+        end_commit: str,
+        publication_ref: str | None = None,
+    ) -> TicketToolResponse:
+        """Capture an already-committed local Git range as trusted ticket evidence.
+
+        Capture only reads local history that is already committed; it never
+        commits, pushes, fetches, or verifies a push. Commit locally (and push
+        separately, if the project's own instructions require it) before calling
+        this tool with the exact base and end commit ids to capture.
+        """
+        return _call(
+            caller,
+            "capture_git_evidence",
+            _payload(
+                TicketGitCaptureCommand(
+                    version=version,
+                    operation_id=operation_id,
+                    transition_id=transition_id,
+                    field_id=field_id,
+                    base_commit=base_commit,
+                    end_commit=end_commit,
+                    publication_ref=publication_ref,
+                )
+            ),
+        )
+
+    return ticket_capture_git_evidence
+
+
 def build_mcp_server(caller: TicketToolCaller) -> MCPServer:
-    server = MCPServer("flowgency-tickets", middleware=[_sanitize_tool_errors])
+    # Capture is registered as a prebuilt tool so its argument model can be
+    # closed before the server sees it; that is why it heads the catalog.
+    server = MCPServer(
+        "flowgency-tickets",
+        middleware=[_sanitize_tool_errors],
+        tools=[_closed_tool(_git_capture_tool(caller))],
+    )
 
     @server.tool(structured_output=True)
     def workflows_list() -> TicketToolResponse:
@@ -250,39 +316,6 @@ def register_remaining_ticket_tools(server: MCPServer, caller: TicketToolCaller)
                     filename=filename,
                     media_type=media_type,
                     content_b64=content_b64,
-                )
-            ),
-        )
-
-    @server.tool(structured_output=True)
-    def ticket_capture_git_evidence(
-        version: TicketVersion,
-        operation_id: str,
-        transition_id: str,
-        field_id: str,
-        base_commit: str,
-        end_commit: str,
-        publication_ref: str | None = None,
-    ) -> TicketToolResponse:
-        """Capture an already-committed local Git range as trusted ticket evidence.
-
-        Capture only reads local history that is already committed; it never
-        commits, pushes, fetches, or verifies a push. Commit locally (and push
-        separately, if the project's own instructions require it) before calling
-        this tool with the exact base and end commit ids to capture.
-        """
-        return _call(
-            caller,
-            "capture_git_evidence",
-            _payload(
-                TicketGitCaptureCommand(
-                    version=version,
-                    operation_id=operation_id,
-                    transition_id=transition_id,
-                    field_id=field_id,
-                    base_commit=base_commit,
-                    end_commit=end_commit,
-                    publication_ref=publication_ref,
                 )
             ),
         )
