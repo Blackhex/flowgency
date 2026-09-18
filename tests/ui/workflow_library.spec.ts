@@ -900,3 +900,28 @@ test('workflow editor tabs match the approved overview, states, and transitions 
   await expect(page).toHaveScreenshot(`workflow-transitions-${suffix}.png`, { fullPage: true });
   await assertNoConsoleErrors(page);
 });
+
+test('required output choice survives save and reload', async ({ page }) => {
+  await page.goto('/admin/workflow-library/blueprints/delivery');
+  await openTransitions(page);
+  await page.getByLabel('Add output', { exact: true }).click();
+  await page.getByLabel('New field label').fill('Independent result');
+  await page.getByLabel('New field type').selectOption('text');
+  await page.getByRole('button', { name: 'Create and add', exact: true }).click();
+  await expect(page.getByLabel('Output required 3', { exact: true })).toBeChecked();
+  await page.getByLabel('Output required 3', { exact: true }).uncheck();
+  await saveEditor(page);
+  await page.reload();
+  await openTransitions(page);
+  await expect(page.getByLabel('Output required 3', { exact: true })).not.toBeChecked();
+  await page.getByLabel('Output required 3', { exact: true }).check();
+  await saveEditor(page);
+  await page.reload();
+  const payload = await readEditorPayload(page);
+  const transition = payload.draft.transitions.find(
+    (row: { name: string }) => row.name === 'Complete review',
+  );
+  expect(transition.outputs[2].required).toBe(true);
+  expect(transition.inputs).toHaveLength(1);
+  await assertNoConsoleErrors(page);
+});

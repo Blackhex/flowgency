@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -11,7 +11,7 @@ type DetailSnapshot = {
     ref: { ticket_id: string };
     assignee: string | null;
   };
-  fields: Array<{ id: string; value: unknown }>;
+  fields: Array<{ id: string; value: unknown; is_output: boolean }>;
 };
 
 const runtimeConfigPath = path.join(__dirname, '.runtime', 'current', 'config.yaml');
@@ -769,4 +769,66 @@ test('desktop board and mobile ticket detail keep keyboard access and stable scr
   await expect(page).toHaveURL(/\/newsletter\/workflows\/delivery/);
   await assertNoLayoutIssues(page);
   await assertNoConsoleErrors(page);
+});
+
+async function setTerminalReviewVerdict(request: APIRequestContext, ticketId: string): Promise<void> {
+  const current = await detailSnapshot(request, ticketId);
+  const updated = await request.post(`/newsletter/workflows/delivery/tickets/${ticketId}/update`, {
+    headers: { Accept: 'application/json' },
+    form: { payload: JSON.stringify({
+      version: current.ticket.version,
+      operation_id: operationId('terminal-result'),
+      patch: { field_values: { 'review-verdict': 'Verified durable result' } },
+    }) },
+  });
+  expect(updated.ok()).toBeTruthy();
+}
+
+async function assertTerminalOutputReadOnly(page: Page): Promise<void> {
+  const overview = page.locator('[data-ticket-panel="overview"]');
+  await expect(overview.getByRole('heading', { name: 'Outputs', exact: true })).toBeVisible();
+  await expect(overview.getByText('Verified durable result', { exact: true })).toBeVisible();
+  await expect(overview.locator('[data-ticket-input="review-verdict"]')).toHaveCount(0);
+  await expect(overview.getByText('Not submitted', { exact: true })).toBeVisible();
+}
+
+test('terminal output remains read-only in inspector and expanded view', async ({ page, request }) => {
+  const ticketId = 'fixture-done-1';
+  await setTerminalReviewVerdict(request, ticketId);
+  for (const url of [
+    `/newsletter/workflows/delivery?ticket=${ticketId}`,
+    `/newsletter/workflows/delivery/tickets/${ticketId}`,
+  ]) {
+    await page.goto(url);
+    await assertTerminalOutputReadOnly(page);
+    await assertNoLayoutIssues(page);
+    await assertNoConsoleErrors(page);
+  }
+
+  const detail = await detailSnapshot(page.request, ticketId);
+  expect(detail.fields.find((field) => field.id === 'review-verdict')?.is_output).toBe(true);
+});
+
+test('terminal output stays read-only at a 320px viewport', async ({ page, request }) => {
+  const ticketId = 'fixture-done-1';
+  await setTerminalReviewVerdict(request, ticketId);
+  await page.setViewportSize({ width: 320, height: 900 });
+
+  await page.goto(`/newsletter/workflows/delivery/tickets/${ticketId}`);
+  await assertTerminalOutputReadOnly(page);
+  await assertNoLayoutIssues(page);
+  await assertNoConsoleErrors(page);
+});
+
+test.describe('javascript-disabled terminal output', () => {
+  test.use({ javaScriptEnabled: false });
+
+  test('terminal output remains read-only in the server-rendered expanded view', async ({ page, request }) => {
+    const ticketId = 'fixture-done-1';
+    await setTerminalReviewVerdict(request, ticketId);
+
+    await page.goto(`/newsletter/workflows/delivery/tickets/${ticketId}`);
+    await assertTerminalOutputReadOnly(page);
+    await assertNoConsoleErrors(page);
+  });
 });
