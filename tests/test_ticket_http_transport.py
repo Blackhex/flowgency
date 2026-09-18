@@ -31,6 +31,7 @@ TICKET_TOOL_NAMES = (
     "ticket_end_work",
     "ticket_sign_off",
     "ticket_artifact_publish",
+    "ticket_capture_git_evidence",
 )
 
 

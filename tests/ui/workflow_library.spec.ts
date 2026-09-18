@@ -925,3 +925,53 @@ test('required output choice survives save and reload', async ({ page }) => {
   expect(transition.inputs).toHaveLength(1);
   await assertNoConsoleErrors(page);
 });
+
+test('git artifact format survives authoring and reload', async ({ page }, testInfo) => {
+  await page.goto('/admin/workflow-library/blueprints/delivery');
+  await openTransitions(page);
+  await page.getByLabel('Add output', { exact: true }).click();
+  await page.getByLabel('New field label').fill('Committed implementation');
+  await page.getByLabel('New field type').selectOption('artifact');
+  await page.getByLabel('New artifact format').selectOption('git-change');
+  await page.getByRole('button', { name: 'Create and add', exact: true }).click();
+  await expect(page.getByLabel('Output required 3', { exact: true })).toBeChecked();
+  await saveEditor(page);
+  await page.reload();
+  const payload = await readEditorPayload(page);
+  const field = payload.draft.fields.find((row: { label: string }) => row.label === 'Committed implementation');
+  expect(field.type).toBe('artifact');
+  expect(field.artifact_format).toBe('git-change');
+  await openTransitions(page);
+  await expect(page.getByLabel('Output artifact format 3', { exact: true })).toHaveValue('git-change');
+  await assertNoLayoutIssues(page);
+  await assertNoConsoleErrors(page);
+
+  // Reuse the field as a later transition's input: the format travels with it,
+  // and toggling required does not disturb it.
+  await addTransitionButton(page, testInfo.project.name).click();
+  await page.getByLabel('Add input', { exact: true }).click();
+  await page.getByRole('button', { name: 'Committed implementation (Artifact)', exact: true }).click();
+  await expect(page.getByLabel('Input artifact format 1', { exact: true })).toHaveValue('git-change');
+  await page.getByLabel('Input required 1', { exact: true }).uncheck();
+  await expect(page.getByLabel('Input artifact format 1', { exact: true })).toHaveValue('git-change');
+  await saveEditor(page);
+  await page.reload();
+  const reusedPayload = await readEditorPayload(page);
+  const newTransition = reusedPayload.draft.transitions.find(
+    (row: { name: string }) => row.name !== 'Complete review',
+  );
+  expect(newTransition.inputs).toHaveLength(1);
+  expect(newTransition.inputs[0].required).toBe(false);
+
+  // Switching another artifact field to text clears its format in the draft.
+  await openTransitions(page);
+  if (testInfo.project.name.startsWith('mobile')) {
+    await page.getByLabel('Transition picker').selectOption({ label: 'Complete review' });
+  } else {
+    await page.getByRole('button', { name: 'Complete review Review Done' }).click();
+  }
+  await expect(page.getByLabel('Output artifact format 2', { exact: true })).toHaveValue('');
+  await page.getByLabel('Output type 2', { exact: true }).selectOption('text');
+  await expect(page.getByLabel('Output artifact format 2', { exact: true })).toHaveCount(0);
+  await assertNoConsoleErrors(page);
+});

@@ -13,6 +13,7 @@ from flowgency.tickets.protocol import (
     TicketCreateCommand,
     TicketEndWorkCommand,
     TicketGetCommand,
+    TicketGitCaptureCommand,
     TicketReportCommand,
     TicketSignOffCommand,
     TicketStartWorkCommand,
@@ -249,6 +250,39 @@ def register_remaining_ticket_tools(server: MCPServer, caller: TicketToolCaller)
                     filename=filename,
                     media_type=media_type,
                     content_b64=content_b64,
+                )
+            ),
+        )
+
+    @server.tool(structured_output=True)
+    def ticket_capture_git_evidence(
+        version: TicketVersion,
+        operation_id: str,
+        transition_id: str,
+        field_id: str,
+        base_commit: str,
+        end_commit: str,
+        publication_ref: str | None = None,
+    ) -> TicketToolResponse:
+        """Capture an already-committed local Git range as trusted ticket evidence.
+
+        Capture only reads local history that is already committed; it never
+        commits, pushes, fetches, or verifies a push. Commit locally (and push
+        separately, if the project's own instructions require it) before calling
+        this tool with the exact base and end commit ids to capture.
+        """
+        return _call(
+            caller,
+            "capture_git_evidence",
+            _payload(
+                TicketGitCaptureCommand(
+                    version=version,
+                    operation_id=operation_id,
+                    transition_id=transition_id,
+                    field_id=field_id,
+                    base_commit=base_commit,
+                    end_commit=end_commit,
+                    publication_ref=publication_ref,
                 )
             ),
         )

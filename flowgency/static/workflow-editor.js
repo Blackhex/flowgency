@@ -554,12 +554,13 @@
     refreshAfterChange();
   }
 
-  function ensureField(label = 'New field', type = 'text') {
+  function ensureField(label = 'New field', type = 'text', artifactFormat = null) {
     const row = {
       key: makeKey('df'),
       existing_field_id: null,
       label,
       type,
+      artifact_format: type === 'artifact' ? artifactFormat : null,
     };
     draft.fields.push(row);
     return row;
@@ -596,7 +597,9 @@
   function addUse(kind, options = {}) {
     const transition = currentTransition();
     if (!transition) return;
-    const field = options.ref ? fieldByRef(options.ref) : ensureField(options.label || 'New field', options.type || 'text');
+    const field = options.ref
+      ? fieldByRef(options.ref)
+      : ensureField(options.label || 'New field', options.type || 'text', options.artifactFormat || null);
     if (!field) return;
     const row = { existing_field_id: null, draft_field_key: null, required: true };
     setUseReference(row, fieldRef(field));
@@ -688,7 +691,7 @@
     const wrap = el('div', { class: 'wf-menu-wrap' });
     const button = el('button', { type: 'button', class: 'wf-icon-btn', 'aria-label': `Add ${kind === 'inputs' ? 'input' : 'output'}`, title: `Add ${kind === 'inputs' ? 'input' : 'output'}` }, icon('plus'));
     button.addEventListener('click', () => {
-      menuState = isOpen ? null : { transitionRef: currentRef, kind, label: '', type: 'text' };
+      menuState = isOpen ? null : { transitionRef: currentRef, kind, label: '', type: 'text', artifactFormat: '' };
       render();
     });
     wrap.append(button);
@@ -704,12 +707,31 @@
       appendOptions(typeSelect, Object.entries(fieldKinds).map(([value, label]) => ({ value, label })), menuState.type);
       typeSelect.addEventListener('change', () => {
         menuState.type = typeSelect.value;
+        if (menuState.type !== 'artifact') menuState.artifactFormat = '';
+        render();
       });
+      menuForm.append(labelInput, typeSelect);
+      if (menuState.type === 'artifact') {
+        const artifactFormatSelect = el('select', { class: 'wf-select', 'aria-label': 'New artifact format' });
+        appendOptions(
+          artifactFormatSelect,
+          [{ value: '', label: 'File' }, { value: 'git-change', label: 'Git changes' }],
+          menuState.artifactFormat || '',
+        );
+        artifactFormatSelect.addEventListener('change', () => {
+          menuState.artifactFormat = artifactFormatSelect.value;
+        });
+        menuForm.append(artifactFormatSelect);
+      }
       const createButton = el('button', { type: 'button', class: 'wf-btn' }, 'Create and add');
       createButton.addEventListener('click', () => {
-        addUse(kind, { label: menuState.label.trim() || 'New field', type: menuState.type || 'text' });
+        addUse(kind, {
+          label: menuState.label.trim() || 'New field',
+          type: menuState.type || 'text',
+          artifactFormat: menuState.type === 'artifact' ? menuState.artifactFormat || null : null,
+        });
       });
-      menuForm.append(labelInput, typeSelect, el('div', { class: 'wf-menu-actions' }, createButton));
+      menuForm.append(el('div', { class: 'wf-menu-actions' }, createButton));
       menu.append(menuForm);
 
       menu.append(el('div', { class: 'wf-menu-title', text: 'Reuse existing field' }));
@@ -923,7 +945,10 @@
       appendOptions(typeSelect, Object.entries(fieldKinds).map(([value, label]) => ({ value, label })), field?.type || 'text');
       bindSelect(typeSelect, () => fieldByRef(ref)?.type || 'text', (value) => {
         const target = fieldByRef(ref);
-        if (target) target.type = value;
+        if (target) {
+          target.type = value;
+          if (value !== 'artifact') target.artifact_format = null;
+        }
       });
       const requiredWrap = el('label', { class: 'wf-required' });
       const requiredInput = el('input', { class: 'wf-checkbox', type: 'checkbox', checked: row.required, 'aria-label': `${kind === 'inputs' ? 'Input' : 'Output'} required ${index + 1}` });
@@ -934,6 +959,22 @@
       const removeButton = el('button', { type: 'button', class: 'wf-icon-btn', 'aria-label': `Remove ${kind === 'inputs' ? 'input' : 'output'} field ${index + 1}`, title: 'Remove field' }, icon('x'));
       removeButton.addEventListener('click', () => removeUse(kind, index));
       contractRow.append(labelInput, typeSelect, requiredWrap, removeButton);
+      if (field?.type === 'artifact') {
+        const artifactFormatSelect = el('select', {
+          class: 'wf-select wf-contract-row-artifact-format',
+          'aria-label': `${kind === 'inputs' ? 'Input' : 'Output'} artifact format ${index + 1}`,
+        });
+        appendOptions(
+          artifactFormatSelect,
+          [{ value: '', label: 'File' }, { value: 'git-change', label: 'Git changes' }],
+          field.artifact_format || '',
+        );
+        bindSelect(artifactFormatSelect, () => fieldByRef(ref)?.artifact_format || '', (value) => {
+          const target = fieldByRef(ref);
+          if (target) target.artifact_format = value || null;
+        });
+        contractRow.append(artifactFormatSelect);
+      }
       section.append(contractRow);
     });
     container.append(section);

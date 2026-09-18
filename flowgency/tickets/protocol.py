@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError
 
 from flowgency.tickets.artifacts import MAX_RETAINED_ARTIFACT_BYTES
 from flowgency.tickets.errors import TicketConflict, TicketStorageError
+from flowgency.tickets.git_evidence import GitCaptureRequest
 from flowgency.tickets.models import (
     AgentTicketContext,
     TicketOperation,
@@ -121,6 +122,26 @@ class TicketSignOffCommand(BaseModel):
     operation_id: StrictStr
 
 
+class TicketGitCaptureCommand(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    version: TicketVersion
+    operation_id: StrictStr
+    transition_id: StrictStr
+    field_id: StrictStr
+    base_commit: StrictStr
+    end_commit: StrictStr
+    publication_ref: StrictStr | None = None
+
+    def request(self) -> GitCaptureRequest:
+        return GitCaptureRequest(
+            transition_id=self.transition_id,
+            field_id=self.field_id,
+            base_commit=self.base_commit,
+            end_commit=self.end_commit,
+            publication_ref=self.publication_ref,
+        )
+
+
 class TicketArtifactPublishCommand(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     version: TicketVersion
@@ -156,6 +177,7 @@ TicketCommand = (
     | TicketEndWorkCommand
     | TicketSignOffCommand
     | TicketArtifactPublishCommand
+    | TicketGitCaptureCommand
 )
 
 
@@ -195,6 +217,7 @@ def parse_ticket_command(operation: str, payload: dict[str, Any]) -> TicketComma
         "end_work": TicketEndWorkCommand,
         "sign_off": TicketSignOffCommand,
         "publish_artifact": TicketArtifactPublishCommand,
+        "capture_git_evidence": TicketGitCaptureCommand,
     }
     model = mapping.get(operation)
     if model is None:
@@ -362,5 +385,15 @@ def dispatch_ticket_command(
             command.filename,
             command.media_type,
             command.content(),
+        ).model_dump(mode="json")
+    if isinstance(command, TicketGitCaptureCommand):
+        operation = canonical_operation(
+            actor,
+            "capture_git_evidence",
+            command.operation_id,
+            command.model_dump(mode="json"),
+        )
+        return service.capture_git_evidence(
+            actor, command.version, command.request(), operation
         ).model_dump(mode="json")
     raise TicketBrokerUnavailable("unavailable", "Ticket broker operation is unavailable")

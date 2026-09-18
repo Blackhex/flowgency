@@ -65,6 +65,7 @@ class TicketFieldValueView(BaseModel):
     id: str
     label: str
     type: str | None = None
+    artifact_format: Literal["git-change"] | None = None
     value: Any = None
     provenance: TicketFieldProvenanceView | None = None
     is_output: bool = False
@@ -82,6 +83,7 @@ class WorkflowFieldDefinitionView(BaseModel):
     id: str
     label: str
     type: str
+    artifact_format: Literal["git-change"] | None = None
 
 
 class WorkflowFieldUseView(BaseModel):
@@ -468,17 +470,21 @@ def _field_rows(view: TicketView) -> tuple[TicketFieldValueView, ...]:
         fallback_definition = output_fields.get(field_id)
         label = field_id
         field_type: str | None = None
+        artifact_format: str | None = None
         if current_definition is not None:
             label = current_definition.label
             field_type = current_definition.type
+            artifact_format = current_definition.artifact_format
         elif fallback_definition is not None:
             label = fallback_definition.label
             field_type = fallback_definition.type
+            artifact_format = fallback_definition.artifact_format
         rows.append(
             TicketFieldValueView(
                 id=field_id,
                 label=label,
                 type=field_type,
+                artifact_format=artifact_format,
                 value=view.record.field_values.get(field_id),
                 provenance=_provenance_view(view.record.field_provenance.get(field_id)),
                 is_output=field_id in output_fields,
@@ -506,7 +512,12 @@ def _definition_view(view: TicketView, blueprint_id: str) -> WorkflowDefinitionV
             for state in view.definition.states
         ),
         fields=tuple(
-            WorkflowFieldDefinitionView(id=field.id, label=field.label, type=field.type)
+            WorkflowFieldDefinitionView(
+                id=field.id,
+                label=field.label,
+                type=field.type,
+                artifact_format=field.artifact_format,
+            )
             for field in view.definition.fields
         ),
         transitions=tuple(

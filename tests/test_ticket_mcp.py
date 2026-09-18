@@ -44,9 +44,10 @@ def test_mcp_http_lifecycle_persists_mid_run(workflow_env):
                         "ticket_end_work",
                         "ticket_sign_off",
                         "ticket_artifact_publish",
+                        "ticket_capture_git_evidence",
                     )
                     catalog = {tool.name: tool for tool in tools.tools}
-                    for name in ("ticket_transition", "ticket_report", "ticket_update"):
+                    for name in ("ticket_transition", "ticket_report", "ticket_update", "ticket_capture_git_evidence"):
                         assert catalog[name].description
                         assert catalog[name].description.strip()
                     _assert_response_schema(catalog["ticket_create"].output_schema)
@@ -74,6 +75,7 @@ def test_mcp_http_lifecycle_persists_mid_run(workflow_env):
                     _assert_versioned_mutation_schema(catalog["ticket_end_work"].input_schema)
                     _assert_versioned_mutation_schema(catalog["ticket_sign_off"].input_schema)
                     _assert_artifact_schema(catalog["ticket_artifact_publish"].input_schema)
+                    _assert_git_capture_schema(catalog["ticket_capture_git_evidence"].input_schema)
                     created = await session.call_tool(
                         "ticket_create",
                         {
@@ -252,6 +254,30 @@ def _assert_artifact_schema(schema: Mapping[str, object] | None) -> None:
     _assert_schema_type(schema, properties["media_type"], "string")
     _assert_schema_type(schema, properties["content_b64"], "string")
     assert "operation_id" not in properties
+    assert "actor" not in properties
+    assert "assignee" not in properties
+    assert "config" not in properties
+
+
+def _assert_git_capture_schema(schema: Mapping[str, object] | None) -> None:
+    resolved = _resolve_schema(schema, schema)
+    _assert_object_schema(
+        schema,
+        resolved,
+        ("version", "operation_id", "transition_id", "field_id", "base_commit", "end_commit"),
+    )
+    properties = resolved["properties"]
+    _assert_ticket_version_schema(schema, properties["version"])
+    _assert_schema_type(schema, properties["operation_id"], "string")
+    _assert_schema_type(schema, properties["transition_id"], "string")
+    _assert_schema_type(schema, properties["field_id"], "string")
+    _assert_schema_type(schema, properties["base_commit"], "string")
+    _assert_schema_type(schema, properties["end_commit"], "string")
+    assert "publication_ref" in properties
+    # No caller-controlled authority: only a range and its ticket target.
+    assert "workspace_path" not in properties
+    assert "job_id" not in properties
+    assert "agent_name" not in properties
     assert "actor" not in properties
     assert "assignee" not in properties
     assert "config" not in properties

@@ -697,3 +697,113 @@ def test_ticket_tool_client_rejects_non_loopback_endpoint():
 def test_ticket_tool_client_rejects_endpoint_credentials():
     with pytest.raises(ValueError):
         TicketToolClient("http://user:pass@127.0.0.1:8500", "token")
+
+
+def test_git_capture_command_rejects_caller_supplied_authority(workflow_env):
+    ticket = workflow_env.create()
+    payload = {
+        "version": ticket.version.model_dump(mode="json"),
+        "operation_id": "capture-a", "transition_id": "complete", "field_id": "evidence",
+        "base_commit": "a" * 40, "end_commit": "b" * 40,
+        "workspace_path": "C:/outside", "job_id": "different-job",
+    }
+    with pytest.raises(InvalidTicketRequest):
+        parse_ticket_command("capture_git_evidence", payload)
+
+
+def test_git_capture_command_parses_typed_fields_only(workflow_env):
+    ticket = workflow_env.create()
+    payload = {
+        "version": ticket.version.model_dump(mode="json"),
+        "operation_id": "capture-a",
+        "transition_id": "complete",
+        "field_id": "evidence",
+        "base_commit": "a" * 40,
+        "end_commit": "b" * 40,
+    }
+    command = parse_ticket_command("capture_git_evidence", payload)
+    assert command.transition_id == "complete"
+    assert command.field_id == "evidence"
+    assert command.base_commit == "a" * 40
+    assert command.end_commit == "b" * 40
+    assert command.publication_ref is None
+
+
+def test_broker_dispatches_git_capture_evidence_using_authenticated_actor(workflow_env, tmp_path):
+    from flowgency.git_evidence.models import GitPublicationPolicy
+    from flowgency.workflows.models import WorkflowDefinition
+    from tests._git_evidence_helpers import create_git_repository, launch_policy_for
+
+    env = workflow_env
+    fixture = create_git_repository(tmp_path / "repo")
+    policy = GitPublicationPolicy(mode="local", allowed_refs=())
+
+    snapshot = env.store.load()
+
+    def configure(raw):
+        team = raw["teams"][env.team_id]
+        team["workspace_path"] = str(fixture.root)
+        team["git_publication"] = policy.model_dump(mode="json")
+
+    env.store.patch(snapshot.revision, configure)
+    env.publish_artifact_field_workflow()
+    source = env.library.inspect(env.blueprint_id)
+    document = source.definition.model_dump(mode="json")
+    for field in document["fields"]:
+        if field["id"] == "evidence":
+            field["artifact_format"] = "git-change"
+    for transition in document["transitions"]:
+        if transition["id"] == "complete":
+            for use in transition["outputs"]:
+                if use["field_id"] == "evidence":
+                    use["required"] = True
+    env.configuration_service.save_blueprint(
+        env.store.load().revision,
+        env.blueprint_id,
+        source.digest,
+        WorkflowDefinition.model_validate(document),
+    )
+
+    # A short job id keeps the private evidence-view scratch path (nested under
+    # the memory store's job/artifact tree) well inside Windows Git's path
+    # limits; this mirrors the job id every other git-evidence fixture uses.
+    authority = env.running_job(
+        "builder",
+        "git-evidence-run",
+        runtime_policy=launch_policy_for(env, "builder"),
+    )
+    # Real authorization comes only from the broker's own authenticated grant,
+    # never from any actor-shaped value the caller puts in the request body.
+    env.service.resolve_git_job = env.access_registry.resolve_context
+    ticket = env.create(values={"verdict": True, "summary": "Pending"})
+
+    with env.broker_session(authority) as (actor, client):
+        start = client.call(
+            "start_work",
+            {"version": ticket.version.model_dump(mode="json"), "operation_id": "start-git-capture"},
+        )
+        assert start["ok"] is True, start
+        version = {
+            "ref": ticket.ref.model_dump(mode="json"),
+            "revision": start["result"]["ticket"]["revision"],
+            "workflow_digest": ticket.version.workflow_digest,
+            "context_digest": ticket.version.context_digest,
+        }
+        result = client.call(
+            "capture_git_evidence",
+            {
+                "version": version,
+                "operation_id": "broker-capture",
+                "transition_id": "complete",
+                "field_id": "evidence",
+                "base_commit": fixture.base_commit,
+                "end_commit": fixture.end_commit,
+            },
+        )
+
+    assert result["ok"] is True, result
+    updated = env.read(ticket.ref)
+    capture_events = [event for event in updated.record.events if event.kind == "git-evidence-captured"]
+    assert len(capture_events) == 1
+    assert capture_events[0].data["capture"]["agent_name"] == actor.agent_name
+    assert capture_events[0].data["capture"]["job_id"] == actor.job_id
