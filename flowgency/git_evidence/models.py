@@ -57,6 +57,8 @@ def _validate_remote_url(url: str, auth: str) -> None:
     elif parsed.scheme == "file":
         if auth != "anonymous":
             raise ValueError("File remote endpoints are anonymous-only")
+        if parsed.netloc:
+            raise ValueError("File remote URL must not contain a host or UNC share")
         if not parsed.path.startswith("/"):
             raise ValueError("File remote URL must use an absolute path")
     if auth == "credential-manager" and parsed.scheme != "https":

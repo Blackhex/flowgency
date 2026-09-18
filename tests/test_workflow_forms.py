@@ -4,6 +4,8 @@ import pytest
 
 from flowgency.workflows.forms import editor_payload, parse_editor_draft
 
+from tests._ticket_helpers import delivery_definition
+
 
 def test_editor_rename_keeps_ids(workflow_env):
     env = workflow_env
@@ -23,6 +25,27 @@ def test_editor_rename_keeps_ids(workflow_env):
         parsed.transitions[0].from_state
         == source.definition.transitions[0].from_state
     )
+
+
+def test_editor_payload_round_trip_preserves_git_change_artifact_format(workflow_env):
+    env = workflow_env
+    definition = delivery_definition()
+    definition["fields"].append(
+        {"id": "diff", "label": "Change diff", "type": "artifact", "artifact_format": "git-change"}
+    )
+    env.write_blueprint("delivery", definition)
+    source = env.library.inspect("delivery")
+
+    draft = editor_payload(source)
+    diff_field = next(field for field in draft["fields"] if field["existing_field_id"] == "diff")
+    assert diff_field["artifact_format"] == "git-change"
+    other_field = next(field for field in draft["fields"] if field["existing_field_id"] == "verdict")
+    assert other_field["artifact_format"] is None
+
+    parsed = parse_editor_draft(source, draft)
+
+    assert parsed.field("diff").artifact_format == "git-change"
+    assert parsed.field("verdict").artifact_format is None
 
 
 def test_parse_editor_draft_rejects_forged_existing_field_id(workflow_env):

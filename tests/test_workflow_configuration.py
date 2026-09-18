@@ -386,6 +386,121 @@ def test_ordinary_team_has_no_git_publication_policy(configured_snapshot):
     assert configured_snapshot.config.teams["newsletter"].git_publication is None
 
 
+def test_safe_relative_known_hosts_resolves_without_issues(raw_config, config_paths):
+    raw = deepcopy(raw_config)
+    (config_paths["config_dir"] / "known_hosts").write_text(
+        "example.com ssh-ed25519 AAAA\n", encoding="utf-8"
+    )
+    raw["teams"]["newsletter"]["git_publication"] = {
+        "mode": "remote",
+        "allowed_refs": ["refs/heads/main"],
+        "remote": {
+            "name": "origin",
+            "url": "ssh://git@example.com/repo.git",
+            "auth": "ssh-agent",
+            "known_hosts": "known_hosts",
+        },
+    }
+
+    assert validate_config(raw, config_paths["config_path"]) == ()
+
+
+def test_known_hosts_rejects_missing_file(raw_config, config_paths):
+    raw = deepcopy(raw_config)
+    raw["teams"]["newsletter"]["git_publication"] = {
+        "mode": "remote",
+        "allowed_refs": ["refs/heads/main"],
+        "remote": {
+            "name": "origin",
+            "url": "ssh://git@example.com/repo.git",
+            "auth": "ssh-agent",
+            "known_hosts": "missing-known-hosts",
+        },
+    }
+
+    issues = validate_config(raw, config_paths["config_path"])
+
+    assert any(issue.code == "invalid-git-known-hosts" for issue in issues)
+
+
+def test_known_hosts_rejects_reparse_ancestor_before_resolve(
+    raw_config, config_paths, tmp_path, monkeypatch
+):
+    from tests.test_path_validation import _make_hostile_directory_entry
+
+    real_parent = tmp_path / "real-known-hosts-dir"
+    real_parent.mkdir()
+    (real_parent / "known_hosts").write_text("example.com key\n", encoding="utf-8")
+    hostile_parent = config_paths["config_dir"] / "hostile-known-hosts-link"
+    kind = _make_hostile_directory_entry(hostile_parent, real_parent, monkeypatch)
+
+    raw = deepcopy(raw_config)
+    raw["teams"]["newsletter"]["git_publication"] = {
+        "mode": "remote",
+        "allowed_refs": ["refs/heads/main"],
+        "remote": {
+            "name": "origin",
+            "url": "ssh://git@example.com/repo.git",
+            "auth": "ssh-agent",
+            "known_hosts": str(hostile_parent / "known_hosts"),
+        },
+    }
+
+    issues = validate_config(raw, config_paths["config_path"])
+
+    assert any(issue.code == "invalid-git-known-hosts" for issue in issues), kind
+
+
+def test_file_endpoint_accepts_existing_directory(raw_config, config_paths, tmp_path):
+    repo_dir = tmp_path / "existing-repo"
+    repo_dir.mkdir()
+    raw = deepcopy(raw_config)
+    raw["teams"]["newsletter"]["git_publication"] = {
+        "mode": "remote",
+        "allowed_refs": ["refs/heads/main"],
+        "remote": {"name": "origin", "url": repo_dir.as_uri()},
+    }
+
+    assert validate_config(raw, config_paths["config_path"]) == ()
+
+
+def test_file_endpoint_rejects_missing_directory(raw_config, config_paths, tmp_path):
+    missing_repo = tmp_path / "missing-repo"
+    raw = deepcopy(raw_config)
+    raw["teams"]["newsletter"]["git_publication"] = {
+        "mode": "remote",
+        "allowed_refs": ["refs/heads/main"],
+        "remote": {"name": "origin", "url": missing_repo.as_uri()},
+    }
+
+    issues = validate_config(raw, config_paths["config_path"])
+
+    assert any(issue.code == "invalid-git-file-endpoint" for issue in issues)
+
+
+def test_file_endpoint_rejects_reparse_ancestor_before_resolve(
+    raw_config, config_paths, tmp_path, monkeypatch
+):
+    from tests.test_path_validation import _make_hostile_directory_entry
+
+    real_parent = tmp_path / "real-repo-parent"
+    real_parent.mkdir()
+    (real_parent / "repo.git").mkdir()
+    hostile_parent = tmp_path / "hostile-repo-link"
+    kind = _make_hostile_directory_entry(hostile_parent, real_parent, monkeypatch)
+
+    raw = deepcopy(raw_config)
+    raw["teams"]["newsletter"]["git_publication"] = {
+        "mode": "remote",
+        "allowed_refs": ["refs/heads/main"],
+        "remote": {"name": "origin", "url": (hostile_parent / "repo.git").as_uri()},
+    }
+
+    issues = validate_config(raw, config_paths["config_path"])
+
+    assert any(issue.code == "invalid-git-file-endpoint" for issue in issues), kind
+
+
 def test_git_policy_changes_context_not_storage_identity(configured_store):
     from flowgency.configuration.patches import patch_team_git_publication
     from flowgency.git_evidence.models import GitPublicationPolicy

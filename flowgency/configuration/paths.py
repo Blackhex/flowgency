@@ -5,6 +5,8 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 import stat
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 from .team_paths import resolve_team_paths
 from .issues import ValidationIssue
@@ -266,6 +268,95 @@ def validate_local_workflow_root_candidate(
         scope=scope,
         field=field,
     )
+
+
+def _lexical_ancestors_unsafe(path: Path, *, leaf_must_be_dir: bool) -> bool:
+    """Walk lexical ancestors (unresolved) before any symlink/reparse is followed."""
+    chain = _path_chain(path)
+    for component in chain[:-1]:
+        if not _path_has_entry(component):
+            continue
+        try:
+            _assert_real_directory(component)
+        except ValueError:
+            return True
+    leaf = chain[-1]
+    if _path_has_entry(leaf):
+        if is_symlink_or_reparse(leaf):
+            return True
+        if leaf_must_be_dir and not leaf.is_dir():
+            return True
+    return False
+
+
+def validate_git_known_hosts_candidate(
+    value: object,
+    *,
+    config_dir: Path,
+    scope: str,
+) -> list[ValidationIssue]:
+    """Validate a config-owned known_hosts file: lexical ancestors before resolve."""
+    field = "git_publication.remote.known_hosts"
+    lexical = _config_path(value, config_dir, resolve=False)
+    if _lexical_ancestors_unsafe(lexical, leaf_must_be_dir=False):
+        return [
+            _issue(
+                "invalid-git-known-hosts",
+                scope,
+                field,
+                f"Configured known_hosts must stay under real directories and must "
+                f"not itself be a link: {lexical}",
+                "Use a real file that is not under a symlink, junction, or reparse point.",
+            )
+        ]
+    resolved = lexical.resolve(strict=False)
+    if not resolved.is_file():
+        return [
+            _issue(
+                "invalid-git-known-hosts",
+                scope,
+                field,
+                f"Configured known_hosts must be an existing file: {resolved}",
+                "Point known_hosts at an existing SSH known_hosts file.",
+            )
+        ]
+    return []
+
+
+def validate_git_file_endpoint_candidate(
+    url: str,
+    *,
+    scope: str,
+) -> list[ValidationIssue]:
+    """Validate an approved existing file: endpoint directory, not a new writer.
+
+    The endpoint is already required to be an absolute, netloc-free file: URL by
+    the pure policy model; this walks its lexical ancestors before resolving.
+    """
+    field = "git_publication.remote.url"
+    lexical = Path(url2pathname(urlparse(url).path))
+    if _lexical_ancestors_unsafe(lexical, leaf_must_be_dir=True):
+        return [
+            _issue(
+                "invalid-git-file-endpoint",
+                scope,
+                field,
+                f"Configured file endpoint must stay under real directories: {lexical}",
+                "Use a real local directory that is not under a symlink, junction, or reparse point.",
+            )
+        ]
+    resolved = lexical.resolve(strict=False)
+    if not resolved.is_dir():
+        return [
+            _issue(
+                "invalid-git-file-endpoint",
+                scope,
+                field,
+                f"Configured file endpoint must be an existing directory: {resolved}",
+                "Point the file endpoint at an existing local Git repository directory.",
+            )
+        ]
+    return []
 
 
 def _overlap_issue(
@@ -614,6 +705,8 @@ __all__ = [
     "initialize_storage_directories",
     "job_store_root",
     "registered_local_workflow_root_keys",
+    "validate_git_file_endpoint_candidate",
+    "validate_git_known_hosts_candidate",
     "validate_local_workflow_root_candidate",
     "validate_resolved_paths",
 ]

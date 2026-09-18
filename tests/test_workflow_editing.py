@@ -62,6 +62,28 @@ def test_add_field_does_not_merge_equal_labels():
     assert len(first.definition.fields) == len(sample_definition().fields) + 1
 
 
+def test_add_field_accepts_git_change_artifact_format():
+    edit = add_field(sample_definition(), "Change", "artifact", artifact_format="git-change")
+    assert edit.definition.field(edit.created_id).artifact_format == "git-change"
+
+
+def test_add_field_defaults_artifact_format_to_none():
+    edit = add_field(sample_definition(), "Notes", "text")
+    assert edit.definition.field(edit.created_id).artifact_format is None
+
+
+def test_rename_field_preserves_git_change_artifact_format():
+    edit = add_field(sample_definition(), "Change", "artifact", artifact_format="git-change")
+    renamed = rename_field(edit.definition, edit.created_id, "Change set")
+    assert renamed.definition.field(edit.created_id).artifact_format == "git-change"
+
+
+def test_use_field_reuse_preserves_git_change_artifact_format():
+    edit = add_field(sample_definition(), "Change", "artifact", artifact_format="git-change")
+    reused = use_field(edit.definition, "complete", "output", edit.created_id, False)
+    assert reused.definition.field(edit.created_id).artifact_format == "git-change"
+
+
 def test_use_field_rejects_duplicate_use():
     with pytest.raises(ContractError):
         use_field(sample_definition(), "complete", "input", "verdict", True)

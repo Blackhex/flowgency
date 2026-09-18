@@ -92,6 +92,8 @@ def test_file_remote_accepts_absolute_path_anonymous():
         ("file:///abs/repo.git", "credential-manager", None),
         ("file:///abs/repo.git", "ssh-agent", None),
         ("https://example.com/repo.git", "anonymous", "known_hosts"),
+        ("file://server/share/repo.git", "anonymous", None),
+        ("file://localhost/abs/repo.git", "anonymous", None),
     ],
 )
 def test_invalid_remote_url_combinations_are_rejected(url, auth, known_hosts):
