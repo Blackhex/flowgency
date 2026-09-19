@@ -1079,6 +1079,116 @@ class TestCopilot:
         assert "Timed out after 30 seconds." in result.stderr
         assert result.write_attempts == ["partial.txt"]
 
+    def test_run_relativizes_write_attempts_against_launch_dir_not_controller_cwd(
+        self, integration, tmp_agent_dir, monkeypatch
+    ):
+        """The live CLI's relative paths are relative to its own cwd (launch_dir).
+
+        Flowgency's own process cwd must not affect the result -- the real
+        failure reported an authorized canary target
+        (``../workspace/write-probe.txt``) as if it were unrecognized because
+        it was resolved against the controller's cwd instead.
+        """
+        import json
+        from pathlib import Path
+        import flowgency.integrations.flowgency.copilot as mod
+
+        elsewhere = tmp_agent_dir.parent / "controller-elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+
+        relative_target = str(Path("..") / "write-probe.txt")
+        jsonl = "\n".join(json.dumps(line) for line in [
+            {"type": "tool.execution_start",
+             "data": {"toolCallId": "t1", "toolName": "create",
+                      "arguments": json.dumps({"path": relative_target})}},
+            {"type": "tool.execution_complete",
+             "data": {"toolCallId": "t1", "success": False,
+                      "toolTelemetry": {"properties": {"sandbox_denied": "true"}}}},
+            {"type": "assistant.message", "data": {"content": "Denied."}},
+        ])
+
+        class FakeCompleted:
+            returncode = 0
+            stdout = jsonl
+            stderr = ""
+
+        monkeypatch.setattr(mod.subprocess, "run", lambda cmd, **kwargs: FakeCompleted())
+        prompt_file = tmp_agent_dir / "prompt.md"
+        prompt_file.write_text("Do the thing")
+        request = IntegrationRunRequest(
+            workspace_root=tmp_agent_dir,
+            launch_dir=tmp_agent_dir / "runtime",
+            task_file=prompt_file,
+            timeout=30,
+            runtime_policy=EffectiveRuntimePolicy(
+                timeout=30
+            ),
+            skill=None,
+            skill_arguments=()
+        )
+        result = integration.run(request)
+
+        assert result.write_attempts == ["write-probe.txt"]
+        assert result.changed_files == []
+
+    def test_run_timeout_relativizes_partial_write_attempts_against_launch_dir(
+        self, integration, tmp_agent_dir, monkeypatch
+    ):
+        import json
+        from pathlib import Path
+        import flowgency.integrations.flowgency.copilot as mod
+
+        elsewhere = tmp_agent_dir.parent / "controller-elsewhere-timeout"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+
+        relative_target = str(Path("..") / "partial-probe.txt")
+        jsonl = "\n".join(
+            json.dumps(line)
+            for line in [
+                {
+                    "type": "tool.execution_start",
+                    "data": {
+                        "toolCallId": "t1",
+                        "toolName": "create",
+                        "arguments": json.dumps({"path": relative_target}),
+                    },
+                },
+                {
+                    "type": "assistant.message",
+                    "data": {"content": "Still working."},
+                },
+            ]
+        ).encode()
+
+        def time_out(cmd, **kwargs):
+            raise mod.subprocess.TimeoutExpired(
+                cmd,
+                kwargs["timeout"],
+                output=jsonl,
+                stderr=b"Work was still in progress."
+            )
+
+        monkeypatch.setattr(mod.subprocess, "run", time_out)
+        prompt_file = tmp_agent_dir / "prompt.md"
+        prompt_file.write_text("Do the thing")
+        request = IntegrationRunRequest(
+            workspace_root=tmp_agent_dir,
+            launch_dir=tmp_agent_dir / "runtime",
+            task_file=prompt_file,
+            timeout=30,
+            runtime_policy=EffectiveRuntimePolicy(
+                timeout=30
+            ),
+            skill=None,
+            skill_arguments=()
+        )
+        result = integration.run(request)
+
+        assert result.exit_code == 124
+        assert result.write_attempts == ["partial-probe.txt"]
+
     def test_parse_jsonl_result_event_fallback(self):
         """M2: result event with filesModified falls back when no per-tool edits parsed."""
         import json

@@ -626,8 +626,14 @@ class CopilotIntegration(BaseIntegration):
     def _parse_jsonl_output_details(
         raw: str,
         root: "Path | None",
+        launch_dir: "Path | None" = None,
     ) -> "tuple[str, list[FileChange], list[str]]":
-        """Recover messages and metadata without discarding valid earlier events."""
+        """Recover messages and metadata without discarding valid earlier events.
+
+        A relative path in Copilot's own output is relative to the CLI's
+        actual working directory, not Flowgency's. ``launch_dir`` supplies
+        that context; direct callers that omit it keep the prior behavior.
+        """
         tool_names: dict[str, str] = {}
         tool_paths: dict[str, str] = {}
         patch_targets: dict[str, list[dict]] = {}
@@ -660,7 +666,7 @@ class CopilotIntegration(BaseIntegration):
                         patch_targets[call_id] = targets
                         for target in targets:
                             relative = CopilotIntegration._relativize(
-                                target["path"], root
+                                target["path"], root, launch_dir
                             )
                             if relative not in seen_attempts:
                                 seen_attempts.add(relative)
@@ -671,7 +677,7 @@ class CopilotIntegration(BaseIntegration):
                     continue
                 tool_paths[call_id] = path
                 if tool_name in CopilotIntegration._WRITE_TOOLS:
-                    relative = CopilotIntegration._relativize(path, root)
+                    relative = CopilotIntegration._relativize(path, root, launch_dir)
                     if relative not in seen_attempts:
                         seen_attempts.add(relative)
                         write_attempts.append(relative)
@@ -689,7 +695,7 @@ class CopilotIntegration(BaseIntegration):
                         continue
                     for target in patch_targets.get(call_id, ()):
                         relative = CopilotIntegration._relativize(
-                            target["path"], root
+                            target["path"], root, launch_dir
                         )
                         entry = files.setdefault(
                             relative, {"status": None, "added": 0, "removed": 0}
@@ -709,7 +715,7 @@ class CopilotIntegration(BaseIntegration):
                 path = tool_paths.get(call_id)
                 if not path:
                     continue
-                relative = CopilotIntegration._relativize(path, root)
+                relative = CopilotIntegration._relativize(path, root, launch_dir)
                 entry = files.setdefault(relative, {"status": None, "added": 0, "removed": 0})
                 entry["added"] += line_count(metrics.get("linesAdded"))
                 entry["removed"] += line_count(metrics.get("linesRemoved"))
@@ -725,7 +731,7 @@ class CopilotIntegration(BaseIntegration):
                     continue
                 for path in modified:
                     if isinstance(path, str) and path:
-                        relative = CopilotIntegration._relativize(path, root)
+                        relative = CopilotIntegration._relativize(path, root, launch_dir)
                         files.setdefault(relative, {"status": "modified", "added": 0, "removed": 0})
         changes = [
             FileChange(path=path, status=info["status"] or "modified",
@@ -735,11 +741,16 @@ class CopilotIntegration(BaseIntegration):
         return "\n".join(texts) if texts else raw, changes, write_attempts
 
     @staticmethod
-    def _parse_jsonl_output(raw: str, root: "Path | None") -> "tuple[str, list[FileChange]]":
+    def _parse_jsonl_output(
+        raw: str,
+        root: "Path | None",
+        launch_dir: "Path | None" = None,
+    ) -> "tuple[str, list[FileChange]]":
         """Parse Copilot --output-format json (JSONL) into (text, changes)."""
         text, changes, _write_attempts = CopilotIntegration._parse_jsonl_output_details(
             raw,
             root,
+            launch_dir,
         )
         return text, changes
 
@@ -934,12 +945,24 @@ class CopilotIntegration(BaseIntegration):
         )
 
     @staticmethod
-    def _relativize(path: str, root: "Path | None") -> str:
-        """Return path relative to root when possible, else the original."""
+    def _relativize(
+        path: str,
+        root: "Path | None",
+        launch_dir: "Path | None" = None,
+    ) -> str:
+        """Return path relative to root when possible, else the original.
+
+        A relative ``path`` is Copilot's own CLI working directory, which is
+        ``launch_dir`` -- not Flowgency's process cwd -- so it is joined onto
+        ``launch_dir`` before resolving, when that context is available.
+        """
         if not root:
             return path
+        candidate = Path(path)
+        if launch_dir is not None and not candidate.is_absolute():
+            candidate = launch_dir / candidate
         try:
-            return str(Path(path).resolve().relative_to(Path(root).resolve()))
+            return str(candidate.resolve().relative_to(Path(root).resolve()))
         except (ValueError, OSError):
             return path
 
@@ -1145,6 +1168,7 @@ class CopilotIntegration(BaseIntegration):
             parsed_text, changed_files, write_attempts = self._parse_jsonl_output_details(
                 result_stdout,
                 parse_root,
+                request.launch_dir,
             )
             usage_summary = self._usage_summary(
                 result_stdout, copilot_home=job_home, cmd=cmd,
@@ -1183,6 +1207,7 @@ class CopilotIntegration(BaseIntegration):
             parsed_text, changed_files, write_attempts = self._parse_jsonl_output_details(
                 partial_stdout,
                 parse_root,
+                request.launch_dir,
             )
             timeout_message = f"Timed out after {request.timeout} seconds."
             stderr = (
