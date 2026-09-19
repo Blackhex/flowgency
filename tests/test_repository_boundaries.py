@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import re
 from pathlib import Path
@@ -25,14 +27,42 @@ CONTENT_SCAN_EXCLUSIONS = (
 
 # A generated SRI subresource-integrity digest ("sha512-<base64>") is opaque
 # binary data, not application terminology: its base64 alphabet can contain
-# any prohibited term as a coincidental substring. Match the same shape npm
-# actually writes so only a genuine digest payload is exempted below.
-_SRI_TOKEN = re.compile(r"^sha(?:1|256|384|512)-[A-Za-z0-9+/]+={0,2}$")
+# any prohibited term as a coincidental substring. Only a token that strictly
+# decodes to the exact digest length for its named algorithm is a genuine
+# digest; a merely alphabet-shaped payload (e.g. a short fragment) is not.
+_SRI_TOKEN = re.compile(r"^sha(1|256|384|512)-([A-Za-z0-9+/]+={0,2})$")
+_SRI_DIGEST_LENGTHS = {"1": 20, "256": 32, "384": 48, "512": 64}
+
+
+def _is_valid_sri_token(token: str) -> bool:
+    match = _SRI_TOKEN.match(token)
+    if not match:
+        return False
+    algorithm, payload = match.groups()
+    try:
+        decoded = base64.b64decode(payload, validate=True)
+    except (binascii.Error, ValueError):
+        return False
+    return len(decoded) == _SRI_DIGEST_LENGTHS[algorithm]
 
 
 def _is_valid_integrity(value: str) -> bool:
     tokens = value.split()
-    return bool(tokens) and all(_SRI_TOKEN.match(token) for token in tokens)
+    return bool(tokens) and all(_is_valid_sri_token(token) for token in tokens)
+
+
+def _synthetic_valid_digest(term: str, algorithm: str = "512") -> str:
+    """Build a genuinely decodable SRI payload for `algorithm` containing `term`."""
+    decoded_length = _SRI_DIGEST_LENGTHS[algorithm]
+    full_groups, remainder = divmod(decoded_length, 3)
+    free_length = full_groups * 4
+    padded_term = term + "A" * ((-len(term)) % 4)
+    body = padded_term + "A" * (free_length - len(padded_term))
+    tail = base64.b64encode(b"\x00" * remainder).decode() if remainder else ""
+    payload = body + tail
+    decoded = base64.b64decode(payload, validate=True)
+    assert len(decoded) == decoded_length
+    return f"sha{algorithm}-{payload}"
 
 
 def _lockfile_meaningful_text(raw: str) -> str:
@@ -96,7 +126,7 @@ def test_lockfile_scan_ignores_valid_integrity_digests_only(term: str):
             "packages": {
                 "node_modules/example": {
                     "version": "1.0.0",
-                    "integrity": f"sha512-AAAA{term}BBBB==",
+                    "integrity": _synthetic_valid_digest(term),
                 }
             }
         }
@@ -127,6 +157,81 @@ def test_lockfile_scan_still_flags_invalid_integrity_text(term: str):
                 "node_modules/example": {
                     "version": "1.0.0",
                     "integrity": f"not-a-real-digest-{term}",
+                }
+            }
+        }
+    )
+    assert term in _lockfile_meaningful_text(fixture).lower()
+
+
+@pytest.mark.parametrize("term", PROHIBITED_TERMS)
+def test_lockfile_scan_flags_short_invalid_integrity_payload(term: str):
+    # A 2-8 character payload is not a valid digest for any SRI algorithm
+    # (sha1's decoded length alone is 20 bytes), even though its characters
+    # are all in the base64 alphabet.
+    fixture = json.dumps(
+        {
+            "packages": {
+                "node_modules/example": {
+                    "version": "1.0.0",
+                    "integrity": f"sha512-{term}",
+                }
+            }
+        }
+    )
+    assert term in _lockfile_meaningful_text(fixture).lower()
+
+
+@pytest.mark.parametrize("term", PROHIBITED_TERMS)
+def test_lockfile_scan_flags_incorrect_length_integrity_payload(term: str):
+    # Alphabet-valid, correctly-padded base64 that genuinely decodes to 32
+    # bytes (a real sha256 digest length), mislabeled as sha512 (64 bytes).
+    decoded_length = 32
+    full_groups, remainder = divmod(decoded_length, 3)
+    free_length = full_groups * 4
+    padded_term = term + "A" * ((-len(term)) % 4)
+    body = padded_term + "A" * (free_length - len(padded_term))
+    tail = base64.b64encode(b"\x00" * remainder).decode() if remainder else ""
+    payload = body + tail
+    assert len(base64.b64decode(payload, validate=True)) == decoded_length
+    fixture = json.dumps(
+        {
+            "packages": {
+                "node_modules/example": {
+                    "version": "1.0.0",
+                    "integrity": f"sha512-{payload}",
+                }
+            }
+        }
+    )
+    assert term in _lockfile_meaningful_text(fixture).lower()
+
+
+@pytest.mark.parametrize("term", PROHIBITED_TERMS)
+def test_lockfile_scan_ignores_multi_token_integrity_when_all_valid(term: str):
+    value = f"{_synthetic_valid_digest(term)} {_synthetic_valid_digest('', '256')}"
+    fixture = json.dumps(
+        {
+            "packages": {
+                "node_modules/example": {
+                    "version": "1.0.0",
+                    "integrity": value,
+                }
+            }
+        }
+    )
+    assert term not in _lockfile_meaningful_text(fixture).lower()
+
+
+@pytest.mark.parametrize("term", PROHIBITED_TERMS)
+def test_lockfile_scan_flags_multi_token_integrity_when_any_invalid(term: str):
+    value = f"{_synthetic_valid_digest('', '256')} sha512-{term}"
+    fixture = json.dumps(
+        {
+            "packages": {
+                "node_modules/example": {
+                    "version": "1.0.0",
+                    "integrity": value,
                 }
             }
         }
