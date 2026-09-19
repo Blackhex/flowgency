@@ -53,6 +53,19 @@ from flowgency.jobs.processes import run_supervised
 
 logger = logging.getLogger(__name__)
 
+# Copilot writes its own config.json with a `// ...` comment header ("this
+# file is managed automatically"), which the CLI itself tolerates but the
+# standard `json` module does not. Only a whole line consisting of a comment
+# is stripped -- a quoted value containing "//" (e.g. a github.com URL) is
+# never anchored at the start of a line, so it survives untouched.
+_JSONC_COMMENT_LINE = re.compile(r"^\s*//")
+
+
+def _strip_jsonc_comment_lines(text: str) -> str:
+    return "\n".join(
+        line for line in text.splitlines() if not _JSONC_COMMENT_LINE.match(line)
+    )
+
 
 def _intersect_grants(
     grants: Iterable[tuple[str, ...] | None],
@@ -164,6 +177,15 @@ class CopilotIntegration(BaseIntegration):
     # long. Reporting a version is a local read; seconds is already generous.
     _VERSION_PROBE_TIMEOUT = 5
     _HELP_PROBE_TIMEOUT = 5
+    # Required on every launch: no built-in MCP servers the operator did not
+    # configure, and no silent version drift mid-fleet. Absence of either from
+    # the CLI's own --help means the claim cannot be made, so the launch is
+    # refused rather than sent out unisolated.
+    _ISOLATION_FLAGS = ("--disable-builtin-mcps", "--no-auto-update")
+    # The only config.json keys a job's private home may inherit. Everything
+    # else -- installed plugins, personal model/trust preferences -- is the
+    # operator's own and must not leak into an agent's isolated launch.
+    _AUTH_CONFIG_KEYS = ("lastLoggedInUser", "loggedInUsers", "authProvider")
     # What the CLI is given, by name. Everything else in Flowgency's environment
     # stays with Flowgency. Compared upper-cased: Windows folds the case of
     # environment names, so the same variable arrives spelled either way.
@@ -321,6 +343,16 @@ class CopilotIntegration(BaseIntegration):
         if has_mcp_config and has_allow_tool:
             return "mcp-http"
         return None
+
+    def _supports_required_isolation(self) -> bool:
+        """Does the installed CLI's --help advertise every isolation flag a launch requires?"""
+        help_text = self._cli_help()
+        if not help_text:
+            return False
+        return all(
+            re.search(rf"^\s+{re.escape(flag)}\b", help_text, re.MULTILINE)
+            for flag in self._ISOLATION_FLAGS
+        )
 
     @classmethod
     def _sandbox_enforces_writes(cls, reported: str | None) -> bool:
@@ -767,25 +799,52 @@ class CopilotIntegration(BaseIntegration):
         self,
         request: IntegrationRunRequest,
         settings: dict,
-    ) -> tuple[Path | None, str | None]:
-        """Create a per-job COPILOT_HOME holding sandbox settings and auth.
+    ) -> tuple[Path, str | None]:
+        """Create a per-job COPILOT_HOME holding sandbox settings and auth-only config.
 
-        Returns ``(home, None)`` on success or ``(None, reason)`` when the
-        caller should fall back to the shared home.
+        Every job gets its own private home, even when the operator's personal
+        config is missing: falling back to the shared home would hand the
+        agent every installed plugin and personal preference, not just
+        authentication. A missing or unreadable source degrades to an empty
+        config -- and a genuine CLI authentication failure -- rather than that
+        leak. A malformed or non-object source fails the launch outright,
+        before the agent ever runs.
+
+        Returns ``(home, None)`` on success or ``(home, reason)`` when the
+        source credentials were missing and the job's config is therefore
+        empty.
         """
         real_home = Path(
             os.environ.get("COPILOT_HOME", Path.home() / ".copilot")
         )
         source_config = real_home / "config.json"
-        if not source_config.is_file():
-            return None, "copilot credentials not found; using shared home"
+
+        auth_config: dict[str, object] = {}
+        degraded: str | None = None
+        if source_config.is_file():
+            raw = source_config.read_text(encoding="utf-8")
+            try:
+                parsed = json.loads(_strip_jsonc_comment_lines(raw))
+            except ValueError as error:
+                raise IntegrationError(
+                    f"copilot config.json at {source_config} is not valid JSON: {error}"
+                ) from error
+            if not isinstance(parsed, dict):
+                raise IntegrationError(
+                    f"copilot config.json at {source_config} must contain a JSON object"
+                )
+            auth_config = {
+                key: parsed[key] for key in self._AUTH_CONFIG_KEYS if key in parsed
+            }
+        else:
+            degraded = "copilot credentials not found; launching with an empty private config"
 
         job_home = request.launch_dir.parent / ".copilot"
         job_home.mkdir(parents=True, exist_ok=True)
 
         atomic_write_text(
             job_home / "config.json",
-            source_config.read_text(encoding="utf-8"),
+            json.dumps(auth_config) + "\n",
         )
 
         atomic_write_text(
@@ -793,7 +852,7 @@ class CopilotIntegration(BaseIntegration):
             json.dumps(settings, indent=2) + "\n",
         )
 
-        return job_home, None
+        return job_home, degraded
 
     @staticmethod
     def _usage_summary(raw: str, *, copilot_home: Path | None = None, cmd: str | None = None) -> str:
@@ -927,6 +986,11 @@ class CopilotIntegration(BaseIntegration):
             request.skill_arguments,
         )
         cmd = self.require_executable()
+        if not self._supports_required_isolation():
+            raise IntegrationError(
+                "GitHub Copilot CLI does not report the required isolation flags "
+                f"({', '.join(self._ISOLATION_FLAGS)}); refusing to launch without isolation."
+            )
 
         policy = request.runtime_policy
         # Only what the operator authored is rendered. Flowgency's generated
@@ -989,7 +1053,12 @@ class CopilotIntegration(BaseIntegration):
             "--no-color",
             "--experimental",
             "--output-format", "json",
+            *self._ISOLATION_FLAGS,
         ]
+
+        model = self._config.get("model")
+        if isinstance(model, str) and model.strip():
+            cmd_args += ["--model", model]
 
         if roots:
             for p in roots:

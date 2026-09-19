@@ -16,6 +16,11 @@ from flowgency.integrations.models import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolation_flags_supported(monkeypatch):
+    monkeypatch.setattr(CopilotIntegration, "_supports_required_isolation", lambda self: True)
+
+
 class _FakeCompleted:
     returncode = 0
     stdout = "ok"

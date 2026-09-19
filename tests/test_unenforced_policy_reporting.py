@@ -20,6 +20,11 @@ from tests.test_job_execution import _authority, queued_job, read_metadata
 NOTE_HEADING = "Permission policy not fully enforced"
 
 
+@pytest.fixture(autouse=True)
+def _isolation_flags_supported(monkeypatch):
+    monkeypatch.setattr(CopilotIntegration, "_supports_required_isolation", lambda self: True)
+
+
 # ── copilot: what the integration reports ───────────────────────────────────
 
 
@@ -115,9 +120,12 @@ def test_copilot_names_the_denial_it_drops_when_the_sandbox_stays_off(
     assert any(str(denied) in entry for entry in result.unenforced_rules)
 
 
-def test_copilot_reports_that_no_filesystem_policy_was_applied_without_credentials(
+def test_copilot_still_applies_the_filesystem_policy_without_credentials(
     tmp_path, monkeypatch, repo
 ):
+    """Every job gets its own private home regardless of credentials, so
+    settings.json is still written and the filesystem policy still applies;
+    only authentication itself degrades."""
     bare_home = tmp_path / "bare_home"
     bare_home.mkdir()
     policy = EffectiveRuntimePolicy(
@@ -128,11 +136,9 @@ def test_copilot_reports_that_no_filesystem_policy_was_applied_without_credentia
 
     result = _launch(policy, tmp_path, monkeypatch, real_home=bare_home)
 
-    assert result.copilot_home is None
-    entries = result.unenforced_rules
-    assert entries, "a run with no sandbox settings must report the gap"
-    assert "filesystem policy was not applied" in entries[0]
-    assert any(str(repo) in entry and "read" in entry for entry in entries)
+    assert result.copilot_home is not None
+    assert result.unenforced_rules == []
+    assert "credentials" in result.stderr
 
 
 # ── execution: what reaches the record ──────────────────────────────────────

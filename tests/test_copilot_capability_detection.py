@@ -220,3 +220,63 @@ def test_shell_is_never_claimed_as_path_scopable(copilot, monkeypatch):
 
     assert "shell" not in copilot.runtime_capabilities.path_scopable_tools
     assert "shell" not in copilot.declared_runtime_capabilities.path_scopable_tools
+
+
+# ── required isolation flags: every launch needs both, verified by --help ──
+
+
+ISOLATION_HELP_TEXT = (
+    "Usage: copilot [options]\n\n"
+    "Options:\n"
+    "  --disable-builtin-mcps        Disable built-in MCP servers\n"
+    "  --no-auto-update               Disable automatic updates\n"
+)
+
+
+def test_help_reporting_both_isolation_flags_is_supported(copilot, monkeypatch):
+    monkeypatch.setattr(copilot, "_cli_help", lambda: ISOLATION_HELP_TEXT)
+
+    assert copilot._supports_required_isolation() is True
+
+
+def test_help_missing_disable_builtin_mcps_is_unsupported(copilot, monkeypatch):
+    monkeypatch.setattr(
+        copilot,
+        "_cli_help",
+        lambda: "  --no-auto-update               Disable automatic updates\n",
+    )
+
+    assert copilot._supports_required_isolation() is False
+
+
+def test_help_missing_no_auto_update_is_unsupported(copilot, monkeypatch):
+    monkeypatch.setattr(
+        copilot,
+        "_cli_help",
+        lambda: "  --disable-builtin-mcps        Disable built-in MCP servers\n",
+    )
+
+    assert copilot._supports_required_isolation() is False
+
+
+def test_absent_help_is_unsupported(copilot, monkeypatch):
+    monkeypatch.setattr(copilot, "_cli_help", lambda: None)
+
+    assert copilot._supports_required_isolation() is False
+
+
+def test_a_flag_name_appearing_only_in_prose_is_not_read_as_support(copilot, monkeypatch):
+    # Mentioning a flag in a description ("...disables --no-auto-update when
+    # set") is not the same as the CLI declaring it as an option; only an
+    # indented option line counts.
+    monkeypatch.setattr(
+        copilot,
+        "_cli_help",
+        lambda: (
+            "  --disable-builtin-mcps        Disable built-in MCP servers\n"
+            "  --quiet                        Suppresses --no-auto-update banners\n"
+        ),
+    )
+
+    assert copilot._supports_required_isolation() is False
+

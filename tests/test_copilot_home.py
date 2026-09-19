@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from flowgency.integrations import IntegrationError
 from flowgency.integrations.flowgency.copilot import CopilotIntegration
 from flowgency.integrations.flowgency.copilot_sandbox import build_sandbox_settings
 from flowgency.integrations.models import (
@@ -15,6 +16,14 @@ from flowgency.integrations.models import (
     IntegrationRunRequest,
     ResolvedPermissionRule,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolation_flags_supported(monkeypatch):
+    """Isolation-flag capability is tested on its own in
+    test_copilot_capability_detection.py; every test here launches with it
+    already granted so it can focus on home preparation."""
+    monkeypatch.setattr(CopilotIntegration, "_supports_required_isolation", lambda self: True)
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────
@@ -105,7 +114,7 @@ def test_prepared_home_contains_settings_json(tmp_path, monkeypatch, repo):
 def test_prepared_home_contains_config_json(tmp_path, monkeypatch, repo):
     real_home = tmp_path / "real_home"
     real_home.mkdir()
-    (real_home / "config.json").write_text('{"tok":"x"}', encoding="utf-8")
+    (real_home / "config.json").write_text('{"authProvider":"github"}', encoding="utf-8")
 
     policy = _policy(repo)
     _captured, _result, launch_dir = _launch(
@@ -114,7 +123,163 @@ def test_prepared_home_contains_config_json(tmp_path, monkeypatch, repo):
 
     copied = launch_dir.parent / ".copilot" / "config.json"
     assert copied.is_file()
-    assert json.loads(copied.read_text(encoding="utf-8")) == {"tok": "x"}
+    assert json.loads(copied.read_text(encoding="utf-8")) == {"authProvider": "github"}
+
+
+def test_prepared_home_config_is_authentication_only_allowlist(tmp_path, monkeypatch, repo):
+    """Only authentication keys survive into a job's private config; every
+    other personal preference -- plugins, model, trust -- is dropped, and the
+    operator's own config.json is never touched."""
+    real_home = tmp_path / "real_home"
+    real_home.mkdir()
+    source = {
+        "lastLoggedInUser": {"login": "fixture-user", "host": "https://github.com"},
+        "loggedInUsers": [{"login": "fixture-user", "host": "https://github.com"}],
+        "installedPlugins": [{"name": "unrelated-fixture", "enabled": True}],
+        "model": "personal-default",
+        "trustedFolders": ["C:/personal"],
+    }
+    source_path = real_home / "config.json"
+    source_path.write_text(json.dumps(source), encoding="utf-8")
+    original_bytes = source_path.read_bytes()
+
+    policy = _policy(repo)
+    _captured, _result, launch_dir = _launch(
+        policy, tmp_path, monkeypatch, real_home=real_home,
+    )
+
+    job_config = json.loads(
+        (launch_dir.parent / ".copilot" / "config.json").read_text(encoding="utf-8")
+    )
+    expected = {key: source[key] for key in ("lastLoggedInUser", "loggedInUsers")}
+    assert job_config == expected
+    assert source_path.read_bytes() == original_bytes
+
+
+def test_prepared_home_config_preserves_nested_auth_structures(tmp_path, monkeypatch, repo):
+    """Nested dicts/lists inside the allowed keys pass through intact, not
+    flattened or re-shaped."""
+    real_home = tmp_path / "real_home"
+    real_home.mkdir()
+    source = {
+        "loggedInUsers": [
+            {"login": "fixture-user", "host": "https://github.com", "scopes": ["repo", "read:org"]},
+            {"login": "fixture-user-2", "host": "https://ghe.example.com"},
+        ],
+        "authProvider": "github",
+    }
+    (real_home / "config.json").write_text(json.dumps(source), encoding="utf-8")
+
+    policy = _policy(repo)
+    _captured, _result, launch_dir = _launch(
+        policy, tmp_path, monkeypatch, real_home=real_home,
+    )
+
+    job_config = json.loads(
+        (launch_dir.parent / ".copilot" / "config.json").read_text(encoding="utf-8")
+    )
+    assert job_config == source
+
+
+def test_prepared_home_config_tolerates_the_real_jsonc_comment_header(
+    tmp_path, monkeypatch, repo
+):
+    """Measured: Copilot's own config.json starts with a `// ...` comment
+    header ("this file is managed automatically") before the JSON object.
+    The CLI tolerates it; the source read here must too, rather than failing
+    the launch on the operator's own untouched file."""
+    real_home = tmp_path / "real_home"
+    real_home.mkdir()
+    (real_home / "config.json").write_text(
+        "// User settings belong in settings.json.\n"
+        "// This file is managed automatically.\n"
+        '{"authProvider": "github", "lastLoggedInUser": {"host": "https://github.com"}}\n',
+        encoding="utf-8",
+    )
+
+    policy = _policy(repo)
+    _captured, _result, launch_dir = _launch(
+        policy, tmp_path, monkeypatch, real_home=real_home,
+    )
+
+    job_config = json.loads(
+        (launch_dir.parent / ".copilot" / "config.json").read_text(encoding="utf-8")
+    )
+    assert job_config == {
+        "authProvider": "github",
+        "lastLoggedInUser": {"host": "https://github.com"},
+    }
+
+
+def test_prepared_home_config_filtering_does_not_widen_the_env_allowlist(
+    tmp_path, monkeypatch, repo
+):
+    """Filtering config.json is a separate boundary from the env allowlist;
+    neither leaks through the other."""
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "not-for-the-agent")
+    real_home = tmp_path / "real_home"
+    real_home.mkdir()
+    (real_home / "config.json").write_text(
+        json.dumps({"authProvider": "github", "installedPlugins": [{"name": "x"}]}),
+        encoding="utf-8",
+    )
+
+    policy = _policy(repo)
+    captured, _result, launch_dir = _launch(
+        policy, tmp_path, monkeypatch, real_home=real_home,
+    )
+
+    assert "AWS_SECRET_ACCESS_KEY" not in captured["kwargs"]["env"]
+    job_config = json.loads(
+        (launch_dir.parent / ".copilot" / "config.json").read_text(encoding="utf-8")
+    )
+    assert "installedPlugins" not in job_config
+
+
+def _launch_expecting_failure(tmp_path, monkeypatch, repo, *, source_config_text: str):
+    import flowgency.integrations.flowgency.copilot as copilot_mod
+
+    real_home = tmp_path / "real_home"
+    real_home.mkdir()
+    (real_home / "config.json").write_text(source_config_text, encoding="utf-8")
+    monkeypatch.setenv("COPILOT_HOME", str(real_home))
+    monkeypatch.setattr(CopilotIntegration, "resolve_executable", lambda self: "copilot")
+
+    def fail_run(args, **kwargs):
+        if "--version" in args or "--help" in args:
+            return _FakeCompleted()
+        pytest.fail("must not launch with a malformed source config")
+
+    monkeypatch.setattr(copilot_mod.subprocess, "run", fail_run)
+
+    prompt = tmp_path / "p.prompt"
+    prompt.write_text("do the thing", encoding="utf-8")
+    launch_dir = tmp_path / "runtime"
+    launch_dir.mkdir(parents=True, exist_ok=True)
+
+    return CopilotIntegration().run(
+        IntegrationRunRequest(
+            workspace_root=tmp_path,
+            launch_dir=launch_dir,
+            task_file=prompt,
+            timeout=60,
+            runtime_policy=_policy(repo),
+            skill=None,
+            skill_arguments=(),
+        )
+    )
+
+
+def test_malformed_source_config_fails_before_launch(tmp_path, monkeypatch, repo):
+    with pytest.raises(IntegrationError):
+        _launch_expecting_failure(tmp_path, monkeypatch, repo, source_config_text="{not json")
+
+
+def test_non_object_source_config_fails_before_launch(tmp_path, monkeypatch, repo):
+    with pytest.raises(IntegrationError):
+        _launch_expecting_failure(
+            tmp_path, monkeypatch, repo, source_config_text=json.dumps(["not", "an", "object"])
+        )
 
 
 # ── env wiring ─────────────────────────────────────────────────────────────
@@ -144,25 +309,26 @@ def test_copilot_home_on_run_result(tmp_path, monkeypatch, repo):
     assert result.copilot_home == str(launch_dir.parent / ".copilot")
 
 
-# ── missing credentials fallback ───────────────────────────────────────────
+# ── missing credentials ─────────────────────────────────────────────────────
 
 
-def test_missing_config_falls_back_to_shared_home(tmp_path, monkeypatch, repo):
+def test_missing_source_config_still_gets_a_private_home(tmp_path, monkeypatch, repo):
+    """No shared-home fallback: a missing source still gets a private home,
+    just with an empty config, so a genuine CLI auth failure surfaces instead
+    of the operator's unfiltered credentials leaking in."""
     empty_home = tmp_path / "empty_home"
     empty_home.mkdir()
 
     policy = _policy(repo)
-    captured, result, _launch_dir = _launch(
+    captured, result, launch_dir = _launch(
         policy, tmp_path, monkeypatch, real_home=empty_home,
     )
 
-    # Falling back to the shared home does not restore the inherited
-    # environment: the agent still gets only what it was named, and the shared
-    # home reaches it through the allowlist rather than through a job-specific
-    # override.
+    job_home = launch_dir.parent / ".copilot"
     env = {name.upper(): value for name, value in captured["kwargs"]["env"].items()}
-    assert env["COPILOT_HOME"] == str(empty_home)
-    assert result.copilot_home is None
+    assert env["COPILOT_HOME"] == str(job_home)
+    assert result.copilot_home == str(job_home)
+    assert json.loads((job_home / "config.json").read_text(encoding="utf-8")) == {}
 
 
 def test_missing_config_surfaces_warning(tmp_path, monkeypatch, repo):

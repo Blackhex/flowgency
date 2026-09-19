@@ -341,6 +341,15 @@ class TestCopilot:
     def integration(self):
         return CopilotIntegration()
 
+    @pytest.fixture(autouse=True)
+    def _isolation_flags_supported(self, monkeypatch, tmp_path):
+        """Isolation-flag capability negotiation is exercised on its own in
+        test_copilot_capability_detection.py; every test in this class
+        launches with it already granted, and isolated from whatever the
+        machine running this suite actually has in its real ~/.copilot."""
+        monkeypatch.setattr(CopilotIntegration, "_supports_required_isolation", lambda self: True)
+        monkeypatch.setenv("COPILOT_HOME", str(tmp_path / "no_such_real_home"))
+
     def test_metadata(self, integration):
         assert integration.name == "copilot"
         assert integration.display_name == "GitHub Copilot"
@@ -1141,7 +1150,10 @@ class TestCopilot:
         import flowgency.integrations.flowgency.copilot as mod
 
         session_id = "usage-session"
-        state_dir = tmp_path / "session-state" / session_id
+        # The usage summary is read from the job's own private home, not
+        # whatever COPILOT_HOME happens to point at.
+        job_home = tmp_agent_dir / ".copilot"
+        state_dir = job_home / "session-state" / session_id
         state_dir.mkdir(parents=True)
         (state_dir / "events.jsonl").write_text(json.dumps({
             "type": "session.shutdown",
@@ -1157,7 +1169,6 @@ class TestCopilot:
                 "codeChanges": {"linesAdded": 0, "linesRemoved": 0},
             },
         }) + "\n")
-        monkeypatch.setenv("COPILOT_HOME", str(tmp_path))
         jsonl = "\n".join([
             json.dumps({"type": "assistant.message", "data": {"content": "Done."}}),
             json.dumps({
@@ -1196,7 +1207,8 @@ class TestCopilot:
         from flowgency.integrations import format_command_with_environment
 
         expected = format_command_with_environment(
-            [integration.require_executable(), "--resume=usage-session"], {}
+            [integration.require_executable(), "--resume=usage-session"],
+            {"COPILOT_HOME": str(job_home)},
         )
         assert f"Resume     {expected}" in result.stderr
 

@@ -31,6 +31,7 @@ import subprocess
 import sys
 import hashlib
 import json
+import os
 import re
 import threading
 from copy import deepcopy
@@ -42,10 +43,14 @@ from flowgency.integrations import REGISTRY
 from flowgency.workflows.models import ArtifactRef
 from tests._runtime_probe_helpers import (
     AI_CLI_COMMANDS,
+    assert_mcp_server_inventory,
     assert_successful_file_read_before_publish,
     assert_sandbox_denied_write,
+    capture_raw_copilot_output,
     file_content_b64,
+    iter_jsonl_events,
     load_job_session_events,
+    pin_resolved_executable,
     supported_ticket_adapters,
     ticket_capable_installed_runtimes,
 )
@@ -230,6 +235,61 @@ def test_assert_sandbox_denied_write_accepts_only_a_correlated_policy_denial():
         assert_sandbox_denied_write([], target_name=target)
 
 
+def _servers_loaded_event(servers: list[dict]) -> dict:
+    return {"type": "session.mcp_servers_loaded", "data": {"servers": servers}}
+
+
+def test_assert_mcp_server_inventory_catches_an_unexpected_leaked_server():
+    """Deterministic proof against a synthetic unrelated plugin server, using
+    real-shaped ``session.mcp_servers_loaded`` events and no CLI launch.
+
+    Measured against a real session (Copilot 1.0.87-0): a disabled built-in
+    and a failed plugin-sourced server both appear in this one-shot inventory
+    with a `name`, regardless of whether either ever completed a handshake --
+    so the assertion must count them, not just servers a tool call reached.
+    """
+    events = [
+        _servers_loaded_event(
+            [
+                {"name": "github-mcp-server", "status": "disabled", "source": "builtin"},
+                {"name": "flowgency-tickets", "status": "connected", "source": "additional"},
+            ]
+        ),
+    ]
+
+    assert_mcp_server_inventory(
+        events, expected_servers=frozenset({"github-mcp-server", "flowgency-tickets"})
+    )
+
+    with pytest.raises(AssertionError, match="unexpected MCP server set"):
+        assert_mcp_server_inventory(events, expected_servers=frozenset({"flowgency-tickets"}))
+
+
+def test_assert_mcp_server_inventory_counts_failed_and_pending_servers():
+    """A leaked plugin server that never finished its handshake must still be
+    caught -- not just servers that fully connected."""
+    events = [
+        _servers_loaded_event(
+            [
+                {
+                    "name": "unrelated-fixture-plugin",
+                    "status": "failed",
+                    "source": "plugin",
+                    "error": "MCP server process exited before completing the MCP initialize handshake",
+                },
+            ]
+        ),
+    ]
+
+    with pytest.raises(AssertionError, match="unrelated-fixture-plugin"):
+        assert_mcp_server_inventory(events, expected_servers=frozenset())
+
+
+def test_assert_mcp_server_inventory_requires_the_inventory_event():
+    with pytest.raises(AssertionError, match="no session.mcp_servers_loaded event"):
+        assert_mcp_server_inventory([], expected_servers=frozenset())
+
+
 @pytest.mark.parametrize(
     ("payload", "expected_b64"),
     (
@@ -345,6 +405,13 @@ def _hash_files(paths: dict[str, Path]) -> dict[str, str]:
     }
 
 
+def _canonical_test_model(runtime_name: str) -> str | None:
+    """The model live Copilot probes select, unless overridden for this run."""
+    if runtime_name != "copilot":
+        return None
+    return os.environ.get("FLOWGENCY_TEST_COPILOT_MODEL", "gpt-5.4")
+
+
 def _ticket_agent_config(raw_config: dict, runtime_name: str) -> dict:
     """A single-agent team bound to the installed ticket-capable runtime.
 
@@ -356,6 +423,9 @@ def _ticket_agent_config(raw_config: dict, runtime_name: str) -> dict:
     builder = raw["teams"]["newsletter"]["agents"][0]
     assert builder["name"] == "builder"
     builder["integration"] = runtime_name
+    model = _canonical_test_model(runtime_name)
+    if model:
+        builder["integration_config"] = {"model": model}
     return raw
 
 
@@ -382,8 +452,12 @@ def _restricted_ticket_agent_config(
         "rules": [{"path": str(workspace), "tools": ["read", "search"]}],
     }
     if allow_local_network:
-        builder["integration_config"] = {"allow_local_network": True}
+        builder["integration_config"] = {
+            **builder.get("integration_config", {}),
+            "allow_local_network": True,
+        }
     return raw
+
 
 
 def _run_tiny_project_check(workspace: Path) -> bytes:
@@ -635,7 +709,7 @@ else:
         ids=lambda item: item.name,
     )
     def test_restricted_agent_reads_ticket_over_http_without_editing(
-        runtime, tmp_path, raw_config
+        runtime, tmp_path, raw_config, monkeypatch
     ):
         """The first live acceptance gate: a restricted read/search-only Copilot
         run with explicit ``allow_local_network`` consent reaches the worker-owned
@@ -652,6 +726,7 @@ else:
         from flowgency.prompts import PromptStore
         from tests._runtime_probe_helpers import record_ticket_tool_calls
 
+        pin_resolved_executable(monkeypatch, runtime)
         raw = _restricted_ticket_agent_config(raw_config, runtime.name)
         env = make_workflow_environment(tmp_path, raw)
         env.publish_criteria_workflow()
@@ -704,7 +779,7 @@ else:
         )
         authority = env.job_store.create(JobRecord.from_spec(spec))
 
-        with record_ticket_tool_calls() as calls:
+        with capture_raw_copilot_output() as raw_stdout, record_ticket_tool_calls() as calls:
             record = execute_job(authority)
 
         job = read_job(authority.path)
@@ -724,6 +799,12 @@ else:
         )
         assert all(call["ok"] for call in ticket_get_calls), (
             f"{runtime.name}: a ticket_get call failed at the broker: {ticket_get_calls}"
+        )
+        # No plugin- or personal-config MCP server leaked in: only the disabled
+        # built-in and the trusted ticket channel this run actually needed.
+        assert_mcp_server_inventory(
+            [event for text in raw_stdout for event in iter_jsonl_events(text)],
+            expected_servers=frozenset({"github-mcp-server", "flowgency-tickets"}),
         )
         # A read-only run leaves the ticket and every protected input untouched.
         final = env.read(ref).record
@@ -1029,7 +1110,7 @@ else:
         "runtime", TICKET_CAPABLE_RUNTIMES, ids=lambda item: item.name
     )
     def test_agent_verifies_presatisfied_project_without_rewriting_it(
-        runtime, tmp_path, raw_config
+        runtime, tmp_path, raw_config, monkeypatch
     ):
         from flowgency.blueprints import CompilationCache
         from flowgency.blueprints.library import BlueprintLibrary
@@ -1039,6 +1120,7 @@ else:
         from flowgency.jobs.store import read_job
         from flowgency.prompts import PromptStore
 
+        pin_resolved_executable(monkeypatch, runtime)
         raw = _ticket_agent_config(raw_config, runtime.name)
         env = make_workflow_environment(tmp_path, raw)
 
@@ -1097,7 +1179,8 @@ else:
         )
         authority = env.job_store.create(JobRecord.from_spec(spec))
 
-        record = execute_job(authority)
+        with capture_raw_copilot_output() as raw_stdout:
+            record = execute_job(authority)
 
         job = read_job(authority.path)
         assert record.status == "complete", (
@@ -1124,6 +1207,11 @@ else:
             artifact_name="result.txt",
         )
         assert read_proof.target == project_result.name
+        # No plugin- or personal-config MCP server leaked in.
+        assert_mcp_server_inventory(
+            [event for text in raw_stdout for event in iter_jsonl_events(text)],
+            expected_servers=frozenset({"github-mcp-server", "flowgency-tickets"}),
+        )
 
         reported = [event for event in final.events if event.kind == "reported"]
         assert reported and reported[-1].summary.strip(), (
@@ -1145,7 +1233,7 @@ else:
         ids=lambda item: item.name,
     )
     def test_agent_in_restricted_workspace_keeps_ticket_flow_and_records_denied_write(
-        runtime, tmp_path, raw_config
+        runtime, tmp_path, raw_config, monkeypatch
     ):
         from flowgency.blueprints import CompilationCache
         from flowgency.blueprints.library import BlueprintLibrary
@@ -1155,6 +1243,7 @@ else:
         from flowgency.jobs.store import read_job
         from flowgency.prompts import PromptStore
 
+        pin_resolved_executable(monkeypatch, runtime)
         raw = _restricted_ticket_agent_config(raw_config, runtime.name)
         env = make_workflow_environment(tmp_path, raw)
         env.publish_artifact_field_workflow()
@@ -1214,7 +1303,8 @@ else:
         )
         authority = env.job_store.create(JobRecord.from_spec(spec))
 
-        record = execute_job(authority)
+        with capture_raw_copilot_output() as raw_stdout:
+            record = execute_job(authority)
         job = read_job(authority.path)
         assert record.status == "complete", (
             f"{runtime.name}: restricted ticket flow did not complete: "
@@ -1236,6 +1326,11 @@ else:
             artifact_name="result.txt",
         )
         assert read_proof.target == project_result.name
+        # No plugin- or personal-config MCP server leaked in.
+        assert_mcp_server_inventory(
+            [event for text in raw_stdout for event in iter_jsonl_events(text)],
+            expected_servers=frozenset({"github-mcp-server", "flowgency-tickets"}),
+        )
         assert read_job(authority.path).result_metadata["write_attempts"] == [blocked_note.name]
         assert not blocked_note.exists()
         # The stored write_attempts and the absent file only prove the agent
@@ -1296,7 +1391,7 @@ if TICKET_CAPABLE_RUNTIMES:
         "runtime", TICKET_CAPABLE_RUNTIMES, ids=lambda item: item.name
     )
     def test_one_run_creates_updates_and_transitions_multiple_tickets(
-        runtime, tmp_path, raw_config
+        runtime, tmp_path, raw_config, monkeypatch
     ):
         from flowgency.blueprints import CompilationCache
         from flowgency.blueprints.library import BlueprintLibrary
@@ -1307,6 +1402,7 @@ if TICKET_CAPABLE_RUNTIMES:
         from flowgency.prompts import PromptStore
         from tests._runtime_probe_helpers import record_ticket_tool_calls
 
+        pin_resolved_executable(monkeypatch, runtime)
         raw = _ticket_agent_config(raw_config, runtime.name)
         env = make_workflow_environment(tmp_path, raw)
         env.publish_criteria_workflow()
@@ -1344,7 +1440,7 @@ if TICKET_CAPABLE_RUNTIMES:
         )
         authority = env.job_store.create(JobRecord.from_spec(spec))
 
-        with record_ticket_tool_calls() as calls:
+        with capture_raw_copilot_output() as raw_stdout, record_ticket_tool_calls() as calls:
             record = execute_job(authority)
         job = read_job(authority.path)
         assert record.status == "complete", (
@@ -1409,4 +1505,9 @@ if TICKET_CAPABLE_RUNTIMES:
         assert created.field_values.get("summary") == "operated by agent", (
             f"{runtime.name}: ticket B update did not land; "
             f"summary={created.field_values.get('summary')!r}"
+        )
+        # No plugin- or personal-config MCP server leaked in.
+        assert_mcp_server_inventory(
+            [event for text in raw_stdout for event in iter_jsonl_events(text)],
+            expected_servers=frozenset({"github-mcp-server", "flowgency-tickets"}),
         )

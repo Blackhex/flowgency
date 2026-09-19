@@ -62,6 +62,23 @@ def installed_ai_cli_runtimes(registry=REGISTRY) -> tuple[InstalledRuntime, ...]
     return tuple(installed)
 
 
+def pin_resolved_executable(monkeypatch, runtime: InstalledRuntime, registry=REGISTRY) -> str | None:
+    """Bind a live probe to the exact path already resolved, and report its version.
+
+    A launch that re-resolves PATH on its own can pick up a different install
+    than the one this probe measured (two copies on PATH, or an update landing
+    mid-suite), silently claiming isolation for a binary that was never
+    checked. Pinning `resolve_executable` makes every call within the probe --
+    the capability checks and the actual launch alike -- resolve to the same
+    file. Returns the version that exact binary reports, or None if it will
+    not say; callers should surface it in failure diagnostics, never log
+    credential values from it.
+    """
+    integration = registry[runtime.name]
+    monkeypatch.setattr(type(integration), "resolve_executable", lambda self: runtime.command)
+    return integration._probe_cli_version(runtime.command)
+
+
 def supported_ticket_adapters(registry=REGISTRY) -> frozenset[str]:
     """Adapters that explicitly declare a live ticket transport.
 
@@ -259,6 +276,36 @@ def assert_protected_state_unchanged(
     assert after.workspace == before.workspace, f"{label}: workspace changed"
     assert after.task == before.task, f"{label}: task changed"
     assert after.repository == before.repository, f"{label}: repository changed"
+
+
+@contextmanager
+def capture_raw_copilot_output():
+    """Observe the raw JSONL stdout of a real supervised Copilot launch.
+
+    Measured: Copilot's persisted session-state ``events.jsonl`` (read by
+    ``load_job_session_events``) excludes every event marked ``ephemeral``,
+    including ``session.mcp_servers_loaded`` and
+    ``session.mcp_server_status_changed`` -- it only keeps conversation
+    history for ``--resume``. Those MCP-server events exist only in the raw
+    stdout stream of the CLI invocation itself, so this wraps the real
+    ``run_supervised`` call (which still drives the genuine subprocess) and
+    records its stdout for later parsing, rather than mocking anything away.
+    """
+    import flowgency.integrations.flowgency.copilot as copilot_mod
+
+    captured: list[str] = []
+    original = copilot_mod.run_supervised
+
+    def recording(*args, **kwargs):
+        completed = original(*args, **kwargs)
+        captured.append(completed.stdout)
+        return completed
+
+    copilot_mod.run_supervised = recording
+    try:
+        yield captured
+    finally:
+        copilot_mod.run_supervised = original
 
 
 # --------------------------------------------------------------------------- #
@@ -582,6 +629,37 @@ def load_job_session_events(job) -> list[dict]:
     for text in texts:
         events.extend(iter_jsonl_events(text))
     return events
+
+
+def assert_mcp_server_inventory(events: list[dict], *, expected_servers: frozenset[str]) -> None:
+    """The exact set of MCP servers this session touched -- connected, pending,
+    disabled, or failed -- must match `expected_servers`.
+
+    Reads Copilot's one-shot ``session.mcp_servers_loaded`` inventory event,
+    whose ``data.servers`` list names every server the CLI attempted to load
+    (measured: a disabled built-in and a failed plugin-sourced server both
+    appear there), rather than only the servers a tool call happened to
+    reach. A server that leaked in but never completed its handshake -- or
+    never got called -- is still caught.
+    """
+    for event in events:
+        if event.get("type") != "session.mcp_servers_loaded":
+            continue
+        data = event.get("data")
+        servers = data.get("servers") if isinstance(data, dict) else None
+        if not isinstance(servers, list):
+            continue
+        observed = {
+            entry.get("name")
+            for entry in servers
+            if isinstance(entry, dict) and isinstance(entry.get("name"), str)
+        }
+        assert observed == set(expected_servers), (
+            f"unexpected MCP server set: observed={sorted(observed)!r}, "
+            f"expected={sorted(expected_servers)!r}"
+        )
+        return
+    assert False, "no session.mcp_servers_loaded event was observed"
 
 
 def assert_sandbox_denied_write(events, *, target_name: str) -> SandboxDenial:

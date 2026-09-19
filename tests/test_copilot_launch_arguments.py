@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from flowgency.integrations import IntegrationError
 from flowgency.integrations.flowgency.copilot import CopilotIntegration
 from flowgency.integrations.models import (
     EffectiveRuntimePolicy,
@@ -22,13 +23,21 @@ from flowgency.integrations.models import (
 from flowgency.jobs.processes import RuntimeProcessLifecycle
 
 
+@pytest.fixture(autouse=True)
+def _isolation_flags_supported(monkeypatch):
+    """Isolation-flag capability negotiation is tested on its own in
+    test_copilot_capability_detection.py; every test here launches with it
+    already granted so it can focus on what ends up on the command line."""
+    monkeypatch.setattr(CopilotIntegration, "_supports_required_isolation", lambda self: True)
+
+
 class _FakeCompleted:
     returncode = 0
     stdout = "ok"
     stderr = ""
 
 
-def _launch(policy, tmp_path, monkeypatch, *, enforce_validation=True) -> list[str]:
+def _launch(policy, tmp_path, monkeypatch, *, enforce_validation=True, config=None) -> list[str]:
     """Run Copilot against `policy` and return the argv it would have used."""
     import flowgency.integrations.flowgency.copilot as copilot_mod
 
@@ -42,8 +51,15 @@ def _launch(policy, tmp_path, monkeypatch, *, enforce_validation=True) -> list[s
 
     monkeypatch.setattr(copilot_mod.subprocess, "run", fake_run)
     monkeypatch.setattr(CopilotIntegration, "resolve_executable", lambda self: "copilot")
+    # Isolated from whatever the machine running this suite actually has in
+    # its real ~/.copilot: these tests only care about argv, not credentials.
+    monkeypatch.setenv("COPILOT_HOME", str(tmp_path / "no_such_real_home"))
 
-    CopilotIntegration({"allow_local_network": True}).run(
+    integration_config = {"allow_local_network": True}
+    if config:
+        integration_config.update(config)
+
+    CopilotIntegration(integration_config).run(
         IntegrationRunRequest(
             workspace_root=tmp_path,
             launch_dir=tmp_path / "runtime",
@@ -67,6 +83,138 @@ def repo(tmp_path: Path) -> Path:
     path = tmp_path / "repo"
     path.mkdir()
     return path
+
+
+# ── Required isolation flags and optional model ─────────────────────────────
+
+
+def test_required_isolation_flags_are_always_present(tmp_path, monkeypatch, repo):
+    policy = EffectiveRuntimePolicy(
+        timeout=60,
+        mode="restricted",
+        rules=(ResolvedPermissionRule(path=repo, tools=("read",)),),
+    )
+
+    args = _launch(policy, tmp_path, monkeypatch)
+
+    assert "--disable-builtin-mcps" in args
+    assert "--no-auto-update" in args
+
+
+def test_configured_model_is_rendered_as_its_own_argument(tmp_path, monkeypatch, repo):
+    policy = EffectiveRuntimePolicy(
+        timeout=60,
+        mode="restricted",
+        rules=(ResolvedPermissionRule(path=repo, tools=("read",)),),
+    )
+
+    args = _launch(policy, tmp_path, monkeypatch, config={"model": "gpt-5.4"})
+
+    assert args[args.index("--model") + 1] == "gpt-5.4"
+
+
+def test_no_configured_model_omits_the_flag_entirely(tmp_path, monkeypatch, repo):
+    """No model configured means no model argument -- not one invented, and
+    not one inherited from the operator's personal config."""
+    policy = EffectiveRuntimePolicy(
+        timeout=60,
+        mode="restricted",
+        rules=(ResolvedPermissionRule(path=repo, tools=("read",)),),
+    )
+
+    args = _launch(policy, tmp_path, monkeypatch)
+
+    assert "--model" not in args
+
+
+def test_blank_configured_model_omits_the_flag(tmp_path, monkeypatch, repo):
+    policy = EffectiveRuntimePolicy(
+        timeout=60,
+        mode="restricted",
+        rules=(ResolvedPermissionRule(path=repo, tools=("read",)),),
+    )
+
+    args = _launch(policy, tmp_path, monkeypatch, config={"model": "   "})
+
+    assert "--model" not in args
+
+
+def test_run_fails_closed_when_cli_does_not_report_isolation_support(
+    tmp_path, monkeypatch, repo
+):
+    """Unsupported isolation must refuse the launch, not silently drop it."""
+    import flowgency.integrations.flowgency.copilot as copilot_mod
+
+    policy = EffectiveRuntimePolicy(
+        timeout=60,
+        mode="restricted",
+        rules=(ResolvedPermissionRule(path=repo, tools=("read",)),),
+    )
+    monkeypatch.setattr(CopilotIntegration, "_supports_required_isolation", lambda self: False)
+    monkeypatch.setattr(CopilotIntegration, "resolve_executable", lambda self: "copilot")
+
+    def fail_run(args, **kwargs):
+        if "--version" in args or "--help" in args:
+            return _FakeCompleted()
+        pytest.fail("must not launch without the required isolation flags")
+
+    monkeypatch.setattr(copilot_mod.subprocess, "run", fail_run)
+
+    prompt = tmp_path / "p.prompt"
+    prompt.write_text("do the thing", encoding="utf-8")
+
+    with pytest.raises(IntegrationError):
+        CopilotIntegration({"allow_local_network": True}).run(
+            IntegrationRunRequest(
+                workspace_root=tmp_path,
+                launch_dir=tmp_path / "runtime",
+                task_file=prompt,
+                timeout=60,
+                runtime_policy=policy,
+                skill=None,
+                skill_arguments=(),
+            )
+        )
+
+
+def test_isolation_gate_applies_even_when_permission_validation_is_bypassed(
+    tmp_path, monkeypatch, repo
+):
+    """The isolation gate is not part of `validate_run`, so it must still
+    apply when a caller passes `enforce_validation=False`."""
+    import flowgency.integrations.flowgency.copilot as copilot_mod
+
+    policy = EffectiveRuntimePolicy(
+        timeout=60,
+        mode="restricted",
+        rules=(ResolvedPermissionRule(path=repo, tools=("read",)),),
+    )
+    monkeypatch.setattr(CopilotIntegration, "_supports_required_isolation", lambda self: False)
+    monkeypatch.setattr(CopilotIntegration, "resolve_executable", lambda self: "copilot")
+
+    def fail_run(args, **kwargs):
+        if "--version" in args or "--help" in args:
+            return _FakeCompleted()
+        pytest.fail("must not launch without the required isolation flags")
+
+    monkeypatch.setattr(copilot_mod.subprocess, "run", fail_run)
+
+    prompt = tmp_path / "p.prompt"
+    prompt.write_text("do the thing", encoding="utf-8")
+
+    with pytest.raises(IntegrationError):
+        CopilotIntegration({"allow_local_network": True}).run(
+            IntegrationRunRequest(
+                workspace_root=tmp_path,
+                launch_dir=tmp_path / "runtime",
+                task_file=prompt,
+                timeout=60,
+                runtime_policy=policy,
+                skill=None,
+                skill_arguments=(),
+                enforce_validation=False,
+            )
+        )
 
 
 # ── The empty grant ─────────────────────────────────────────────────────────
@@ -341,6 +489,75 @@ def test_ticket_server_grant_does_not_add_workspace_write(tmp_path, monkeypatch,
     )
 
     assert _granted(captured["args"]) == ["read", "search", "flowgency-tickets"]
+
+
+def test_ticket_launch_keeps_isolation_flags_and_a_single_extra_mcp_config(
+    tmp_path, monkeypatch, repo
+):
+    """A supervised ticket launch still carries the required isolation flags,
+    and the ticket channel is the only additional MCP configuration added."""
+    monkeypatch.setattr(CopilotIntegration, "_ticket_tool_contract", lambda self, version: "mcp-http")
+    prompt = tmp_path / "p.prompt"
+    prompt.write_text("do the thing", encoding="utf-8")
+    captured: dict[str, list[str]] = {}
+
+    def fake_supervised(argv, *, cwd, env, timeout, lifecycle):
+        captured["args"] = list(argv)
+        from flowgency.jobs.processes import CompletedRuntimeProcess, ProcessStopEvidence
+
+        return CompletedRuntimeProcess(
+            exit_code=0,
+            stdout='{"type":"message","content":"ok"}\n',
+            stderr="",
+            duration_seconds=0.01,
+            process_stop_evidence=ProcessStopEvidence(
+                job_id="job-1",
+                generation="gen-1",
+                confirmed=True,
+                reason="exited",
+            ),
+        )
+
+    import flowgency.integrations.flowgency.copilot as copilot_mod
+
+    monkeypatch.setattr(copilot_mod, "run_supervised", fake_supervised)
+    monkeypatch.setattr(
+        copilot_mod.subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("ticket launch with lifecycle must not use subprocess.run")
+        ),
+    )
+    monkeypatch.setattr(CopilotIntegration, "resolve_executable", lambda self: "copilot")
+    monkeypatch.setattr(CopilotIntegration, "_cli_version", lambda self: "1.0.78-2")
+    monkeypatch.setattr(
+        CopilotIntegration, "_prepare_copilot_home", lambda self, request, settings: (None, "shared-home")
+    )
+
+    CopilotIntegration({"allow_local_network": True, "model": "gpt-5.4"}).run(
+        IntegrationRunRequest(
+            workspace_root=tmp_path,
+            launch_dir=tmp_path / "runtime",
+            task_file=prompt,
+            timeout=60,
+            runtime_policy=EffectiveRuntimePolicy(
+                timeout=60,
+                mode="restricted",
+                rules=(ResolvedPermissionRule(path=repo, tools=("read", "search")),),
+            ),
+            ticket_tools=TicketToolLaunch(
+                url="http://127.0.0.1:9999/mcp",
+                headers={"Authorization": "Bearer fixture-only-token"},
+                lifecycle=RuntimeProcessLifecycle(job_id="job-1", generation="gen-1"),
+            ),
+        )
+    )
+
+    args = captured["args"]
+    assert "--disable-builtin-mcps" in args
+    assert "--no-auto-update" in args
+    assert args[args.index("--model") + 1] == "gpt-5.4"
+    assert args.count("--additional-mcp-config") == 1
 
 
 def test_write_is_not_granted_when_no_rule_grants_it(tmp_path, monkeypatch, repo):

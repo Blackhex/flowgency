@@ -70,6 +70,7 @@ def _patch_common(monkeypatch) -> None:
     monkeypatch.setattr(CopilotIntegration, "resolve_executable", lambda self: "copilot")
     monkeypatch.setattr(CopilotIntegration, "_cli_version", lambda self: "1.0.78-2")
     monkeypatch.setattr(CopilotIntegration, "_ticket_tool_contract", lambda self, version: "mcp-http")
+    monkeypatch.setattr(CopilotIntegration, "_supports_required_isolation", lambda self: True)
     monkeypatch.setattr(
         CopilotIntegration,
         "_prepare_copilot_home",
