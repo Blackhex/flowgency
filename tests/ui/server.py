@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import argparse
+import base64
 from datetime import datetime, timezone
 import dataclasses
+import hashlib
 import json
 import os
 from pathlib import Path
 import shutil
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import time
@@ -40,7 +43,11 @@ FIXTURE_CONFIG = Path(__file__).resolve().parent / "fixtures" / "config.yaml"
 FIXED_NOW = "2026-07-16T12:00:00+00:00"
 UI_RESET_PATH = "/__ui/reset"
 ACTIVITY_LOGS_FIXTURE = "agent-activity-logs"
-SUPPORTED_UI_FIXTURES = frozenset({"default", ACTIVITY_LOGS_FIXTURE})
+GIT_EVIDENCE_FIXTURE = "git-evidence"
+SUPPORTED_UI_FIXTURES = frozenset({"default", ACTIVITY_LOGS_FIXTURE, GIT_EVIDENCE_FIXTURE})
+GIT_EVIDENCE_TICKET_ID = "fixture-git-evidence"
+GIT_EVIDENCE_REF = "refs/heads/main"
+GIT_EVIDENCE_INDEX = "fixture-index"
 
 
 def _ui_sitecustomize(runtime: Path) -> Path:
@@ -745,6 +752,478 @@ def _apply_activity_logs_fixture(runtime: Path, config_path: Path) -> None:
     _seed_activity_ticket_history(runtime)
 
 
+# -- opt-in Git evidence fixture ------------------------------------------
+#
+# Everything below builds real evidence: a real repository under the test
+# runtime workspace, a real running job, the real capture service, and real
+# accepted transitions. No AI runtime is launched and no remote is contacted.
+
+_GIT_FIXTURE_IDENTITY = {
+    "GIT_AUTHOR_NAME": "Fixture Author",
+    "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
+    "GIT_AUTHOR_DATE": "2026-05-04T09:00:00+00:00",
+    "GIT_COMMITTER_NAME": "Fixture Author",
+    "GIT_COMMITTER_EMAIL": "fixture@example.invalid",
+    "GIT_COMMITTER_DATE": "2026-05-04T09:00:00+00:00",
+}
+
+_LONG_DIRECTORY = "reference/unusually-long-reference-directory-for-narrow-layout-verification"
+_APPENDIX_BEFORE = f"docs/{_LONG_DIRECTORY}/handbook-appendix-with-an-unusually-long-unbroken-filename.md"
+_APPENDIX_AFTER = f"docs/{_LONG_DIRECTORY}/renamed-handbook-appendix-with-an-unusually-long-unbroken-filename.md"
+_BULK_REPORT = "docs/generated/bulk-release-report.txt"
+
+_APPENDIX_BODY = b"""# Handbook appendix
+
+The appendix keeps the long-form checklist that the handbook summarizes.
+
+- Record the reviewed range.
+- Record the reviewing agent.
+- Record the accepted result.
+"""
+
+_HANDBOOK_BEFORE = b"""# Delivery handbook
+
+Every release follows the same three steps.
+
+1. Prepare the draft.
+2. Review the retained evidence.
+3. Publish the result.
+
+Superseded guidance is removed here and stays in history.
+"""
+
+_HANDBOOK_AFTER = b"""# Delivery handbook
+
+Every release follows the same three steps.
+
+1. Prepare the draft from committed work only.
+2. Review the retained evidence.
+3. Publish the result and record the reviewed range.
+
+Superseded guidance is removed here and stays in history.
+"""
+
+# Source text that looks hostile on purpose. The viewer must show it as text.
+_INERT_SOURCE = b'''"""Sample module retained only as diff content."""
+
+MARKUP = "<script>window.__evidenceXssFired = true</script>"
+ATTRIBUTE = '"><img src=x onerror="window.__evidenceXssFired = true">'
+
+
+def render() -> str:
+    return MARKUP + ATTRIBUTE
+'''
+
+_HOSTILE_VERDICT = '<b>bold</b> & "quoted" <script>window.__verdictXssFired = true</script>'
+
+
+def _git_environment(root: Path) -> dict[str, str]:
+    """Deterministic Git environment: no inherited GIT_*, no user config."""
+    env = {name: value for name, value in os.environ.items() if not name.startswith("GIT_")}
+    absent = str(Path(root).parent / "absent-gitconfig")
+    env.update(_GIT_FIXTURE_IDENTITY)
+    env.update(
+        {
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": absent,
+            "GIT_CONFIG_SYSTEM": absent,
+            "GIT_ATTR_NOSYSTEM": "1",
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_OPTIONAL_LOCKS": "0",
+        }
+    )
+    return env
+
+
+def _git(root: Path, *arguments: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(root), *arguments],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=_git_environment(root),
+    )
+    return result.stdout.decode("utf-8", errors="replace").strip()
+
+
+def _git_write(root: Path, relative: str, content: bytes) -> None:
+    target = root / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(content)
+
+
+def _build_git_evidence_repository(workspace: Path) -> dict[str, str]:
+    """Build (once) the fixture repository and name each range boundary.
+
+    The boundaries are kept as ordinary local branches so a reset can read them
+    back without remembering process state, and so the capture's local-ref
+    policy has a real ref to verify against.
+    """
+    workspace.mkdir(parents=True, exist_ok=True)
+    if not (workspace / ".git").exists():
+        _git(workspace, "init", "--template=", "--initial-branch=main")
+        _git(workspace, "config", "user.name", "Fixture Author")
+        _git(workspace, "config", "user.email", "fixture@example.invalid")
+        _git(workspace, "config", "core.autocrlf", "false")
+        _git(workspace, "config", "core.safecrlf", "false")
+        _git(workspace, "config", "commit.gpgsign", "false")
+        _git(workspace, "config", "core.hooksPath", str(workspace.parent / "absent-hooks"))
+
+        _git_write(workspace, "docs/handbook.md", _HANDBOOK_BEFORE)
+        _git_write(workspace, _APPENDIX_BEFORE, _APPENDIX_BODY)
+        _git_write(
+            workspace,
+            "tools/retired_notes.txt",
+            b"Retired note one\nRetired note two\nRetired note three\n",
+        )
+        # Present from the start so the oversized range is a modification: an
+        # added file would report its 000000 mode instead of the real reason
+        # its rows are missing.
+        _git_write(workspace, _BULK_REPORT, b"generated release row 0000\n")
+        _git(workspace, "add", "--all")
+        _git(workspace, "commit", "-m", "test: seed delivery handbook")
+        _git(workspace, "branch", "fixture-base")
+
+        _git_write(workspace, "docs/handbook.md", _HANDBOOK_AFTER)
+        (workspace / _APPENDIX_BEFORE).unlink()
+        _git_write(workspace, _APPENDIX_AFTER, _APPENDIX_BODY)
+        (workspace / "tools" / "retired_notes.txt").unlink()
+        _git_write(workspace, "assets/release-marker.bin", bytes(range(16)) * 8)
+        _git_write(workspace, "src/inert_sample.py", _INERT_SOURCE)
+        _git(workspace, "add", "--all")
+        _git(workspace, "commit", "-m", "test: publish reviewed delivery changes")
+        _git(workspace, "branch", "fixture-rich")
+
+        _git_write(
+            workspace,
+            _BULK_REPORT,
+            b"".join(b"generated release row %04d\n" % index for index in range(2600)),
+        )
+        _git(workspace, "add", "--all")
+        _git(workspace, "commit", "-m", "test: record the bulk release report")
+        _git(workspace, "branch", "fixture-bulk")
+
+        _git_write(workspace, "scratch/temporary-note.txt", b"temporary\n")
+        _git(workspace, "add", "--all")
+        _git(workspace, "commit", "-m", "test: stage a temporary note")
+        (workspace / "scratch" / "temporary-note.txt").unlink()
+        _git(workspace, "add", "--all")
+        _git(workspace, "commit", "-m", "test: remove the temporary note")
+    return {
+        "base": _git(workspace, "rev-parse", "fixture-base"),
+        "rich": _git(workspace, "rev-parse", "fixture-rich"),
+        "bulk": _git(workspace, "rev-parse", "fixture-bulk"),
+        "tip": _git(workspace, "rev-parse", "main"),
+    }
+
+
+def _git_evidence_delivery_definition() -> dict:
+    """The delivery workflow with a Git-format output and the transitions
+    that accept one, added without changing the default fixture's contract."""
+    definition = _delivery_definition()
+    definition["fields"].append(
+        {
+            "id": "committed-changes",
+            "label": "Committed changes",
+            "type": "artifact",
+            "artifact_format": "git-change",
+        }
+    )
+    definition["transitions"].extend(
+        [
+            {
+                "id": "submit-draft",
+                "name": "Submit draft",
+                "from_state": "backlog",
+                "to_state": "in-progress",
+                "inputs": [],
+                "outputs": [{"field_id": "committed-changes", "required": True}],
+                "preconditions": [],
+                "criteria": [],
+            },
+            {
+                "id": "submit-bulk",
+                "name": "Submit bulk update",
+                "from_state": "in-progress",
+                "to_state": "review",
+                "inputs": [],
+                "outputs": [{"field_id": "committed-changes", "required": True}],
+                "preconditions": [],
+                "criteria": [],
+            },
+            {
+                "id": "request-changes",
+                "name": "Request changes",
+                "from_state": "review",
+                "to_state": "in-progress",
+                "inputs": [],
+                "outputs": [
+                    {"field_id": "review-verdict", "required": True},
+                    {"field_id": "committed-changes", "required": True},
+                ],
+                "preconditions": [],
+                "criteria": [],
+            },
+            {
+                "id": "deliver",
+                "name": "Deliver",
+                "from_state": "in-progress",
+                "to_state": "done",
+                "inputs": [],
+                "outputs": [{"field_id": "committed-changes", "required": True}],
+                "preconditions": [],
+                "criteria": [],
+            },
+        ]
+    )
+    return definition
+
+
+def _git_evidence_job(
+    runtime: Path, config_path: Path, job_id: str, agent_name: str, target
+):
+    """Create the running, fixture-owned ticket job a real run would own."""
+    from flowgency.configuration.effective import resolve_effective_policy
+
+    store = JobStore(runtime / "memory-store")
+    store.team_root("newsletter").mkdir(parents=True, exist_ok=True)
+    snapshot = ConfigStore(config_path).load()
+    integration = snapshot.config.teams["newsletter"].agents[agent_name].integration
+    cache_path = runtime / "compiled-agents" / "ticket-test" / "ui" / agent_name
+    cache_path.mkdir(parents=True, exist_ok=True)
+    spec = dataclasses.replace(
+        _job_spec(runtime, config_path, job_id),
+        schema_version=6,
+        agent_name=agent_name,
+        routine_id=None,
+        trigger="ticket",
+        integration_name=integration,
+        integration_config={},
+        blueprint=BlueprintRef(
+            key=agent_name,
+            source_digest="0" * 64,
+            integration=integration,
+            projector_version="ui-ticket",
+            cache_path=str(cache_path.resolve()),
+            instance_digest="1" * 64,
+        ),
+        ticket_target=target,
+        prompt_source={
+            "type": "ticket",
+            "scope": "ticket",
+            "name": "ticket-run",
+            "source_path": "ticket.prompt.md",
+            "source_digest": "0" * 64,
+        },
+        runtime_policy=RuntimePolicySnapshot.from_effective_policy(
+            resolve_effective_policy(snapshot.config, "newsletter", agent_name)
+        ),
+    )
+    record = JobRecord.from_spec(spec)
+    authority = store.create(record)
+    record.status = "running"
+    record.worker_pid = os.getpid()
+    record.started_at = FIXED_NOW
+    record.launched_at = FIXED_NOW
+    record.session_id = f"{job_id}-session"
+    write_job(authority.path, record)
+    return authority, record
+
+
+def _settle_git_evidence_job(authority, record, *, changed_files=None) -> None:
+    """Close the fixture job the way a finished run leaves it."""
+    record.status = "complete"
+    record.completed_at = FIXED_NOW
+    record.duration_seconds = 12
+    if changed_files is not None:
+        record.changed_files = changed_files
+    write_job(authority.path, record)
+
+
+def _evidence_entry(provider, ref, captured, job_id: str) -> dict:
+    """Describe one retained artifact from its own stored bytes.
+
+    The expected download digest is taken from the retained manifest on disk
+    and never from the download route, so the browser assertion compares the
+    route against known bytes rather than against itself.
+    """
+    artifact = provider.read_artifact(ref, captured.artifact.value)
+    manifest = json.loads(artifact.content)
+    patch = base64.b64decode(manifest["patch_b64"])
+    return {
+        "artifact_id": captured.artifact.value,
+        "patch_sha256": hashlib.sha256(patch).hexdigest(),
+        "patch_bytes": len(patch),
+        "base_commit": manifest["base_commit"],
+        "end_commit": manifest["end_commit"],
+        "job_id": job_id,
+    }
+
+
+def _seed_git_evidence_fixture(runtime: Path, config: dict) -> None:
+    from flowgency.jobs.models import TicketJobTarget
+    from flowgency.tickets.access import TicketAccessRegistry
+    from flowgency.tickets.git_evidence import GitCaptureRequest
+    from flowgency.tickets.models import TransitionRequest, UserTicketContext
+    from flowgency.tickets.service import TicketService
+    from flowgency.tickets.storages.registry import resolve_storage
+    from flowgency.workflows.configuration import resolve_workflow_binding
+    from flowgency.workflows.library import WorkflowLibrary
+
+    config_path = runtime / "config.yaml"
+    commits = _build_git_evidence_repository(runtime / "workspaces" / "newsletter")
+    _seed_workflow_blueprint(
+        runtime / "workflow-library", "delivery", _git_evidence_delivery_definition()
+    )
+
+    delivery_root = runtime / "tickets" / "delivery"
+    provider = LocalTicketStorage(
+        delivery_root, clock=lambda: datetime.fromisoformat(FIXED_NOW)
+    )
+    binding = StorageBinding(
+        integration="local",
+        config={"root": str(delivery_root)},
+        team_id="newsletter",
+        workflow_id="delivery",
+    )
+    ticket = _ticket_record(
+        binding,
+        ticket_id=GIT_EVIDENCE_TICKET_ID,
+        number=109,
+        title="Retain committed evidence for the delivery handbook",
+        description="Capture the reviewed committed range and keep the retained patch readable after the work is closed.",
+        state_id="backlog",
+    )
+    provider.create(ticket, _ticket_operation(ticket.id))
+    ref = ticket.ref
+
+    config_store = ConfigStore(config_path)
+    job_store = JobStore(runtime / "memory-store")
+    registry = TicketAccessRegistry(job_store)
+    # The capture manifest requires a timezone-aware instant, exactly as the
+    # job-side runtime supplies one; the fixture pins it instead of using now().
+    def fixed_clock() -> datetime:
+        return datetime.fromisoformat(FIXED_NOW)
+
+    # The capture must name a ref this fixture's own written policy allows.
+    publication_ref = config["teams"]["newsletter"]["git_publication"]["allowed_refs"][0]
+    service = TicketService(
+        config_store,
+        WorkflowLibrary(runtime / "workflow-library"),
+        lambda storage: resolve_storage(storage, clock=fixed_clock),
+        registry.validate_context,
+        clock=fixed_clock,
+        resolve_git_job=registry.resolve_context,
+    )
+    user = UserTicketContext(team_id="newsletter")
+
+    def workflow_binding():
+        return resolve_workflow_binding(config_store.load(), "newsletter", "delivery")
+
+    def version():
+        return service.inspect(user, ref).version
+
+    def capture(actor, label: str, transition_id: str, base: str, end: str):
+        return service.capture_git_evidence(
+            actor,
+            service.inspect(actor, ref).version,
+            GitCaptureRequest(
+                transition_id=transition_id,
+                field_id="committed-changes",
+                base_commit=base,
+                end_commit=end,
+                publication_ref=publication_ref,
+            ),
+            _ticket_operation(label),
+        )
+
+    def accept(actor, label: str, transition_id: str, outputs: dict):
+        service.transition(
+            actor,
+            service.inspect(actor, ref).version,
+            TransitionRequest(transition_id=transition_id, outputs=outputs),
+            _ticket_operation(label),
+        )
+
+    def open_run(job_id: str, agent_name: str):
+        service.assign(user, version(), agent_name, _ticket_operation(f"assign-{job_id}"))
+        record = provider.read(ref)
+        assignment_event_id = next(
+            event.id for event in reversed(record.events) if event.kind == "assigned"
+        )
+        target = TicketJobTarget(
+            binding=workflow_binding().storage,
+            ref=ref,
+            assigned_agent=agent_name,
+            assignment_event_id=assignment_event_id,
+            context_digest=workflow_binding().context_digest,
+        )
+        authority, job_record = _git_evidence_job(
+            runtime, config_path, job_id, agent_name, target
+        )
+        actor = registry.open(authority).context
+        service.start_work(actor, version(), _ticket_operation(f"start-{job_id}"))
+        return actor, authority, job_record
+
+    def close_run(actor, authority, record, *, changed_files=None):
+        service.end_work(
+            actor, service.inspect(actor, ref).version, _ticket_operation(f"end-{actor.job_id}")
+        )
+        _settle_git_evidence_job(authority, record, changed_files=changed_files)
+        service.assign(user, version(), None, _ticket_operation(f"release-{actor.job_id}"))
+
+    builder, build_authority, build_record = open_run("fixture-evidence-build", "builder")
+    empty = capture(builder, "capture-empty", "submit-draft", commits["bulk"], commits["tip"])
+    accept(builder, "accept-empty", "submit-draft", {"committed-changes": empty.artifact})
+    bulk = capture(builder, "capture-bulk", "submit-bulk", commits["rich"], commits["bulk"])
+    accept(builder, "accept-bulk", "submit-bulk", {"committed-changes": bulk.artifact})
+    close_run(builder, build_authority, build_record)
+
+    reviewer, review_authority, review_record = open_run("fixture-evidence-review", "reviewer")
+    # The reviewer only reuses the builder's artifact; it produces none itself.
+    accept(
+        reviewer,
+        "accept-review",
+        "request-changes",
+        {"review-verdict": _HOSTILE_VERDICT, "committed-changes": bulk.artifact},
+    )
+    close_run(
+        reviewer,
+        review_authority,
+        review_record,
+        changed_files=[
+            {"path": "docs/handbook.md", "status": "modified", "lines_added": 2, "lines_removed": 2}
+        ],
+    )
+
+    finisher, final_authority, final_record = open_run("fixture-evidence-final", "builder")
+    rich = capture(finisher, "capture-rich", "deliver", commits["base"], commits["rich"])
+    accept(finisher, "accept-rich", "deliver", {"committed-changes": rich.artifact})
+    close_run(finisher, final_authority, final_record)
+
+    _write(
+        runtime / GIT_EVIDENCE_INDEX / "git-evidence.json",
+        json.dumps(
+            {
+                "ticket_id": GIT_EVIDENCE_TICKET_ID,
+                "ticket_href": f"/newsletter/workflows/delivery/tickets/{GIT_EVIDENCE_TICKET_ID}",
+                "current": _evidence_entry(provider, ref, rich, "fixture-evidence-final"),
+                "bulk": _evidence_entry(provider, ref, bulk, "fixture-evidence-build"),
+                "empty": _evidence_entry(provider, ref, empty, "fixture-evidence-build"),
+                "reviewer_job_id": "fixture-evidence-review",
+                "renamed_path": _APPENDIX_AFTER,
+                "original_path": _APPENDIX_BEFORE,
+                "binary_path": "assets/release-marker.bin",
+                "bulk_path": _BULK_REPORT,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+    )
+
+
+
 def _seed_private_prompts(runtime: Path) -> None:
     PromptStore(runtime / "prompts").create(
         "newsletter",
@@ -780,16 +1259,34 @@ def _safe_remove_runtime(runtime: Path) -> None:
     candidate = runtime.resolve(strict=False)
     if candidate.parent != parent or candidate.name != "current":
         raise RuntimeError(f"Refusing to remove unsafe UI runtime path: {candidate}")
-    shutil.rmtree(candidate, ignore_errors=True)
+    if not candidate.exists():
+        return
+
+    def _clear_readonly(function, path, _excinfo):
+        # Git marks its object files read-only, so Windows refuses the plain
+        # removal every other fixture directory accepts.
+        os.chmod(path, stat.S_IWRITE)
+        function(path)
+
+    try:
+        shutil.rmtree(candidate, onexc=_clear_readonly)
+    except OSError:
+        shutil.rmtree(candidate, ignore_errors=True)
 
 
 def _reset_runtime_state(runtime: Path, *, fixture: str = "default") -> None:
     raw = yaml.safe_load(FIXTURE_CONFIG.read_text(encoding="utf-8"))
     config = _replace_runtime(raw, runtime)
+    if fixture == GIT_EVIDENCE_FIXTURE:
+        config["teams"]["newsletter"]["git_publication"] = {
+            "mode": "local",
+            "allowed_refs": [GIT_EVIDENCE_REF],
+        }
     _write_runtime_config(runtime / "config.yaml", config)
 
     _clear_directory(runtime / "workflow-library")
     _clear_directory(runtime / "tickets")
+    _clear_directory(runtime / GIT_EVIDENCE_INDEX)
 
     memory_root = runtime / "memory-store"
     _clear_directory(memory_root / "ui-ticket-memory")
@@ -807,6 +1304,8 @@ def _reset_runtime_state(runtime: Path, *, fixture: str = "default") -> None:
     _seed_jobs(runtime, runtime / "config.yaml")
     if fixture == ACTIVITY_LOGS_FIXTURE:
         _apply_activity_logs_fixture(runtime, runtime / "config.yaml")
+    elif fixture == GIT_EVIDENCE_FIXTURE:
+        _seed_git_evidence_fixture(runtime, config)
     elif fixture != "default":
         raise ValueError(f"Unknown UI fixture: {fixture}")
 
