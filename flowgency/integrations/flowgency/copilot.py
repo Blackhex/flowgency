@@ -824,10 +824,10 @@ class CopilotIntegration(BaseIntegration):
         Every job gets its own private home, even when the operator's personal
         config is missing: falling back to the shared home would hand the
         agent every installed plugin and personal preference, not just
-        authentication. A missing or unreadable source degrades to an empty
-        config -- and a genuine CLI authentication failure -- rather than that
-        leak. A malformed or non-object source fails the launch outright,
-        before the agent ever runs.
+        authentication. A missing source degrades to an empty config -- and a
+        genuine CLI authentication failure -- rather than that leak. A read
+        error, malformed source, or non-object source fails the launch
+        outright, before the agent ever runs.
 
         Returns ``(home, None)`` on success or ``(home, reason)`` when the
         source credentials were missing and the job's config is therefore
