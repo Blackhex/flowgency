@@ -137,6 +137,56 @@ def test_wheel_contains_the_generated_tailwind_stylesheet(built_wheel: Path):
         assert archive.read("flowgency/static/tailwind.css") == generated.read_bytes()
 
 
+def _configure_missing_config(tmp_path: Path, monkeypatch) -> None:
+    """A config path that does not exist, so ``/setup`` renders its guided
+    form (state ``waiting``) instead of redirecting to the dashboard."""
+    config_path = tmp_path / "config.yaml"
+    monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
+    app_mod.app.state.services = None
+
+
+def test_setup_page_serves_local_tailwind_css_without_cdn_or_runtime_config(
+    tmp_path: Path, monkeypatch
+):
+    """The standalone setup.html (reachable before any config exists) must not
+    depend on the Tailwind CDN either — it does not extend base.html."""
+    _configure_missing_config(tmp_path, monkeypatch)
+    client = TestClient(app_mod.app)
+
+    response = client.get("/setup")
+
+    assert response.status_code == 200
+    assert "https://cdn.tailwindcss.com" not in response.text
+    assert "tailwind.config" not in response.text
+    assert "/static/tailwind.css" in response.text
+
+    stylesheet = client.get("/static/tailwind.css")
+    assert stylesheet.status_code == 200
+    assert "text/css" in stylesheet.headers["content-type"]
+    assert ".hidden" in stylesheet.text
+
+
+def test_setup_complete_page_serves_local_tailwind_css_without_cdn_or_runtime_config(
+    tmp_path: Path, monkeypatch
+):
+    """The standalone setup_complete.html (reachable right after setup) must
+    not depend on the Tailwind CDN either — it does not extend base.html."""
+    _configure_minimal_app(tmp_path, monkeypatch)
+    client = TestClient(app_mod.app)
+
+    response = client.get("/setup/complete/newsletter")
+
+    assert response.status_code == 200
+    assert "https://cdn.tailwindcss.com" not in response.text
+    assert "tailwind.config" not in response.text
+    assert "/static/tailwind.css" in response.text
+
+    stylesheet = client.get("/static/tailwind.css")
+    assert stylesheet.status_code == 200
+    assert "text/css" in stylesheet.headers["content-type"]
+    assert ".hidden" in stylesheet.text
+
+
 def test_wheel_contains_every_canonical_setup_skill_file(tmp_path: Path):
     result = subprocess.run(
         [
