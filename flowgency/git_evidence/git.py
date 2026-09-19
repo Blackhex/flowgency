@@ -27,6 +27,8 @@ from flowgency.jobs.processes import RuntimeProcessLifecycle, run_supervised
 GIT_COMMAND_TIMEOUT_SECONDS = 30
 CAPTURE_TIMEOUT_SECONDS = 120
 METADATA_OUTPUT_LIMIT_BYTES = 1024 * 1024
+PACKED_REFS_LIMIT_BYTES = 4 * 1024 * 1024
+LOOSE_REF_LIMIT_BYTES = 4 * 1024
 MAX_PATCH_BYTES = 640 * 1024
 # Diagnostics Git writes alongside a read (rename-limit or advice warnings) get
 # their own bounded room, so a patch that exactly fills its byte budget is not
@@ -62,6 +64,20 @@ def _within(path: Path, root: Path) -> bool:
     except ValueError:
         return False
     return True
+
+
+def read_bounded_metadata(path: Path, limit: int) -> bytes:
+    """Read a repository metadata file, refusing one longer than ``limit``.
+
+    The length is taken from the opened stream rather than a prior ``stat``,
+    which a still-growing file can outrun, and an overlong file is rejected
+    instead of being judged by the prefix that happened to fit.
+    """
+    with path.open("rb") as stream:
+        data = stream.read(limit + 1)
+    if len(data) > limit:
+        raise GitEvidenceError("git-evidence-verification-incomplete")
+    return data
 
 
 def _within_any(path: Path, roots: tuple[Path, ...]) -> bool:
@@ -286,7 +302,9 @@ def _reject_untrusted_object_sources(common_dir: Path) -> None:
     if replace_dir.is_dir() and any(replace_dir.iterdir()):
         raise GitEvidenceError("git-evidence-unsafe-repository")
     packed_refs = common_dir / "packed-refs"
-    if packed_refs.is_file() and b"refs/replace/" in packed_refs.read_bytes():
+    if packed_refs.is_file() and b"refs/replace/" in read_bounded_metadata(
+        packed_refs, PACKED_REFS_LIMIT_BYTES
+    ):
         raise GitEvidenceError("git-evidence-unsafe-repository")
     if (common_dir / "shallow").exists():
         raise GitEvidenceError("git-evidence-shallow-repository")

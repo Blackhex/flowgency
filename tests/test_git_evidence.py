@@ -26,6 +26,8 @@ from flowgency.git_evidence import git as git_module
 from flowgency.git_evidence import publication as publication_module
 from flowgency.git_evidence.capture import capture_committed_range
 from flowgency.git_evidence.git import (
+    LOOSE_REF_LIMIT_BYTES,
+    PACKED_REFS_LIMIT_BYTES,
     open_git_repository,
     run_git_bytes,
     verify_repository_identity,
@@ -761,6 +763,41 @@ def test_open_rejects_a_replacement_ref_recorded_in_packed_refs(tmp_path):
     assert failure.value.code == "git-evidence-unsafe-repository"
 
 
+def _packed_refs_bytes(fixture, total: int) -> bytes:
+    """Ordinary packed refs padded with comment lines to an exact byte length."""
+    body = (
+        "# pack-refs with: peeled fully-peeled sorted \n"
+        f"{fixture.end_commit} refs/heads/main\n"
+    ).encode()
+    return body + b"#" * (total - len(body) - 1) + b"\n"
+
+
+@requires_git
+def test_open_still_inspects_packed_refs_exactly_at_the_read_bound(tmp_path):
+    fixture = create_git_repository(tmp_path / "repo")
+    (fixture.root / ".git" / "packed-refs").write_bytes(
+        _packed_refs_bytes(fixture, PACKED_REFS_LIMIT_BYTES)
+    )
+    with open_git_repository(
+        fixture.root, scratch_root=tmp_path / "scratch", lifecycle=_lifecycle()
+    ) as repository:
+        assert repository.common_dir == (fixture.root / ".git").resolve()
+
+
+@requires_git
+def test_open_refuses_packed_refs_it_cannot_read_within_its_bound(tmp_path):
+    fixture = create_git_repository(tmp_path / "repo")
+    (fixture.root / ".git" / "packed-refs").write_bytes(
+        _packed_refs_bytes(fixture, PACKED_REFS_LIMIT_BYTES + 1)
+    )
+    with pytest.raises(GitEvidenceError) as failure:
+        with open_git_repository(
+            fixture.root, scratch_root=tmp_path / "scratch", lifecycle=_lifecycle()
+        ):
+            pass
+    assert failure.value.code == "git-evidence-verification-incomplete"
+
+
 @requires_git
 def test_open_rejects_a_bare_repository(tmp_path):
     bare = tmp_path / "bare.git"
@@ -1484,6 +1521,42 @@ def test_a_ref_entry_leaving_the_repository_is_refused_not_read(tmp_path):
                 publication_ref="refs/heads/escape/main",
             )
     assert failure.value.code == "git-evidence-publication-ref-denied"
+
+
+@requires_git
+def test_packed_refs_that_grow_past_the_bound_are_refused_not_parsed(tmp_path):
+    fixture = create_git_repository(tmp_path / "repo")
+    git_command(fixture.root, "pack-refs", "--all")
+    packed = fixture.root / ".git" / "packed-refs"
+
+    with _publication_context(
+        fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch"
+    ) as context:
+        packed.write_bytes(_packed_refs_bytes(fixture, PACKED_REFS_LIMIT_BYTES + 1))
+        with pytest.raises(GitEvidenceError) as failure:
+            _verify(
+                context, _restricted("refs/heads/main"), publication_ref="refs/heads/main"
+            )
+    assert failure.value.code == "git-evidence-verification-incomplete"
+
+
+@requires_git
+def test_an_oversized_loose_ref_is_refused_not_read_as_its_prefix(tmp_path):
+    fixture = create_git_repository(tmp_path / "repo")
+    (_refs_dir(fixture) / "bloated").write_bytes(
+        fixture.end_commit.encode() + b" " * LOOSE_REF_LIMIT_BYTES
+    )
+
+    with _publication_context(
+        fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch"
+    ) as context:
+        with pytest.raises(GitEvidenceError) as failure:
+            _verify(
+                context,
+                _restricted("refs/heads/bloated"),
+                publication_ref="refs/heads/bloated",
+            )
+    assert failure.value.code == "git-evidence-verification-incomplete"
 
 
 _TRANSPORT_SUBCOMMANDS = frozenset(

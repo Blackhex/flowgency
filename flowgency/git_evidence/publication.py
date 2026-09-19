@@ -15,7 +15,12 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from flowgency.git_evidence.git import run_git_exit_code
+from flowgency.git_evidence.git import (
+    LOOSE_REF_LIMIT_BYTES,
+    PACKED_REFS_LIMIT_BYTES,
+    read_bounded_metadata,
+    run_git_exit_code,
+)
 from flowgency.git_evidence.models import (
     GitEvidenceError,
     GitPublicationPolicy,
@@ -54,14 +59,21 @@ def _read_source_ref(repository: GitRepository, ref: str) -> str | None:
         # A ref entry that leaves ``refs/`` is refused, never followed.
         raise GitEvidenceError("git-evidence-publication-ref-denied")
     if candidate.is_file():
-        text = candidate.read_text(encoding="utf-8", errors="replace").strip()
+        text = (
+            read_bounded_metadata(candidate, LOOSE_REF_LIMIT_BYTES)
+            .decode("utf-8", errors="replace")
+            .strip()
+        )
         if text.startswith("ref:"):
             raise GitEvidenceError("git-evidence-verification-incomplete")
         return text
     packed = repository.common_dir / "packed-refs"
     if not packed.is_file():
         return None
-    for raw in packed.read_text(encoding="utf-8", errors="replace").split("\n"):
+    content = read_bounded_metadata(packed, PACKED_REFS_LIMIT_BYTES).decode(
+        "utf-8", errors="replace"
+    )
+    for raw in content.split("\n"):
         line = raw.strip()
         if not line or line.startswith(("#", "^")):
             continue
