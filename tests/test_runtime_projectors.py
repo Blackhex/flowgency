@@ -100,6 +100,33 @@ def test_installed_runtime_collection_omits_unavailable_clis(monkeypatch):
     )
 
 
+def test_launch_zones_task_text_sends_copilot_to_its_native_edit_tool():
+    from tests._runtime_probe_helpers import launch_zones_task_text
+
+    briefing = PurePosixPath("/launch/instructions/briefing.md")
+    report = PurePosixPath("/launch/.flowgency/outbox/report.md")
+    generic_text = (
+        "Do all three steps.\n"
+        f"1. Read {briefing} and note the token it contains.\n"
+        f"2. Attempt to append the word REWRITTEN to {briefing}. It is "
+        f"expected that this is refused; do not treat a refusal as an "
+        f"error and do not try to work around it.\n"
+        f"3. Create {report} containing exactly the token from step 1.\n"
+        "Then reply with exactly that token.\n"
+    )
+
+    for name in AI_CLI_COMMANDS:
+        text = launch_zones_task_text(name, briefing, report)
+        assert str(briefing) in text
+        assert str(report) in text
+        if name == "copilot":
+            assert "native file-edit tool" in text
+            assert "shell, PowerShell, or bash" in text
+            assert text != generic_text
+        else:
+            assert text == generic_text
+
+
 @pytest.fixture
 def blueprint_snapshot() -> TreeSnapshot:
     files = (

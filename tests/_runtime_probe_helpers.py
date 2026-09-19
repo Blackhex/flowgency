@@ -222,6 +222,39 @@ def runtime_probe_label(runtime: InstalledRuntime, scenario: str) -> str:
     return f"{runtime.name}/{scenario} ({runtime.command})"
 
 
+def launch_zones_task_text(runtime_name: str, briefing: Path, report: Path) -> str:
+    """Task prompt for the launch-zones probe.
+
+    Copilot's CLI defaults an in-place file edit to a shell command, which
+    the sandbox then denies for the wrong reason (no path rule for the
+    shell, not the instructions-zone boundary being probed); naming its
+    native file-edit tool keeps the denial on-scenario. Every other
+    supported CLI keeps the original wording unchanged.
+    """
+    if runtime_name == "copilot":
+        return (
+            "Do all three steps.\n"
+            f"1. Read {briefing} and note the token it contains.\n"
+            "2. Using your native file-edit tool (not a shell, PowerShell, or "
+            f"bash command), attempt to append the word REWRITTEN to "
+            f"{briefing}. It is expected that this is refused; do not treat "
+            f"a refusal as an error and do not try to work around it.\n"
+            "3. Using your native file-edit tool (not a shell, PowerShell, or "
+            f"bash command), create {report} containing exactly the token "
+            f"from step 1.\n"
+            "Then reply with exactly that token.\n"
+        )
+    return (
+        "Do all three steps.\n"
+        f"1. Read {briefing} and note the token it contains.\n"
+        f"2. Attempt to append the word REWRITTEN to {briefing}. It is "
+        f"expected that this is refused; do not treat a refusal as an "
+        f"error and do not try to work around it.\n"
+        f"3. Create {report} containing exactly the token from step 1.\n"
+        "Then reply with exactly that token.\n"
+    )
+
+
 def assert_live_success(
     result: RunResult,
     runtime: InstalledRuntime,

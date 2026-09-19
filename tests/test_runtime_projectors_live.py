@@ -19,6 +19,7 @@ from tests._runtime_probe_helpers import (
     capture_protected_state,
     create_probe_directories,
     installed_ai_cli_runtimes,
+    launch_zones_task_text,
     prepare_copilot_probe,
     request,
     selected_skill_supported,
@@ -371,13 +372,7 @@ else:
 
         task_file = task_dir / "launch-zones.md"
         task_file.write_text(
-            f"Do all three steps.\n"
-            f"1. Read {briefing} and note the token it contains.\n"
-            f"2. Attempt to append the word REWRITTEN to {briefing}. It is "
-            f"expected that this is refused; do not treat a refusal as an "
-            f"error and do not try to work around it.\n"
-            f"3. Create {report} containing exactly the token from step 1.\n"
-            f"Then reply with exactly that token.\n",
+            launch_zones_task_text(runtime.name, briefing, report),
             encoding="utf-8",
         )
 
