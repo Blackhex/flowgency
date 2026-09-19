@@ -30,36 +30,6 @@
       document.documentElement.classList.add('dark');
     }
   </script>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          fontFamily: {
-            sans: ['"DM Sans"', 'system-ui', 'sans-serif'],
-            mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
-          },
-          screens: {
-            '3xl': '1920px',
-          },
-          colors: {
-            flowgency: {
-              50: '#f0f4ff',
-              100: '#dbe4ff',
-              200: '#bac8ff',
-              500: '#5c7cfa',
-              600: '#4263eb',
-              700: '#3b5bdb',
-              800: '#364fc7',
-              900: '#1e2a5e',
-              950: '#141b3d',
-            }
-          }
-        }
-      }
-    }
-  </script>
   <style>
     .text-gray-400 { color: #475569; }
     .text-gray-500 { color: #475569; }
@@ -227,6 +197,7 @@
       .prose table { display: block; overflow-x: auto; }
     }
   </style>
+  <link rel="stylesheet" href="/static/tailwind.css">
   {% if theme_css is defined and theme_css %}{{ theme_css | safe }}{% endif %}
 </head>
 <body class="h-full bg-gray-50 dark:bg-gray-900 font-sans text-gray-900 dark:text-gray-100 transition-colors duration-200">

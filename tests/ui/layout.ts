@@ -9,6 +9,7 @@ type LayoutIssue = {
 };
 
 const pageErrors = new WeakMap<Page, string[]>();
+const tailwindCdnRequests = new WeakMap<Page, string[]>();
 
 const FONT_DIR = resolve(__dirname, '../../node_modules');
 const FONT_BUFFERS: Record<string, Buffer> = {
@@ -76,9 +77,19 @@ export async function installDeterministicFontResponses(page: Page): Promise<voi
   });
 }
 
+export async function installTailwindCdnBlock(page: Page): Promise<void> {
+  const requests: string[] = [];
+  tailwindCdnRequests.set(page, requests);
+  await page.route('https://cdn.tailwindcss.com/**', async (route) => {
+    requests.push(route.request().url());
+    await route.abort();
+  });
+}
+
 export async function installBasePageSetup(page: Page, theme: 'light' | 'dark'): Promise<void> {
   installConsoleErrorGate(page);
   await installDeterministicFontResponses(page);
+  await installTailwindCdnBlock(page);
   await page.addInitScript((initialTheme) => {
     if (!localStorage.getItem('theme')) localStorage.setItem('theme', initialTheme);
   }, theme);
@@ -86,6 +97,10 @@ export async function installBasePageSetup(page: Page, theme: 'light' | 'dark'):
 
 export async function assertNoConsoleErrors(page: Page): Promise<void> {
   expect(pageErrors.get(page) ?? []).toEqual([]);
+}
+
+export async function assertNoTailwindCdnRequests(page: Page): Promise<void> {
+  expect(tailwindCdnRequests.get(page) ?? []).toEqual([]);
 }
 
 export async function assertNoLayoutIssues(page: Page): Promise<void> {

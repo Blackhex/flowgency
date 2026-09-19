@@ -139,6 +139,25 @@ python -m pip install -e '.[test]'
 
 Flowgency uses Python, FastAPI, Jinja2, and filesystem-backed YAML and Markdown.
 
+### Rebuilding CSS
+
+The dashboard's Tailwind CSS is compiled ahead of time into
+[flowgency/static/tailwind.css](flowgency/static/tailwind.css) and shipped in
+the wheel; startup and packaged installs never fetch Tailwind from a CDN or
+require Node.js. After changing a template, an application source file that
+produces utility classes, or [tailwind.config.cjs](tailwind.config.cjs), rebuild
+the stylesheet:
+
+```text
+npm install
+npm run build:css
+```
+
+This runs Tailwind 3 against [tools/tailwind.css](tools/tailwind.css) and the
+content sources declared in `tailwind.config.cjs`, writing the minified result
+to `flowgency/static/tailwind.css`. Commit the regenerated file; the build is
+deterministic given unchanged inputs.
+
 ## Contributing
 
 See [AGENTS.md](AGENTS.md) for the repository guide, development workflow, and

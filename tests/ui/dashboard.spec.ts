@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
-import { assertNoConsoleErrors, assertNoLayoutIssues, installBasePageSetup } from './layout';
+import { assertNoConsoleErrors, assertNoLayoutIssues, assertNoTailwindCdnRequests, installBasePageSetup } from './layout';
 
 // Absolute paths vary in length per checkout; pin them to one line so they cannot reflow the page.
 async function pinToSingleLine(locator: Locator) {
@@ -41,6 +41,7 @@ test('dashboard reports selected group pipeline and durable job semantics', asyn
     fullPage: true,
     mask: dashboardScreenshotMasks(page),
   });
+  await assertNoTailwindCdnRequests(page);
   await assertNoConsoleErrors(page);
 });
 

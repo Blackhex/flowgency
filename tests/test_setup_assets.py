@@ -11,9 +11,12 @@ import subprocess
 import sys
 from zipfile import ZipFile
 
+from fastapi.testclient import TestClient
 from packaging.requirements import Requirement
 import pytest
+import yaml
 
+from flowgency import app as app_mod
 from flowgency.setup_assets import copilot_discovery_root
 
 
@@ -76,6 +79,62 @@ def test_copilot_discovery_root_is_package_owned():
     assert copilot_discovery_root() == (
         REPO_ROOT / "flowgency" / "setup_assets" / "copilot"
     ).resolve()
+
+
+def _configure_minimal_app(tmp_path: Path, monkeypatch) -> None:
+    """The smallest valid config that lets services start with no teams."""
+    library_root = tmp_path / "agent-library"
+    cache_root = tmp_path / "compiled-agents"
+    memory_root = tmp_path / "memory-store"
+    prompt_root = tmp_path / "prompts"
+    for root in (library_root, cache_root, memory_root, prompt_root):
+        root.mkdir(parents=True, exist_ok=True)
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": 1,
+                "flowgency": {
+                    "title": "Flowgency",
+                    "default_team": "",
+                    "agent_library": str(library_root),
+                    "compilation_cache": str(cache_root),
+                    "memory_store": str(memory_root),
+                    "prompt_store": str(prompt_root),
+                },
+                "teams": {},
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
+    app_mod.refresh_services()
+
+
+def test_base_page_serves_local_tailwind_css_without_cdn_or_runtime_config(
+    tmp_path: Path, monkeypatch
+):
+    _configure_minimal_app(tmp_path, monkeypatch)
+    client = TestClient(app_mod.app)
+
+    response = client.get("/admin/")
+
+    assert response.status_code == 200
+    assert "https://cdn.tailwindcss.com" not in response.text
+    assert "tailwind.config" not in response.text
+    assert "/static/tailwind.css" in response.text
+
+    stylesheet = client.get("/static/tailwind.css")
+    assert stylesheet.status_code == 200
+    assert "text/css" in stylesheet.headers["content-type"]
+    assert ".hidden" in stylesheet.text
+
+
+def test_wheel_contains_the_generated_tailwind_stylesheet(built_wheel: Path):
+    generated = REPO_ROOT / "flowgency" / "static" / "tailwind.css"
+    with ZipFile(built_wheel) as archive:
+        assert archive.read("flowgency/static/tailwind.css") == generated.read_bytes()
 
 
 def test_wheel_contains_every_canonical_setup_skill_file(tmp_path: Path):

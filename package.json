@@ -2,6 +2,7 @@
   "name": "flowgency-ui-gate",
   "private": true,
   "scripts": {
+    "build:css": "tailwindcss --config tailwind.config.cjs --input tools/tailwind.css --output flowgency/static/tailwind.css --minify",
     "test:ui": "playwright test",
     "test:ui:update": "playwright test --update-snapshots"
   },
@@ -11,6 +12,7 @@
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
     "@playwright/test": "^1.52.0",
     "lucide": "0.468.0",
+    "tailwindcss": "3.4.17",
     "yaml": "^2.8.1"
   }
 }
