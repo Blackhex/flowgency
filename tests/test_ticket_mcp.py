@@ -8,10 +8,17 @@ import httpx2
 from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
+from flowgency.git_evidence.models import GitPublicationPolicy
 from flowgency.integrations.ticket_tools import build_ticket_tool_launch
 from flowgency.tickets.broker import TicketBroker
 from flowgency.tickets.models import TicketRef
 from flowgency.workflows.models import ArtifactRef
+from tests._git_evidence_helpers import (
+    configure_git_workflow,
+    create_git_repository,
+    launch_policy_for,
+    requires_git,
+)
 
 
 def test_mcp_http_lifecycle_persists_mid_run(workflow_env):
@@ -200,6 +207,104 @@ def test_mcp_git_capture_rejects_an_unknown_field_at_runtime(workflow_env):
     record = env.current_provider().read(ticket.ref)
     assert record.revision == ticket.version.revision
     assert all(event.kind != "git-evidence-captured" for event in record.events)
+
+
+@requires_git
+def test_mcp_git_capture_succeeds_and_its_result_completes_the_transition(
+    workflow_env, tmp_path
+):
+    """The whole authenticated MCP path: list, capture, then submit the result.
+
+    Trust comes from the broker's own grant, and the artifact submitted to the
+    transition is the one capture returned, not a caller-shaped stand-in.
+    """
+    env = workflow_env
+    fixture = create_git_repository(tmp_path / "mcp-repo")
+    configure_git_workflow(env, fixture, GitPublicationPolicy(mode="local", allowed_refs=()))
+    # The job authority exists before the ticket, and is never rewritten.
+    authority = env.running_job(
+        "builder",
+        "mcp-capture-run",
+        runtime_policy=launch_policy_for(env, "builder"),
+    )
+    env.service.resolve_git_job = env.access_registry.resolve_context
+    ticket = env.create(values={"verdict": True, "summary": "Pending"})
+    session_identity: dict[str, str] = {}
+
+    async def exercise() -> None:
+        with TicketBroker(env.service, env.access_registry, authority=authority) as broker:
+            actor = broker.endpoint.grant.context
+            session_identity["agent_name"] = actor.agent_name
+            session_identity["job_id"] = actor.job_id
+            launch = build_ticket_tool_launch(broker.endpoint)
+            client = httpx2.AsyncClient(headers=dict(launch.headers))
+            async with streamable_http_client(launch.url, http_client=client) as (
+                read_stream,
+                write_stream,
+            ):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    started = await session.call_tool(
+                        "ticket_start_work",
+                        {
+                            "version": ticket.version.model_dump(mode="json"),
+                            "operation_id": "mcp-capture-start",
+                        },
+                    )
+                    assert started.structured_content["ok"] is True, started.structured_content
+                    version = {
+                        "ref": ticket.ref.model_dump(mode="json"),
+                        "revision": started.structured_content["result"]["ticket"]["revision"],
+                        "workflow_digest": ticket.version.workflow_digest,
+                        "context_digest": ticket.version.context_digest,
+                    }
+                    captured = await session.call_tool(
+                        "ticket_capture_git_evidence",
+                        {
+                            "version": version,
+                            "operation_id": "mcp-capture",
+                            "transition_id": "complete",
+                            "field_id": "evidence",
+                            "base_commit": fixture.base_commit,
+                            "end_commit": fixture.end_commit,
+                        },
+                    )
+                    assert captured.is_error is False
+                    capture_payload = captured.structured_content
+                    assert capture_payload["ok"] is True, capture_payload
+                    result = capture_payload["result"]
+                    assert result["artifact"]["kind"] == "id"
+                    # The transition submits exactly what capture handed back.
+                    completed = await session.call_tool(
+                        "ticket_transition",
+                        {
+                            "version": result["version"],
+                            "operation_id": "mcp-capture-complete",
+                            "transition_id": "complete",
+                            "inputs": {"verdict": True},
+                            "outputs": {
+                                "summary": "Committed result",
+                                "evidence": result["artifact"],
+                            },
+                        },
+                    )
+                    assert completed.structured_content["ok"] is True, completed.structured_content
+                    session_identity["artifact_id"] = result["artifact"]["value"]
+
+    asyncio.run(exercise())
+
+    record = env.current_provider().read(ticket.ref)
+    capture_events = [
+        event for event in record.events if event.kind == "git-evidence-captured"
+    ]
+    assert len(capture_events) == 1
+    receipt = capture_events[0].data["capture"]
+    assert receipt["agent_name"] == session_identity["agent_name"]
+    assert receipt["job_id"] == session_identity["job_id"]
+    assert receipt["artifact_id"] == session_identity["artifact_id"]
+    assert record.field_values["evidence"] == ArtifactRef(
+        kind="id", value=session_identity["artifact_id"]
+    )
 
 
 def _assert_required_properties(schema: Mapping[str, object] | None, required: tuple[str, ...]) -> None:

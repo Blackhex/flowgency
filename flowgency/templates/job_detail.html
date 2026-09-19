@@ -85,12 +85,12 @@
   {% endif %}
 
   {% if git_evidence_links or git_evidence_issues %}
-  <div class="mb-6">
+  <div class="mb-6" data-git-evidence-links>
     <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Git evidence</div>
     <div class="space-y-2 text-sm">
       {% for link in git_evidence_links %}
-      <div class="flex flex-wrap items-center gap-3">
-        <a href="{{ link.href }}" class="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400">{{ link.label }}</a>
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
+        <a href="{{ link.href }}" class="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 break-words min-w-0">{{ link.label }}</a>
         <a href="{{ link.ticket_href }}" class="text-gray-500 hover:text-gray-700 dark:text-gray-400">Ticket</a>
       </div>
       {% endfor %}

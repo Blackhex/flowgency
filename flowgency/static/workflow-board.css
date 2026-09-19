@@ -608,6 +608,16 @@
   text-underline-offset: 0.12rem;
 }
 
+/* The outputs column is narrow, so the retained-evidence actions stack
+   instead of wrapping into each other mid-line. */
+.workflow-evidence-links {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  overflow-wrap: anywhere;
+}
+
 .workflow-empty-value {
   color: var(--workflow-muted);
 }

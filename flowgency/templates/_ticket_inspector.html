@@ -6,8 +6,10 @@
 {% macro render_value(field_type, value, git_evidence=none) -%}
   {%- if field_type == "artifact" and value and value.kind == "id" and git_evidence -%}
     {%- set evidence_base = "/" ~ team ~ "/workflows/" ~ active_workflow_id ~ "/tickets/" ~ current_ticket.ref.ticket_id ~ "/artifacts/" ~ git_evidence.artifact_id -%}
-    <a class="workflow-value-link" href="{{ evidence_base }}/diff?source=ticket">View diff</a>
-    <a class="workflow-value-link" href="{{ evidence_base }}/patch">Download patch</a>
+    <span class="workflow-evidence-links" data-git-evidence-links>
+      <a class="workflow-value-link" href="{{ evidence_base }}/diff?source=ticket">View diff</a>
+      <a class="workflow-value-link" href="{{ evidence_base }}/patch">Download patch</a>
+    </span>
   {%- elif field_type == "artifact" and value and value.kind == "id" -%}
     <a class="workflow-value-link" href="/{{ team }}/workflows/{{ active_workflow_id }}/artifacts/{{ value.value }}">Download retained file</a>
   {%- elif field_type == "artifact" and value and value.kind == "url" -%}

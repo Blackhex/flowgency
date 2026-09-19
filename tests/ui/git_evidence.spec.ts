@@ -13,6 +13,11 @@ const fixtureIndexPath = path.join(__dirname, '.runtime', 'current', 'fixture-in
 // three times, which is far slower than an ordinary UI action but bounded.
 const RESET_TIMEOUT_MS = 120_000;
 
+// Measured on this worktree: the seeding reset costs 12-14s in beforeEach and
+// the same again in afterEach, which both draw on the test's own budget. This
+// spec therefore gets its own bounded deadline; the global 30s stays untouched.
+test.describe.configure({ timeout: 90_000 });
+
 type EvidenceEntry = {
   artifact_id: string;
   patch_sha256: string;
@@ -33,6 +38,7 @@ type FixtureIndex = {
   original_path: string;
   binary_path: string;
   bulk_path: string;
+  added_bulk_path: string;
 };
 
 async function fixtureIndex(): Promise<FixtureIndex> {
@@ -153,6 +159,11 @@ test('binary, renamed, oversized and empty evidence stay truthful', async ({ pag
   await expect(binary.locator('table')).toHaveCount(0);
   const renamed = page.locator(`section[aria-label="${index.renamed_path}"]`);
   await expect(renamed).toContainText(`from ${index.original_path}`);
+  // A rename that changed no bytes is its own state, not a mode change and not
+  // a file whose rows were dropped by the display budget.
+  await expect(renamed).toContainText('Renamed with no content change.');
+  await expect(renamed).not.toContainText('File mode changed');
+  await expect(renamed).not.toContainText('No lines are shown for this file');
   const hostile = page.locator('section[aria-label="src/inert_sample.py"]');
   await expect(hostile).toContainText('<script>window.__evidenceXssFired = true</script>');
   expect(await page.evaluate(() => (window as unknown as Record<string, unknown>).__evidenceXssFired)).toBeUndefined();
@@ -175,6 +186,10 @@ test('binary, renamed, oversized and empty evidence stay truthful', async ({ pag
   const oversized = page.locator(`section[aria-label="${index.bulk_path}"]`);
   await expect(oversized).toContainText('No lines are shown for this file. Download the patch to read it.');
   await expect(oversized.locator('tbody tr')).toHaveCount(0);
+  // An added file has a 000000 old mode, which is not a mode change.
+  const oversizedAddition = page.locator(`section[aria-label="${index.added_bulk_path}"]`);
+  await expect(oversizedAddition).toContainText('No lines are shown for this file. Download the patch to read it.');
+  await expect(oversizedAddition).not.toContainText('File mode changed');
   const complete = await (await request.get(patchHref(index, index.bulk))).body();
   expect(complete.length).toBe(index.bulk.patch_bytes);
   expect(createHash('sha256').update(complete).digest('hex')).toBe(index.bulk.patch_sha256);
@@ -214,6 +229,64 @@ test('keyboard and a 320px viewport reach the diff controls', async ({ page }) =
   await assertNoConsoleErrors(page);
 });
 
+async function regionFit(page: Page, selector: string) {
+  return page.evaluate((target) => {
+    const region = document.querySelector(target) as HTMLElement | null;
+    if (region === null) {
+      return null;
+    }
+    const bounds = region.getBoundingClientRect();
+    const links = Array.from(region.querySelectorAll('a'));
+    return {
+      links: links.length,
+      escaping: links.filter((link) => {
+        const rect = link.getBoundingClientRect();
+        return rect.right > bounds.right + 1 || rect.left < bounds.left - 1 || rect.width === 0;
+      }).length,
+      documentOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    };
+  }, selector);
+}
+
+test('verified evidence links fit the ticket outputs column and the producing job', async ({ page }) => {
+  const index = await fixtureIndex();
+  const outputs = page.locator('[data-ticket-panel="overview"] [data-git-evidence-links]');
+  const jobLinks = page.locator('[data-git-evidence-links]');
+
+  for (const width of [1440, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+
+    await page.goto(index.ticket_href);
+    await expect(outputs.getByRole('link', { name: 'View diff', exact: true })).toBeVisible();
+    await expect(outputs.getByRole('link', { name: 'Download patch', exact: true })).toBeVisible();
+    const ticketFit = await regionFit(page, '[data-ticket-panel="overview"] [data-git-evidence-links]');
+    expect(ticketFit?.links).toBe(2);
+    expect(ticketFit?.escaping).toBe(0);
+    expect(ticketFit?.documentOverflow).toBeLessThanOrEqual(1);
+    await assertNoLayoutIssues(page);
+    if (width === 320) {
+      await expect(outputs).toHaveScreenshot('git-evidence-ticket-outputs-narrow.png');
+    }
+
+    await page.goto(`/newsletter/jobs/${index.current.job_id}`);
+    await expect(jobLinks).toBeVisible();
+    const jobFit = await regionFit(page, '[data-git-evidence-links]');
+    expect(jobFit?.links).toBe(2);
+    expect(jobFit?.escaping).toBe(0);
+    expect(jobFit?.documentOverflow).toBeLessThanOrEqual(1);
+    await assertNoLayoutIssues(page);
+    if (width === 1440) {
+      await expect(jobLinks).toHaveScreenshot('git-evidence-job-links.png');
+    }
+  }
+
+  // Both links are reachable from the narrow column, not merely visible.
+  await page.goto(index.ticket_href);
+  await outputs.getByRole('link', { name: 'View diff', exact: true }).click();
+  await expect(page.getByText('Local commits', { exact: true })).toBeVisible();
+  await assertNoConsoleErrors(page);
+});
+
 test.describe('javascript-disabled evidence viewer', () => {
   test.use({ javaScriptEnabled: false });
 
@@ -236,6 +309,26 @@ test.describe('javascript-disabled evidence viewer', () => {
     await page.getByRole('link', { name: 'Back to ticket', exact: true }).click();
     await expect(page).toHaveURL(index.ticket_href);
     await expect(page.locator('[data-ticket-panel="overview"]')).toContainText('Committed changes');
+
+    // The ticket page's unrelated no-script input overflow still trips the
+    // global helper here, so this measures the feature's own region instead.
+    const stacking = await page.evaluate(() => {
+      const region = document.querySelector('[data-ticket-panel="overview"] [data-git-evidence-links]');
+      if (region === null) {
+        return null;
+      }
+      const cell = region.closest('dd') as HTMLElement;
+      const cellBounds = cell.getBoundingClientRect();
+      const boxes = Array.from(region.querySelectorAll('a')).map((link) => link.getBoundingClientRect());
+      return {
+        links: boxes.length,
+        escapingCell: boxes.filter((box) => box.width === 0 || box.right > cellBounds.right + 1 || box.left < cellBounds.left - 1).length,
+        sharingALine: boxes.slice(1).filter((box, before) => box.top < boxes[before].bottom - 1).length,
+      };
+    });
+    expect(stacking?.links).toBe(2);
+    expect(stacking?.escapingCell).toBe(0);
+    expect(stacking?.sharingALine).toBe(0);
   });
 });
 

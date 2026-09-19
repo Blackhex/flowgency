@@ -58,7 +58,19 @@
       {% elif file.change.binary %}
       <p class="git-evidence-notice">Binary file change. Download the patch to read it.</p>
       {% elif not file.lines %}
-      <p class="git-evidence-notice">{% if file.change.old_mode != file.change.new_mode %}File mode changed from {{ file.change.old_mode }} to {{ file.change.new_mode }}.{% else %}No lines are shown for this file. Download the patch to read it.{% endif %}</p>
+      <p class="git-evidence-notice">
+        {%- if file.change.lines_added or file.change.lines_removed -%}
+        No lines are shown for this file. Download the patch to read it.
+        {%- elif file.change.status == "renamed" and file.change.old_mode != file.change.new_mode -%}
+        Renamed with no content change; its file mode changed from {{ file.change.old_mode }} to {{ file.change.new_mode }}.
+        {%- elif file.change.status == "renamed" -%}
+        Renamed with no content change.
+        {%- elif file.change.status == "modified" and file.change.old_mode != file.change.new_mode -%}
+        File mode changed from {{ file.change.old_mode }} to {{ file.change.new_mode }}.
+        {%- else -%}
+        No lines are shown for this file. Download the patch to read it.
+        {%- endif -%}
+      </p>
       {% else %}
       <div class="git-diff-scroll" tabindex="0" aria-label="Diff for {{ file.change.path }}">
         <table class="git-diff-table">

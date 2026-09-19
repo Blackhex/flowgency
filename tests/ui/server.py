@@ -5,6 +5,7 @@ import base64
 from datetime import datetime, timezone
 import dataclasses
 import hashlib
+import inspect
 import json
 import os
 from pathlib import Path
@@ -215,6 +216,51 @@ def _clear_directory(path: Path) -> None:
             shutil.rmtree(child, ignore_errors=True)
         else:
             child.unlink(missing_ok=True)
+
+
+def _configured_workflow_roots(config: dict) -> tuple[Path, ...]:
+    roots: list[Path] = []
+    for team in (config.get("teams") or {}).values():
+        for workflow in ((team or {}).get("workflows") or {}).values():
+            root = ((workflow or {}).get("integration_config") or {}).get("root")
+            if root:
+                roots.append(Path(root))
+    return tuple(roots)
+
+
+def _clear_directory_keeping(path: Path, keep: frozenset[Path]) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    for child in path.iterdir():
+        if not child.is_dir():
+            child.unlink(missing_ok=True)
+        elif child in keep:
+            _clear_directory_keeping(child, keep)
+        else:
+            shutil.rmtree(child, ignore_errors=True)
+
+
+def _clear_workflow_roots(runtime: Path, config: dict) -> None:
+    """Clear seeded tickets while every configured workflow root stays present.
+
+    A board request that races a reset revalidates its configured root, so that
+    directory must never be absent, not even between two removals.
+    """
+    tickets = runtime / "tickets"
+    roots = tuple(
+        root
+        for root in _configured_workflow_roots(config)
+        if root == tickets or tickets in root.parents
+    )
+    for root in roots:
+        root.mkdir(parents=True, exist_ok=True)
+    keep = frozenset(
+        ancestor
+        for root in roots
+        for ancestor in (root, *root.parents)
+        if ancestor == tickets or tickets in ancestor.parents
+    )
+    _clear_directory_keeping(tickets, keep)
+
 
 
 def _set_mtime(path: Path, value: str) -> None:
@@ -771,6 +817,7 @@ _LONG_DIRECTORY = "reference/unusually-long-reference-directory-for-narrow-layou
 _APPENDIX_BEFORE = f"docs/{_LONG_DIRECTORY}/handbook-appendix-with-an-unusually-long-unbroken-filename.md"
 _APPENDIX_AFTER = f"docs/{_LONG_DIRECTORY}/renamed-handbook-appendix-with-an-unusually-long-unbroken-filename.md"
 _BULK_REPORT = "docs/generated/bulk-release-report.txt"
+_ADDED_BULK_REPORT = "docs/generated/added-bulk-appendix.txt"
 
 _APPENDIX_BODY = b"""# Handbook appendix
 
@@ -876,9 +923,8 @@ def _build_git_evidence_repository(workspace: Path) -> dict[str, str]:
             "tools/retired_notes.txt",
             b"Retired note one\nRetired note two\nRetired note three\n",
         )
-        # Present from the start so the oversized range is a modification: an
-        # added file would report its 000000 mode instead of the real reason
-        # its rows are missing.
+        # Present from the start so the oversized range carries a modification
+        # as well as the added file below; the two omission notices differ.
         _git_write(workspace, _BULK_REPORT, b"generated release row 0000\n")
         _git(workspace, "add", "--all")
         _git(workspace, "commit", "-m", "test: seed delivery handbook")
@@ -898,6 +944,11 @@ def _build_git_evidence_repository(workspace: Path) -> dict[str, str]:
             workspace,
             _BULK_REPORT,
             b"".join(b"generated release row %04d\n" % index for index in range(2600)),
+        )
+        _git_write(
+            workspace,
+            _ADDED_BULK_REPORT,
+            b"".join(b"appendix row %04d\n" % index for index in range(2400)),
         )
         _git(workspace, "add", "--all")
         _git(workspace, "commit", "-m", "test: record the bulk release report")
@@ -1215,6 +1266,7 @@ def _seed_git_evidence_fixture(runtime: Path, config: dict) -> None:
                 "original_path": _APPENDIX_BEFORE,
                 "binary_path": "assets/release-marker.bin",
                 "bulk_path": _BULK_REPORT,
+                "added_bulk_path": _ADDED_BULK_REPORT,
             },
             indent=2,
             sort_keys=True,
@@ -1254,6 +1306,31 @@ def _seed_memory(runtime: Path, config: dict) -> None:
     _write(channel.directory / "memory.md", "# Brand Strategy\n\nPrefer concise, evidence-led releases.\n")
 
 
+def _clear_readonly(function, path, _error) -> None:
+    # Git marks its object files read-only, so Windows refuses the plain
+    # removal every other fixture directory accepts. The third argument is an
+    # exception on 3.12+ and an ``exc_info`` triple on 3.11; neither is used.
+    os.chmod(path, stat.S_IWRITE)
+    function(path)
+
+
+def _rmtree_including_read_only(runtime: Path, rmtree=None) -> None:
+    """Remove a tree whose files may be read-only, on every supported Python.
+
+    ``shutil.rmtree`` only grew ``onexc`` in 3.12 while this package supports
+    3.11, so the error-handler keyword is chosen from the interpreter's own
+    signature instead of being assumed.
+    """
+    remove = shutil.rmtree if rmtree is None else rmtree
+    keyword = "onexc" if "onexc" in inspect.signature(remove).parameters else "onerror"
+    try:
+        remove(runtime, **{keyword: _clear_readonly})
+    except OSError:
+        remove(runtime, ignore_errors=True)
+    if Path(runtime).exists():
+        raise RuntimeError(f"UI runtime could not be removed: {runtime}")
+
+
 def _safe_remove_runtime(runtime: Path) -> None:
     parent = RUNTIME_PARENT.resolve(strict=False)
     candidate = runtime.resolve(strict=False)
@@ -1261,17 +1338,7 @@ def _safe_remove_runtime(runtime: Path) -> None:
         raise RuntimeError(f"Refusing to remove unsafe UI runtime path: {candidate}")
     if not candidate.exists():
         return
-
-    def _clear_readonly(function, path, _excinfo):
-        # Git marks its object files read-only, so Windows refuses the plain
-        # removal every other fixture directory accepts.
-        os.chmod(path, stat.S_IWRITE)
-        function(path)
-
-    try:
-        shutil.rmtree(candidate, onexc=_clear_readonly)
-    except OSError:
-        shutil.rmtree(candidate, ignore_errors=True)
+    _rmtree_including_read_only(candidate)
 
 
 def _reset_runtime_state(runtime: Path, *, fixture: str = "default") -> None:
@@ -1285,7 +1352,7 @@ def _reset_runtime_state(runtime: Path, *, fixture: str = "default") -> None:
     _write_runtime_config(runtime / "config.yaml", config)
 
     _clear_directory(runtime / "workflow-library")
-    _clear_directory(runtime / "tickets")
+    _clear_workflow_roots(runtime, config)
     _clear_directory(runtime / GIT_EVIDENCE_INDEX)
 
     memory_root = runtime / "memory-store"

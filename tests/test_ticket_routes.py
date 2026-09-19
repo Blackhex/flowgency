@@ -1456,7 +1456,7 @@ def test_git_diff_download_is_retained_not_recomputed(workflow_web_env):
     assert "attachment" in download.headers["content-disposition"]
 
 
-def _git_evidence_ticket(env, *, name="source", commit=None):
+def _git_evidence_ticket(env, *, name="source", commit=None, commit_with=None):
     """Start a real run on a ticket whose team points at a Git fixture."""
     from flowgency.git_evidence.models import GitPublicationPolicy
     from tests._git_evidence_helpers import (
@@ -1471,6 +1471,9 @@ def _git_evidence_ticket(env, *, name="source", commit=None):
         (fixture.root / filename).write_bytes(content)
         git_command(fixture.root, "add", "--", filename)
         git_command(fixture.root, "commit", "-m", "test: add reviewed content")
+    if commit_with is not None:
+        commit_with(fixture.root)
+    if commit is not None or commit_with is not None:
         fixture = replace(
             fixture,
             end_commit=git_command(fixture.root, "rev-parse", "HEAD").decode().strip(),
@@ -1511,6 +1514,12 @@ def _evidence_base(env, ticket, captured):
         f"{env.base_path}/tickets/{ticket.ref.ticket_id}"
         f"/artifacts/{captured.artifact.value}"
     )
+
+
+def _evidence_section(html: str, path: str) -> str:
+    """The one changed-file block the viewer rendered for this path."""
+    start = html.index(f'aria-label="{path}"')
+    return html[start : html.index("</section>", start)]
 
 
 def _retained_patch(env, ticket, captured):
@@ -1685,6 +1694,98 @@ def test_git_evidence_page_escapes_committed_markup(workflow_web_env):
     assert '<button onclick="steal()">' not in viewer.text
     assert "&lt;script&gt;alert(" in viewer.text
     assert "&lt;button onclick=" in viewer.text
+
+
+@requires_git
+def test_a_pure_rename_is_not_reported_as_a_mode_or_content_change(workflow_web_env):
+    from tests._git_evidence_helpers import git_command
+
+    env = workflow_web_env
+
+    def rename_only(root):
+        git_command(root, "mv", "unrelated.txt", "moved-unrelated.txt")
+        git_command(root, "commit", "-m", "test: rename without editing")
+
+    fixture, actor, ticket = _git_evidence_ticket(
+        env, name="rename-source", commit_with=rename_only
+    )
+    captured = _capture_evidence(env, fixture, actor, ticket)
+    _accept_evidence(env, actor, captured)
+
+    viewer = env.client.get(f"{_evidence_base(env, ticket, captured)}/diff")
+
+    assert viewer.status_code == 200
+    section = _evidence_section(viewer.text, "moved-unrelated.txt")
+    assert "Renamed with no content change." in section
+    assert "File mode changed" not in section
+    assert "No lines are shown for this file" not in section
+
+
+@requires_git
+def test_a_mode_only_change_still_reports_its_modes(workflow_web_env):
+    from tests._git_evidence_helpers import git_command
+
+    env = workflow_web_env
+
+    def make_executable(root):
+        git_command(root, "update-index", "--chmod=+x", "--", "unrelated.txt")
+        git_command(root, "commit", "-m", "test: make it executable")
+
+    fixture, actor, ticket = _git_evidence_ticket(
+        env, name="mode-source", commit_with=make_executable
+    )
+    captured = _capture_evidence(env, fixture, actor, ticket)
+    _accept_evidence(env, actor, captured)
+
+    viewer = env.client.get(f"{_evidence_base(env, ticket, captured)}/diff")
+
+    assert viewer.status_code == 200
+    section = _evidence_section(viewer.text, "unrelated.txt")
+    assert "File mode changed from 100644 to 100755." in section
+    assert "Renamed" not in section
+
+
+@requires_git
+def test_an_added_file_whose_rows_are_omitted_says_so(workflow_web_env):
+    """An addition always has a 000000 old mode; that is not a mode change."""
+    env = workflow_web_env
+    bulk = "".join(f"added line {index}\n" for index in range(2400)).encode("utf-8")
+    fixture, actor, ticket = _git_evidence_ticket(env, commit=("added-bulk.txt", bulk))
+    captured = _capture_evidence(env, fixture, actor, ticket)
+    _accept_evidence(env, actor, captured)
+
+    viewer = env.client.get(f"{_evidence_base(env, ticket, captured)}/diff")
+
+    assert viewer.status_code == 200
+    section = _evidence_section(viewer.text, "added-bulk.txt")
+    assert "No lines are shown for this file. Download the patch to read it." in section
+    assert "File mode changed" not in section
+
+
+@requires_git
+def test_the_preview_byte_budget_is_reached_before_the_line_budget(workflow_web_env):
+    """Few but very long lines exhaust the 200 KiB preview allowance alone."""
+    from flowgency.web.git_evidence import MAX_PREVIEW_BYTES, MAX_PREVIEW_LINES
+
+    env = workflow_web_env
+    rows = 80
+    heavy = "".join(f"{index:04d}" + "w" * 4092 + "\n" for index in range(rows)).encode("utf-8")
+    assert rows < MAX_PREVIEW_LINES
+    assert len(heavy) > MAX_PREVIEW_BYTES
+    fixture, actor, ticket = _git_evidence_ticket(env, commit=("heavy.txt", heavy))
+    captured = _capture_evidence(env, fixture, actor, ticket)
+    _accept_evidence(env, actor, captured)
+    expected_patch = _retained_patch(env, ticket, captured)
+    base_url = _evidence_base(env, ticket, captured)
+
+    viewer = env.client.get(f"{base_url}/diff")
+    download = env.client.get(f"{base_url}/patch")
+
+    assert viewer.status_code == 200
+    assert "not shown here" in viewer.text
+    assert "w" * 4092 not in viewer.text
+    assert download.content == expected_patch
+    assert b"+" + heavy.splitlines()[-1] in download.content
 
 
 @requires_git
