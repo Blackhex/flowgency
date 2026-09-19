@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import re
 import threading
 from contextlib import contextmanager
@@ -79,6 +80,100 @@ def pin_resolved_executable(monkeypatch, runtime: InstalledRuntime, registry=REG
     return integration._probe_cli_version(runtime.command)
 
 
+# Every live Copilot probe -- ordinary and ticket-capable alike -- must
+# disable exactly this built-in; nothing else may quietly stand in for it.
+DISABLED_BUILTIN_MCP_SERVERS = frozenset({"github-mcp-server"})
+
+_DEFAULT_COPILOT_TEST_MODEL = "gpt-5.4"
+
+
+def canonical_test_model(runtime_name: str) -> str | None:
+    """The model live Copilot probes select, unless overridden for this run.
+
+    Only Copilot has a canonical `model` configuration today; every other
+    runtime keeps launching however it already does, so this returns `None`
+    for them rather than inventing a value no other adapter understands.
+    """
+    if runtime_name != "copilot":
+        return None
+    return os.environ.get("FLOWGENCY_TEST_COPILOT_MODEL", _DEFAULT_COPILOT_TEST_MODEL)
+
+
+@dataclass(frozen=True)
+class LiveRuntimeDiagnostics:
+    """The exact executable, measured version, and selected model a live probe
+    pinned itself to.
+
+    Callers must fold `describe()` into their own failure messages so this
+    evidence reaches actual test output -- not a discarded return value that
+    gets reconstructed by hand afterward in a report.
+    """
+
+    runtime: InstalledRuntime
+    version: str | None
+    model: str | None
+
+    def describe(self) -> str:
+        return (
+            f"executable={self.runtime.command} version={self.version!r} "
+            f"model={self.model!r}"
+        )
+
+
+def pin_live_runtime(
+    monkeypatch, runtime: InstalledRuntime, *, model: str | None = None, registry=REGISTRY
+) -> LiveRuntimeDiagnostics:
+    """`pin_resolved_executable`, but keeping what it measures.
+
+    Pins the exact binary a probe resolves to (see `pin_resolved_executable`)
+    and carries its measured version, plus the model this probe selected,
+    into a `LiveRuntimeDiagnostics` callers fold into their own assertions.
+    """
+    version = pin_resolved_executable(monkeypatch, runtime, registry=registry)
+    return LiveRuntimeDiagnostics(runtime=runtime, version=version, model=model)
+
+
+def prepare_copilot_probe(monkeypatch, runtime: InstalledRuntime, integration, registry=REGISTRY):
+    """Pin the exact binary and bind the canonical test model, for Copilot only.
+
+    For any other runtime this is a no-op that returns `(integration, None)`
+    unchanged, so ordinary (non-ticket) live scenarios can call this
+    unconditionally without altering non-Copilot behavior. For Copilot it
+    returns a model-bound copy of `integration` (see `with_config`) the
+    caller must launch on, plus the `LiveRuntimeDiagnostics` recording what
+    was pinned.
+    """
+    if runtime.name != "copilot":
+        return integration, None
+    model = canonical_test_model(runtime.name)
+    diagnostics = pin_live_runtime(monkeypatch, runtime, model=model, registry=registry)
+    if model:
+        integration = integration.with_config({"model": model})
+    return integration, diagnostics
+
+
+@contextmanager
+def verified_copilot_run(runtime: InstalledRuntime, *, expected_connected: frozenset[str] = frozenset()):
+    """Wrap a live launch and, for Copilot only, verify its real MCP server
+    inventory once it completes: the disabled built-in and nothing else,
+    unless `expected_connected` names servers this run legitimately needed.
+
+    For any other runtime this yields without observing anything, so the
+    launch runs exactly as it did before -- non-Copilot behavior is
+    untouched.
+    """
+    if runtime.name != "copilot":
+        yield
+        return
+    with capture_raw_copilot_output() as raw_stdout:
+        yield
+    assert_mcp_server_inventory(
+        [event for text in raw_stdout for event in iter_jsonl_events(text)],
+        expected_disabled=DISABLED_BUILTIN_MCP_SERVERS,
+        expected_connected=expected_connected,
+    )
+
+
 def supported_ticket_adapters(registry=REGISTRY) -> frozenset[str]:
     """Adapters that explicitly declare a live ticket transport.
 
@@ -132,8 +227,12 @@ def assert_live_success(
     runtime: InstalledRuntime,
     scenario: str,
     token: str,
+    *,
+    diagnostics: "LiveRuntimeDiagnostics | None" = None,
 ) -> None:
     label = runtime_probe_label(runtime, scenario)
+    if diagnostics is not None:
+        label = f"{label}; {diagnostics.describe()}"
     assert result.exit_code == 0, (
         f"{label}: exit={result.exit_code}; stderr={result.stderr!r}"
     )
@@ -280,32 +379,52 @@ def assert_protected_state_unchanged(
 
 @contextmanager
 def capture_raw_copilot_output():
-    """Observe the raw JSONL stdout of a real supervised Copilot launch.
+    """Observe the raw JSONL stdout of a real Copilot launch, supervised or not.
 
     Measured: Copilot's persisted session-state ``events.jsonl`` (read by
     ``load_job_session_events``) excludes every event marked ``ephemeral``,
     including ``session.mcp_servers_loaded`` and
     ``session.mcp_server_status_changed`` -- it only keeps conversation
     history for ``--resume``. Those MCP-server events exist only in the raw
-    stdout stream of the CLI invocation itself, so this wraps the real
-    ``run_supervised`` call (which still drives the genuine subprocess) and
-    records its stdout for later parsing, rather than mocking anything away.
+    stdout stream of the CLI invocation itself.
+
+    A ticket-enabled launch runs through ``run_supervised``; an ordinary
+    (non-ticket) launch calls ``subprocess.run`` directly instead (see
+    ``CopilotIntegration.run``) -- so both must be wrapped, or an ordinary
+    session's inventory would silently go unobserved. Wrapping
+    ``subprocess.run`` also sees the capability probes
+    (``_probe_cli_version``/``_probe_cli_help``) that a launch triggers along
+    the way, so only calls whose argv actually names ``-p`` (the real launch's
+    own prompt flag) are recorded; a probe's plain version/help text is never
+    valid ``session.*`` JSONL anyway, but filtering keeps the captured stream
+    to what a caller actually means by "this launch's output". Both wrapped
+    callables still drive the genuine subprocess -- this taps their return
+    value, it does not mock anything away.
     """
     import flowgency.integrations.flowgency.copilot as copilot_mod
 
     captured: list[str] = []
-    original = copilot_mod.run_supervised
+    original_run_supervised = copilot_mod.run_supervised
+    original_subprocess_run = copilot_mod.subprocess.run
 
-    def recording(*args, **kwargs):
-        completed = original(*args, **kwargs)
+    def recording_supervised(*args, **kwargs):
+        completed = original_run_supervised(*args, **kwargs)
         captured.append(completed.stdout)
         return completed
 
-    copilot_mod.run_supervised = recording
+    def recording_subprocess_run(popenargs, *args, **kwargs):
+        completed = original_subprocess_run(popenargs, *args, **kwargs)
+        if isinstance(popenargs, (list, tuple)) and "-p" in popenargs:
+            captured.append(completed.stdout or "")
+        return completed
+
+    copilot_mod.run_supervised = recording_supervised
+    copilot_mod.subprocess.run = recording_subprocess_run
     try:
         yield captured
     finally:
-        copilot_mod.run_supervised = original
+        copilot_mod.run_supervised = original_run_supervised
+        copilot_mod.subprocess.run = original_subprocess_run
 
 
 # --------------------------------------------------------------------------- #
@@ -631,35 +750,86 @@ def load_job_session_events(job) -> list[dict]:
     return events
 
 
-def assert_mcp_server_inventory(events: list[dict], *, expected_servers: frozenset[str]) -> None:
-    """The exact set of MCP servers this session touched -- connected, pending,
-    disabled, or failed -- must match `expected_servers`.
+def assert_mcp_server_inventory(
+    events: list[dict],
+    *,
+    expected_disabled: frozenset[str] = frozenset(),
+    expected_connected: frozenset[str] = frozenset(),
+) -> None:
+    """Every MCP server this session ever reported must be exactly
+    `expected_disabled | expected_connected`, each settled into the status its
+    caller actually requires.
 
-    Reads Copilot's one-shot ``session.mcp_servers_loaded`` inventory event,
-    whose ``data.servers`` list names every server the CLI attempted to load
-    (measured: a disabled built-in and a failed plugin-sourced server both
-    appear there), rather than only the servers a tool call happened to
-    reach. A server that leaked in but never completed its handshake -- or
-    never got called -- is still caught.
+    - An `expected_disabled` server must report *only* ``disabled`` -- any
+      other status it ever carried, even a transient one absorbed into a
+      later snapshot, is a leak (an ordinary session must not have any server
+      actually start).
+    - An `expected_connected` server must report ``connected`` at least once,
+      with nothing besides ``connected``/``pending`` ever observed for it: a
+      server that also reported ``failed`` at some point is not proof of a
+      clean, trusted-only channel.
+
+    Reads *every* ``session.mcp_servers_loaded`` inventory snapshot (not only
+    the first) and every transitional ``session.mcp_server_status_changed``
+    event, so a server that leaked in only between snapshots, or that was
+    absent from the final one, is still caught -- a built-in briefly enabled
+    before settling "disabled", or a plugin server visible solely in a
+    status-changed event, cannot pass by looking clean in the last inventory
+    alone.
     """
+    expected = frozenset(expected_disabled) | frozenset(expected_connected)
+    observed_statuses: dict[str, set[str]] = {}
+    inventory_seen = False
+
     for event in events:
-        if event.get("type") != "session.mcp_servers_loaded":
-            continue
         data = event.get("data")
-        servers = data.get("servers") if isinstance(data, dict) else None
-        if not isinstance(servers, list):
+        if not isinstance(data, dict):
             continue
-        observed = {
-            entry.get("name")
-            for entry in servers
-            if isinstance(entry, dict) and isinstance(entry.get("name"), str)
-        }
-        assert observed == set(expected_servers), (
-            f"unexpected MCP server set: observed={sorted(observed)!r}, "
-            f"expected={sorted(expected_servers)!r}"
+        event_type = event.get("type")
+        if event_type == "session.mcp_servers_loaded":
+            servers = data.get("servers")
+            if not isinstance(servers, list):
+                continue
+            inventory_seen = True
+            for entry in servers:
+                if not isinstance(entry, dict):
+                    continue
+                name = entry.get("name")
+                status = entry.get("status")
+                if isinstance(name, str) and isinstance(status, str):
+                    observed_statuses.setdefault(name, set()).add(status)
+        elif event_type == "session.mcp_server_status_changed":
+            name = data.get("serverName")
+            status = data.get("status")
+            if isinstance(name, str) and isinstance(status, str):
+                observed_statuses.setdefault(name, set()).add(status)
+
+    assert inventory_seen, "no session.mcp_servers_loaded event was observed"
+
+    observed_names = frozenset(observed_statuses)
+    assert observed_names == expected, (
+        f"unexpected MCP server set: observed={sorted(observed_names)!r}, "
+        f"expected={sorted(expected)!r}; "
+        f"statuses={ {name: sorted(statuses) for name, statuses in observed_statuses.items()} }"
+    )
+
+    for name in expected_disabled:
+        statuses = observed_statuses[name]
+        assert statuses == {"disabled"}, (
+            f"{name} must report only 'disabled' throughout the session; "
+            f"observed statuses={sorted(statuses)!r}"
         )
-        return
-    assert False, "no session.mcp_servers_loaded event was observed"
+
+    for name in expected_connected:
+        statuses = observed_statuses[name]
+        assert "connected" in statuses, (
+            f"{name} never reported 'connected'; observed statuses={sorted(statuses)!r}"
+        )
+        leaked = statuses - {"connected", "pending"}
+        assert not leaked, (
+            f"{name} reported an unexpected status besides connected/pending: "
+            f"{sorted(leaked)!r}"
+        )
 
 
 def assert_sandbox_denied_write(events, *, target_name: str) -> SandboxDenial:

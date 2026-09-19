@@ -904,6 +904,21 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                             hint="Set integration_config.allow_local_network to true or false.",
                         )
                     )
+                if "model" in integration_config:
+                    model = integration_config.get("model")
+                    if not isinstance(model, str) or not model.strip():
+                        issues.append(
+                            _build_issue(
+                                code="invalid-config",
+                                scope=f"teams.{team_name}.agents.{name or '<unknown>'}.integration_config",
+                                field=(
+                                    f"teams.{team_name}.agents.{name or '<unknown>'}."
+                                    "integration_config.model"
+                                ),
+                                message="Copilot integration_config.model must be a non-blank string.",
+                                hint="Set integration_config.model to a non-blank model identifier, or omit it.",
+                            )
+                        )
             default_memory = agent.get("default_memory") or {}
             if default_memory:
                 issue = _validate_memory_selector(

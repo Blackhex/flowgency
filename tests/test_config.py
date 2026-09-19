@@ -176,6 +176,55 @@ def test_validate_config_allows_default_off_copilot_setting_when_omitted(raw_con
     )
 
 
+def test_validate_config_rejects_non_string_copilot_model(raw_config, config_paths):
+    from flowgency.configuration.models import validate_config
+
+    raw_config["teams"]["newsletter"]["agents"][0]["integration"] = "copilot"
+    raw_config["teams"]["newsletter"]["agents"][0]["integration_config"] = {
+        "model": 42
+    }
+
+    issues = validate_config(raw_config, config_paths["config_path"])
+
+    assert any(
+        issue.field == "teams.newsletter.agents.builder.integration_config.model"
+        and "non-blank string" in issue.message.lower()
+        for issue in issues
+    )
+
+
+def test_validate_config_rejects_blank_copilot_model(raw_config, config_paths):
+    from flowgency.configuration.models import validate_config
+
+    raw_config["teams"]["newsletter"]["agents"][0]["integration"] = "copilot"
+    raw_config["teams"]["newsletter"]["agents"][0]["integration_config"] = {
+        "model": "   "
+    }
+
+    issues = validate_config(raw_config, config_paths["config_path"])
+
+    assert any(
+        issue.field == "teams.newsletter.agents.builder.integration_config.model"
+        for issue in issues
+    )
+
+
+def test_validate_config_allows_omitted_copilot_model(raw_config, config_paths):
+    from flowgency.configuration.models import validate_config
+
+    raw_config["teams"]["newsletter"]["agents"][0]["integration"] = "copilot"
+    raw_config["teams"]["newsletter"]["agents"][0]["integration_config"] = {
+        "allow_local_network": False
+    }
+
+    issues = validate_config(raw_config, config_paths["config_path"])
+
+    assert not any(
+        issue.field == "teams.newsletter.agents.builder.integration_config.model"
+        for issue in issues
+    )
+
+
 def test_parse_config_rejects_team_dispatch_agents_not_supported(raw_config, config_paths):
     from flowgency.configuration.models import parse_config
 

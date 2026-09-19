@@ -253,9 +253,15 @@ class CopilotIntegration(BaseIntegration):
         return "AGENTS.md"
 
     def _probe_cli_version(self, command: str) -> str | None:
-        """The version the installed CLI reports, or None when it will not say."""
+        """The version the installed CLI reports, or None when it will not say.
+
+        Passes ``--no-auto-update`` so the probe measures the exact runtime
+        mode an actual launch uses -- a version probed without it could report
+        a different binary than the one that just auto-updated itself before
+        the real launch ran.
+        """
         result = subprocess.run(
-            [command, "--version"],
+            [command, "--version", "--no-auto-update"],
             capture_output=True,
             text=True,
             timeout=self._VERSION_PROBE_TIMEOUT,
@@ -267,8 +273,10 @@ class CopilotIntegration(BaseIntegration):
         return (result.stdout or result.stderr or "").strip() or None
 
     def _probe_cli_help(self, command: str) -> str | None:
+        """Same reasoning as ``_probe_cli_version``: measure the no-auto-update
+        runtime mode, since that is what every real launch now uses."""
         result = subprocess.run(
-            [command, "--help"],
+            [command, "--help", "--no-auto-update"],
             capture_output=True,
             text=True,
             timeout=self._HELP_PROBE_TIMEOUT,

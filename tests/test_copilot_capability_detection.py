@@ -201,7 +201,7 @@ def test_the_probe_reads_the_version_from_the_cli(copilot, monkeypatch):
     monkeypatch.setattr(copilot_module.subprocess, "run", fake_run)
 
     assert copilot._probe_cli_version("copilot.exe") == MEASURED_VERSION
-    assert seen["args"] == ["copilot.exe", "--version"]
+    assert seen["args"] == ["copilot.exe", "--version", "--no-auto-update"]
     # The probe runs on the request path, so it must never be able to sit
     # waiting: closed stdin so it cannot prompt, a bounded timeout, and no
     # console window to steal focus on Windows.
@@ -211,6 +211,30 @@ def test_the_probe_reads_the_version_from_the_cli(copilot, monkeypatch):
     assert seen["kwargs"]["creationflags"] == getattr(
         subprocess, "CREATE_NO_WINDOW", 0
     )
+
+
+def test_the_probe_reads_help_in_the_same_no_auto_update_mode_as_a_real_launch(
+    copilot, monkeypatch
+):
+    # A real launch always passes --no-auto-update (see _ISOLATION_FLAGS), so a
+    # help probe missing it could measure a different runtime mode -- one that
+    # might auto-update mid-probe and no longer match the binary a launch uses.
+    seen = {}
+
+    def fake_run(args, **kwargs):
+        seen["args"] = args
+        seen["kwargs"] = kwargs
+        return subprocess.CompletedProcess(
+            args, 0, stdout=ISOLATION_HELP_TEXT, stderr=""
+        )
+
+    monkeypatch.setattr(copilot_module.subprocess, "run", fake_run)
+
+    assert copilot._probe_cli_help("copilot.exe") == ISOLATION_HELP_TEXT.strip()
+    assert seen["args"] == ["copilot.exe", "--help", "--no-auto-update"]
+    assert seen["kwargs"]["stdin"] is subprocess.DEVNULL
+    assert seen["kwargs"]["timeout"] == CopilotIntegration._HELP_PROBE_TIMEOUT
+    assert seen["kwargs"]["timeout"] <= 5
 
 
 def test_shell_is_never_claimed_as_path_scopable(copilot, monkeypatch):

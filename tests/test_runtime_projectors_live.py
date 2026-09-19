@@ -19,10 +19,12 @@ from tests._runtime_probe_helpers import (
     capture_protected_state,
     create_probe_directories,
     installed_ai_cli_runtimes,
+    prepare_copilot_probe,
     request,
     selected_skill_supported,
     snapshot,
     unique_token,
+    verified_copilot_run,
     write_boundary_supported,
 )
 
@@ -55,8 +57,9 @@ else:
 
     @pytest.mark.real_runtime
     @pytest.mark.parametrize("runtime", INSTALLED_RUNTIMES, ids=lambda item: item.name)
-    def test_live_basic_execution(runtime, tmp_path):
+    def test_live_basic_execution(runtime, tmp_path, monkeypatch):
         integration = REGISTRY[runtime.name]
+        integration, diagnostics = prepare_copilot_probe(monkeypatch, runtime, integration)
         token = unique_token("BASIC")
         launch_dir, workspace_root, task_dir = create_probe_directories(tmp_path)
         source = snapshot("# Neutral runtime probe\n")
@@ -80,9 +83,12 @@ else:
             REPOSITORY_ROOT,
         )
 
-        result = integration.run(request(workspace_root, launch_dir, task_file))
+        # An ordinary session must load no MCP server beyond the disabled
+        # built-in: no plugin- or personal-config server may leak in.
+        with verified_copilot_run(runtime):
+            result = integration.run(request(workspace_root, launch_dir, task_file))
 
-        assert_live_success(result, runtime, "basic", token)
+        assert_live_success(result, runtime, "basic", token, diagnostics=diagnostics)
         assert_protected_state_unchanged(
             before,
             launch_dir,
@@ -96,8 +102,9 @@ else:
 
     @pytest.mark.real_runtime
     @pytest.mark.parametrize("runtime", INSTALLED_RUNTIMES, ids=lambda item: item.name)
-    def test_live_root_instructions(runtime, tmp_path):
+    def test_live_root_instructions(runtime, tmp_path, monkeypatch):
         integration = REGISTRY[runtime.name]
+        integration, diagnostics = prepare_copilot_probe(monkeypatch, runtime, integration)
         token = unique_token("INSTRUCTION")
         launch_dir, workspace_root, task_dir = create_probe_directories(tmp_path)
         source = snapshot(
@@ -125,9 +132,10 @@ else:
             REPOSITORY_ROOT,
         )
 
-        result = integration.run(request(workspace_root, launch_dir, task_file))
+        with verified_copilot_run(runtime):
+            result = integration.run(request(workspace_root, launch_dir, task_file))
 
-        assert_live_success(result, runtime, "root-instructions", token)
+        assert_live_success(result, runtime, "root-instructions", token, diagnostics=diagnostics)
         assert_protected_state_unchanged(
             before,
             launch_dir,
@@ -143,6 +151,7 @@ else:
     @pytest.mark.parametrize("runtime", INSTALLED_RUNTIMES, ids=lambda item: item.name)
     def test_live_selected_skill(runtime, tmp_path, monkeypatch):
         integration = REGISTRY[runtime.name]
+        integration, diagnostics = prepare_copilot_probe(monkeypatch, runtime, integration)
         token = unique_token("SKILL")
         launch_dir, workspace_root, task_dir = create_probe_directories(tmp_path)
         source = snapshot(
@@ -177,8 +186,9 @@ else:
         )
 
         if selected_skill_supported(integration):
-            result = integration.run(probe_request)
-            assert_live_success(result, runtime, "selected-skill", token)
+            with verified_copilot_run(runtime):
+                result = integration.run(probe_request)
+            assert_live_success(result, runtime, "selected-skill", token, diagnostics=diagnostics)
         else:
             integration_module = importlib.import_module(type(integration).__module__)
 
@@ -226,6 +236,7 @@ else:
     @pytest.mark.parametrize("runtime", INSTALLED_RUNTIMES, ids=lambda item: item.name)
     def test_live_write_boundary(runtime, tmp_path, monkeypatch):
         integration = REGISTRY[runtime.name]
+        integration, diagnostics = prepare_copilot_probe(monkeypatch, runtime, integration)
         token = unique_token("WRITE")
         launch_dir, workspace_root, task_dir = create_probe_directories(tmp_path)
         source = snapshot("# Neutral write-boundary instructions\n")
@@ -260,8 +271,9 @@ else:
         )
 
         if bool(integration.runtime_capabilities.path_scopable_tools):
-            result = integration.run(probe_request)
-            assert_live_success(result, runtime, "write-boundary", token)
+            with verified_copilot_run(runtime):
+                result = integration.run(probe_request)
+            assert_live_success(result, runtime, "write-boundary", token, diagnostics=diagnostics)
             # Whether the model tries the denied write is its own choice; the boundary
             # is that nothing outside the probe is attempted and nothing lands.
             assert result.write_attempts in ([], ["write-probe.txt"]), (
@@ -325,7 +337,7 @@ else:
 
     @pytest.mark.real_runtime
     @pytest.mark.parametrize("runtime", INSTALLED_RUNTIMES, ids=lambda item: item.name)
-    def test_live_launch_zones(runtime, tmp_path):
+    def test_live_launch_zones(runtime, tmp_path, monkeypatch):
         """The outcome the whole permission model was built to reach.
 
         A read-only agent must be able to read the instructions it runs under,
@@ -339,6 +351,7 @@ else:
                 f"{runtime.name} cannot scope a write to a path; launch zones "
                 f"stay advisory for it"
             )
+        integration, diagnostics = prepare_copilot_probe(monkeypatch, runtime, integration)
 
         token = unique_token("ZONE")
         launch_dir, workspace_root, task_dir = create_probe_directories(tmp_path)
@@ -391,8 +404,11 @@ else:
             launch_dir, workspace_root, task_file, REPOSITORY_ROOT
         )
         label = f"{runtime.name}/launch-zones ({runtime.command})"
+        if diagnostics is not None:
+            label = f"{label}; {diagnostics.describe()}"
 
-        result = integration.run(probe_request)
+        with verified_copilot_run(runtime):
+            result = integration.run(probe_request)
 
         assert result.exit_code == 0, (
             f"{label}: exit={result.exit_code}; stderr={result.stderr!r}"

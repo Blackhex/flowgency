@@ -46,11 +46,12 @@ from tests._runtime_probe_helpers import (
     assert_mcp_server_inventory,
     assert_successful_file_read_before_publish,
     assert_sandbox_denied_write,
+    canonical_test_model,
     capture_raw_copilot_output,
     file_content_b64,
     iter_jsonl_events,
     load_job_session_events,
-    pin_resolved_executable,
+    pin_live_runtime,
     supported_ticket_adapters,
     ticket_capable_installed_runtimes,
 )
@@ -239,14 +240,20 @@ def _servers_loaded_event(servers: list[dict]) -> dict:
     return {"type": "session.mcp_servers_loaded", "data": {"servers": servers}}
 
 
-def test_assert_mcp_server_inventory_catches_an_unexpected_leaked_server():
-    """Deterministic proof against a synthetic unrelated plugin server, using
-    real-shaped ``session.mcp_servers_loaded`` events and no CLI launch.
+def _status_changed_event(name: str, status: str) -> dict:
+    return {
+        "type": "session.mcp_server_status_changed",
+        "data": {"serverName": name, "status": status},
+    }
+
+
+def test_assert_mcp_server_inventory_accepts_disabled_builtin_and_connected_ticket_server():
+    """Deterministic proof of the accepting shape, using real-shaped
+    ``session.mcp_servers_loaded`` events and no CLI launch.
 
     Measured against a real session (Copilot 1.0.87-0): a disabled built-in
-    and a failed plugin-sourced server both appear in this one-shot inventory
-    with a `name`, regardless of whether either ever completed a handshake --
-    so the assertion must count them, not just servers a tool call reached.
+    and a connected trusted server both appear in this one-shot inventory
+    with a `name` and `status`.
     """
     events = [
         _servers_loaded_event(
@@ -258,11 +265,31 @@ def test_assert_mcp_server_inventory_catches_an_unexpected_leaked_server():
     ]
 
     assert_mcp_server_inventory(
-        events, expected_servers=frozenset({"github-mcp-server", "flowgency-tickets"})
+        events,
+        expected_disabled=frozenset({"github-mcp-server"}),
+        expected_connected=frozenset({"flowgency-tickets"}),
     )
 
+
+def test_assert_mcp_server_inventory_catches_an_unexpected_leaked_server():
+    """An unrelated plugin server present in the inventory, even connected,
+    must be caught -- not just servers a tool call happened to reach."""
+    events = [
+        _servers_loaded_event(
+            [
+                {"name": "github-mcp-server", "status": "disabled", "source": "builtin"},
+                {"name": "flowgency-tickets", "status": "connected", "source": "additional"},
+                {"name": "unrelated-fixture-plugin", "status": "connected", "source": "plugin"},
+            ]
+        ),
+    ]
+
     with pytest.raises(AssertionError, match="unexpected MCP server set"):
-        assert_mcp_server_inventory(events, expected_servers=frozenset({"flowgency-tickets"}))
+        assert_mcp_server_inventory(
+            events,
+            expected_disabled=frozenset({"github-mcp-server"}),
+            expected_connected=frozenset({"flowgency-tickets"}),
+        )
 
 
 def test_assert_mcp_server_inventory_counts_failed_and_pending_servers():
@@ -282,12 +309,84 @@ def test_assert_mcp_server_inventory_counts_failed_and_pending_servers():
     ]
 
     with pytest.raises(AssertionError, match="unrelated-fixture-plugin"):
-        assert_mcp_server_inventory(events, expected_servers=frozenset())
+        assert_mcp_server_inventory(events)
 
 
 def test_assert_mcp_server_inventory_requires_the_inventory_event():
     with pytest.raises(AssertionError, match="no session.mcp_servers_loaded event"):
-        assert_mcp_server_inventory([], expected_servers=frozenset())
+        assert_mcp_server_inventory([])
+
+
+def test_assert_mcp_server_inventory_rejects_a_builtin_reported_enabled_even_if_disabled_later():
+    """A built-in that ever reported a status other than ``disabled`` -- even
+    if a *later* inventory snapshot shows it disabled -- must fail: the final
+    snapshot alone cannot prove nothing was briefly enabled or connected."""
+    events = [
+        _servers_loaded_event(
+            [{"name": "github-mcp-server", "status": "connected", "source": "builtin"}]
+        ),
+        _servers_loaded_event(
+            [{"name": "github-mcp-server", "status": "disabled", "source": "builtin"}]
+        ),
+    ]
+
+    with pytest.raises(AssertionError, match="github-mcp-server"):
+        assert_mcp_server_inventory(
+            events, expected_disabled=frozenset({"github-mcp-server"})
+        )
+
+
+def test_assert_mcp_server_inventory_catches_a_server_visible_only_in_status_changed_events():
+    """A server that never appears in an inventory snapshot but does appear in
+    a transitional status-changed event is still an unexpected server, not a
+    clean run."""
+    events = [
+        _servers_loaded_event(
+            [{"name": "github-mcp-server", "status": "disabled", "source": "builtin"}]
+        ),
+        _status_changed_event("unrelated-fixture-plugin", "pending"),
+    ]
+
+    with pytest.raises(AssertionError, match="unexpected MCP server set"):
+        assert_mcp_server_inventory(
+            events, expected_disabled=frozenset({"github-mcp-server"})
+        )
+
+
+def test_assert_mcp_server_inventory_requires_the_trusted_server_to_actually_connect():
+    """A ticket session that only ever reports the trusted server pending or
+    failed -- never connected -- must fail; presence alone is not enough."""
+    events = [
+        _servers_loaded_event(
+            [{"name": "github-mcp-server", "status": "disabled", "source": "builtin"}]
+        ),
+        _status_changed_event("flowgency-tickets", "pending"),
+        _status_changed_event("flowgency-tickets", "failed"),
+    ]
+
+    with pytest.raises(AssertionError, match="flowgency-tickets"):
+        assert_mcp_server_inventory(
+            events,
+            expected_disabled=frozenset({"github-mcp-server"}),
+            expected_connected=frozenset({"flowgency-tickets"}),
+        )
+
+
+def test_assert_mcp_server_inventory_requires_the_trusted_server_to_be_named_at_all():
+    """A ticket session where the trusted server never appears anywhere is an
+    absence, not an oversight to be waved through."""
+    events = [
+        _servers_loaded_event(
+            [{"name": "github-mcp-server", "status": "disabled", "source": "builtin"}]
+        ),
+    ]
+
+    with pytest.raises(AssertionError, match="unexpected MCP server set"):
+        assert_mcp_server_inventory(
+            events,
+            expected_disabled=frozenset({"github-mcp-server"}),
+            expected_connected=frozenset({"flowgency-tickets"}),
+        )
 
 
 @pytest.mark.parametrize(
@@ -405,13 +504,6 @@ def _hash_files(paths: dict[str, Path]) -> dict[str, str]:
     }
 
 
-def _canonical_test_model(runtime_name: str) -> str | None:
-    """The model live Copilot probes select, unless overridden for this run."""
-    if runtime_name != "copilot":
-        return None
-    return os.environ.get("FLOWGENCY_TEST_COPILOT_MODEL", "gpt-5.4")
-
-
 def _ticket_agent_config(raw_config: dict, runtime_name: str) -> dict:
     """A single-agent team bound to the installed ticket-capable runtime.
 
@@ -423,7 +515,7 @@ def _ticket_agent_config(raw_config: dict, runtime_name: str) -> dict:
     builder = raw["teams"]["newsletter"]["agents"][0]
     assert builder["name"] == "builder"
     builder["integration"] = runtime_name
-    model = _canonical_test_model(runtime_name)
+    model = canonical_test_model(runtime_name)
     if model:
         builder["integration_config"] = {"model": model}
     return raw
@@ -726,7 +818,8 @@ else:
         from flowgency.prompts import PromptStore
         from tests._runtime_probe_helpers import record_ticket_tool_calls
 
-        pin_resolved_executable(monkeypatch, runtime)
+        model = canonical_test_model(runtime.name)
+        diagnostics = pin_live_runtime(monkeypatch, runtime, model=model)
         raw = _restricted_ticket_agent_config(raw_config, runtime.name)
         env = make_workflow_environment(tmp_path, raw)
         env.publish_criteria_workflow()
@@ -786,11 +879,12 @@ else:
         assert record.status == "complete", (
             f"{runtime.name}: restricted read-only probe did not complete: "
             f"status={record.status!r}; summary={job.execution_summary!r}; "
-            f"stderr_path={job.stderr_path!r}; stdout_path={job.stdout_path!r}"
+            f"stderr_path={job.stderr_path!r}; stdout_path={job.stdout_path!r}; "
+            f"{diagnostics.describe()}"
         )
         assert record.exit_code == 0, (
             f"{runtime.name}: non-zero exit {record.exit_code!r}; "
-            f"summary={job.execution_summary!r}"
+            f"summary={job.execution_summary!r}; {diagnostics.describe()}"
         )
         ticket_get_calls = [call for call in calls if call["tool"] == "ticket_get"]
         assert ticket_get_calls, (
@@ -804,7 +898,8 @@ else:
         # built-in and the trusted ticket channel this run actually needed.
         assert_mcp_server_inventory(
             [event for text in raw_stdout for event in iter_jsonl_events(text)],
-            expected_servers=frozenset({"github-mcp-server", "flowgency-tickets"}),
+            expected_disabled=frozenset({"github-mcp-server"}),
+            expected_connected=frozenset({"flowgency-tickets"}),
         )
         # A read-only run leaves the ticket and every protected input untouched.
         final = env.read(ref).record
@@ -1120,7 +1215,8 @@ else:
         from flowgency.jobs.store import read_job
         from flowgency.prompts import PromptStore
 
-        pin_resolved_executable(monkeypatch, runtime)
+        model = canonical_test_model(runtime.name)
+        diagnostics = pin_live_runtime(monkeypatch, runtime, model=model)
         raw = _ticket_agent_config(raw_config, runtime.name)
         env = make_workflow_environment(tmp_path, raw)
 
@@ -1185,7 +1281,8 @@ else:
         job = read_job(authority.path)
         assert record.status == "complete", (
             f"{runtime.name}: job did not complete: status={record.status!r}; "
-            f"summary={job.execution_summary!r}; stderr_path={job.stderr_path!r}"
+            f"summary={job.execution_summary!r}; stderr_path={job.stderr_path!r}; "
+            f"{diagnostics.describe()}"
         )
 
         final = env.read(ref).record
@@ -1210,7 +1307,8 @@ else:
         # No plugin- or personal-config MCP server leaked in.
         assert_mcp_server_inventory(
             [event for text in raw_stdout for event in iter_jsonl_events(text)],
-            expected_servers=frozenset({"github-mcp-server", "flowgency-tickets"}),
+            expected_disabled=frozenset({"github-mcp-server"}),
+            expected_connected=frozenset({"flowgency-tickets"}),
         )
 
         reported = [event for event in final.events if event.kind == "reported"]
@@ -1243,7 +1341,8 @@ else:
         from flowgency.jobs.store import read_job
         from flowgency.prompts import PromptStore
 
-        pin_resolved_executable(monkeypatch, runtime)
+        model = canonical_test_model(runtime.name)
+        diagnostics = pin_live_runtime(monkeypatch, runtime, model=model)
         raw = _restricted_ticket_agent_config(raw_config, runtime.name)
         env = make_workflow_environment(tmp_path, raw)
         env.publish_artifact_field_workflow()
@@ -1309,7 +1408,8 @@ else:
         assert record.status == "complete", (
             f"{runtime.name}: restricted ticket flow did not complete: "
             f"status={record.status!r}; summary={job.execution_summary!r}; "
-            f"stderr_path={job.stderr_path!r}; stdout_path={job.stdout_path!r}"
+            f"stderr_path={job.stderr_path!r}; stdout_path={job.stdout_path!r}; "
+            f"{diagnostics.describe()}"
         )
 
         final = env.read(ref).record
@@ -1329,7 +1429,8 @@ else:
         # No plugin- or personal-config MCP server leaked in.
         assert_mcp_server_inventory(
             [event for text in raw_stdout for event in iter_jsonl_events(text)],
-            expected_servers=frozenset({"github-mcp-server", "flowgency-tickets"}),
+            expected_disabled=frozenset({"github-mcp-server"}),
+            expected_connected=frozenset({"flowgency-tickets"}),
         )
         assert read_job(authority.path).result_metadata["write_attempts"] == [blocked_note.name]
         assert not blocked_note.exists()
@@ -1402,7 +1503,8 @@ if TICKET_CAPABLE_RUNTIMES:
         from flowgency.prompts import PromptStore
         from tests._runtime_probe_helpers import record_ticket_tool_calls
 
-        pin_resolved_executable(monkeypatch, runtime)
+        model = canonical_test_model(runtime.name)
+        diagnostics = pin_live_runtime(monkeypatch, runtime, model=model)
         raw = _ticket_agent_config(raw_config, runtime.name)
         env = make_workflow_environment(tmp_path, raw)
         env.publish_criteria_workflow()
@@ -1445,7 +1547,7 @@ if TICKET_CAPABLE_RUNTIMES:
         job = read_job(authority.path)
         assert record.status == "complete", (
             f"{runtime.name}: job did not complete: status={record.status!r}; "
-            f"summary={job.execution_summary!r}"
+            f"summary={job.execution_summary!r}; {diagnostics.describe()}"
         )
 
         # The dispatch observer captured the live tool calls in the order the run
@@ -1509,5 +1611,6 @@ if TICKET_CAPABLE_RUNTIMES:
         # No plugin- or personal-config MCP server leaked in.
         assert_mcp_server_inventory(
             [event for text in raw_stdout for event in iter_jsonl_events(text)],
-            expected_servers=frozenset({"github-mcp-server", "flowgency-tickets"}),
+            expected_disabled=frozenset({"github-mcp-server"}),
+            expected_connected=frozenset({"flowgency-tickets"}),
         )
