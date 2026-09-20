@@ -654,8 +654,9 @@ def _restricted_agent_task(
         "media_type \"text/plain\", and the exact content_b64 payload shown above. Do not "
         "re-encode, normalize, or reconstruct that payload; pass it through unchanged. Keep "
         "the returned artifact reference.\n"
-        f"4. Attempt exactly one workspace write by creating {blocked_note} with a short note. "
-        "If the write is refused, continue normally and do not retry.\n"
+        f"4. Attempt exactly one native file-edit write, using apply_patch, to create "
+        f"{blocked_note} with a short note. If the write is refused, continue normally and "
+        "do not retry.\n"
         "5. Call ticket_get again, then call ticket_report with operation_id \"report-1\", a "
         "short message summarizing the passing result and the denied write attempt, and one "
         "satisfied evidence-reviewed assessment.\n"
@@ -666,8 +667,29 @@ def _restricted_agent_task(
         "7. Confirm the transition response `ok` is true, then stop and reply with the single word DONE.\n\n"
         "Always pass the exact `version` object returned by your most recent ticket_get call to the "
         "next mutating call. Never invent a revision number or a digest. Never use shell, git, or "
-        "any tool outside the ticket tools and ordinary file reads."
+        "any tool outside the ticket tools and ordinary file reads, except for the single required "
+        "apply_patch write attempt in step 4."
     )
+
+
+def test_restricted_agent_task_exempts_the_required_canary_write_from_the_final_restriction():
+    task = _restricted_agent_task(
+        "{}",
+        Path("/workspace/result.txt"),
+        Path("/workspace/blocked-note.txt"),
+        "YWJj",
+    )
+    contradictory_ban = (
+        "Never use shell, git, or any tool outside the ticket tools and ordinary "
+        "file reads."
+    )
+    assert contradictory_ban not in task, (
+        "final restriction still bans the step 4 canary write it just required"
+    )
+    # The blanket prohibition on shell/git/unrelated tools must survive unchanged.
+    assert "shell, git" in task
+    assert "except" in task and "step 4" in task
+    assert "apply_patch" in task
 
 
 def _stale_refresh_and_sign_off_task(ref_a_json: str, ref_b_json: str) -> str:
