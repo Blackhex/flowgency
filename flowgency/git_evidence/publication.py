@@ -14,7 +14,9 @@ fetches missing objects or downgrades an unprovable claim into a provable one.
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 
+from flowgency.configuration.paths import is_symlink_or_reparse
 from flowgency.git_evidence.git import (
     LOOSE_REF_LIMIT_BYTES,
     PACKED_REFS_LIMIT_BYTES,
@@ -51,11 +53,32 @@ def _validated_ref(ref_name: str) -> str:
     return ref_name
 
 
+def _reject_linked_ref_path(lexical_candidate: Path, refs_root: Path) -> None:
+    """Refuse a ref whose own name, or a directory above it, is a link.
+
+    Resolving symlinks only proves the *final* target stayed under ``refs/``;
+    it proves nothing about whether the requested name is the real file read,
+    rather than an alias to some other ref. Every component between ``refs/``
+    and the candidate must therefore be the real entry, not a symlink or
+    Windows reparse point standing in for it.
+    """
+    current = refs_root
+    if is_symlink_or_reparse(current):
+        raise GitEvidenceError("git-evidence-publication-ref-denied")
+    for part in lexical_candidate.relative_to(refs_root).parts:
+        current = current / part
+        if is_symlink_or_reparse(current):
+            raise GitEvidenceError("git-evidence-publication-ref-denied")
+
+
 def _read_source_ref(repository: GitRepository, ref: str) -> str | None:
     """Read one loose or packed ref from inside the authorized repository."""
-    refs_root = (repository.common_dir / "refs").resolve(strict=False)
-    candidate = (repository.common_dir / ref).resolve(strict=False)
-    if not candidate.is_relative_to(refs_root):
+    refs_root = repository.common_dir / "refs"
+    lexical_candidate = repository.common_dir / ref
+    _reject_linked_ref_path(lexical_candidate, refs_root)
+    resolved_root = refs_root.resolve(strict=False)
+    candidate = lexical_candidate.resolve(strict=False)
+    if not candidate.is_relative_to(resolved_root):
         # A ref entry that leaves ``refs/`` is refused, never followed.
         raise GitEvidenceError("git-evidence-publication-ref-denied")
     if candidate.is_file():
@@ -68,6 +91,10 @@ def _read_source_ref(repository: GitRepository, ref: str) -> str | None:
             raise GitEvidenceError("git-evidence-verification-incomplete")
         return text
     packed = repository.common_dir / "packed-refs"
+    if is_symlink_or_reparse(packed):
+        # A linked packed-refs would let some other file's content stand in
+        # for what this repository actually recorded.
+        raise GitEvidenceError("git-evidence-publication-ref-denied")
     if not packed.is_file():
         return None
     content = read_bounded_metadata(packed, PACKED_REFS_LIMIT_BYTES).decode(

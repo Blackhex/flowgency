@@ -1524,6 +1524,74 @@ def test_a_ref_entry_leaving_the_repository_is_refused_not_read(tmp_path):
 
 
 @requires_git
+def test_a_ref_aliased_within_refs_is_refused_not_followed(tmp_path):
+    fixture = create_git_repository(tmp_path / "repo")
+    # The decoy resolves to the exact captured end commit, so following the
+    # alias would let the policy appear satisfied without proving the
+    # *requested* name ever pointed there.
+    (_refs_dir(fixture) / "decoy").write_text(f"{fixture.end_commit}\n", encoding="utf-8")
+    try:
+        (_refs_dir(fixture) / "alias").symlink_to(_refs_dir(fixture) / "decoy")
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+
+    with _publication_context(
+        fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch"
+    ) as context:
+        with pytest.raises(GitEvidenceError) as failure:
+            _verify(
+                context, _restricted("refs/heads/alias"), publication_ref="refs/heads/alias"
+            )
+    assert failure.value.code == "git-evidence-publication-ref-denied"
+
+
+@requires_git
+def test_a_linked_packed_refs_file_is_refused_not_read(tmp_path):
+    fixture = create_git_repository(tmp_path / "repo")
+    git_command(fixture.root, "pack-refs", "--all")
+    packed = fixture.root / ".git" / "packed-refs"
+    forged = fixture.root / ".git" / "packed-refs-forged"
+    forged.write_bytes(packed.read_bytes())
+    packed.unlink()
+    try:
+        packed.symlink_to(forged)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+
+    with _publication_context(
+        fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch"
+    ) as context:
+        with pytest.raises(GitEvidenceError) as failure:
+            _verify(
+                context, _restricted("refs/heads/main"), publication_ref="refs/heads/main"
+            )
+    assert failure.value.code == "git-evidence-publication-ref-denied"
+
+
+@requires_git
+@pytest.mark.parametrize("directory", ("refs", "refs/heads"))
+def test_a_linked_ref_directory_is_refused(tmp_path, directory):
+    fixture = create_git_repository(tmp_path / "repo")
+    linked = fixture.root / ".git" / directory
+    target = linked.with_name(f"{linked.name}-real")
+    linked.rename(target)
+    try:
+        linked.symlink_to(target, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+
+    with _publication_context(
+        fixture.root, fixture.base_commit, fixture.end_commit, tmp_path / "scratch"
+    ) as context:
+        with pytest.raises(GitEvidenceError) as failure:
+            _verify(
+                context, _restricted("refs/heads/main"),
+                publication_ref="refs/heads/main",
+            )
+    assert failure.value.code == "git-evidence-publication-ref-denied"
+
+
+@requires_git
 def test_packed_refs_that_grow_past_the_bound_are_refused_not_parsed(tmp_path):
     fixture = create_git_repository(tmp_path / "repo")
     git_command(fixture.root, "pack-refs", "--all")
