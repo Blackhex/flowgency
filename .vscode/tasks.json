@@ -94,12 +94,18 @@
     },
     {
       "args": [
+        "-m",
+        "flowgency.cli",
         "serve",
         "--host",
         "127.0.0.1"
       ],
-      "command": "flowgency",
-      "detail": "Start Flowgency dashboard on http://127.0.0.1:8500",
+      "command": "python",
+      "dependsOn": [
+        "Hidden/Install editable"
+      ],
+      "dependsOrder": "sequence",
+      "detail": "Install current dependencies and start Flowgency dashboard on http://127.0.0.1:8500",
       "group": "none",
       "isBackground": true,
       "label": "Dashboard/Serve",
@@ -120,12 +126,14 @@
     },
     {
       "args": [
+        "-m",
+        "flowgency.cli",
         "serve",
         "--reload",
         "--host",
         "127.0.0.1"
       ],
-      "command": "flowgency",
+      "command": "python",
       "detail": "Start the Flowgency dashboard with hot-reload on http://127.0.0.1:8500",
       "group": "none",
       "hide": true,
