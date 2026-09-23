@@ -132,9 +132,13 @@ terminal output to other clients.
 
 ## Access And Safety
 
-Connected launch, session view, input, resize, state, and Stop endpoints require
-a direct loopback client, a loopback `Host`, and a matching same-origin `Origin`
-for unsafe HTTP requests and all WebSocket upgrades. The initial setup page
+Any setup launch, whether it starts the connected session or the external
+terminal, as well as connected session view, input, resize, state, and Stop
+endpoints require a direct loopback client and a loopback `Host`. Unsafe HTTP
+requests and all WebSocket upgrades require a matching same-origin `Origin`.
+Check launch access before integration discovery or data-root preparation: a
+remote or cross-origin POST cannot create a directory or spawn a process. The
+initial setup page
 issues a random same-site, HTTP-only browser cookie and a form anti-CSRF token.
 Launch and HTTP controls require both; the session is bound to that cookie, and
 WebSocket upgrades require the cookie and a matching `Origin` before acceptance.
@@ -161,6 +165,8 @@ sequences, and bound incoming controls and outbound queues.
   process-tree cleanup, exit, and server shutdown with a controllable test CLI.
 - Verify loopback, `Host`, `Origin`, cookie, and anti-CSRF checks on HTTP and
   WebSocket paths, including remote clients and cross-origin browser requests.
+  Cover both connected and external launch POSTs: a remote request naming a
+  missing data root returns 403 without creating the root or launching an agent.
 - Test configuration readiness separately from process exit, automatic
   redirect with Copilot still running, dashboard return and Stop, disconnected
   polling, relaunch after failure, and startup without PTY support.
