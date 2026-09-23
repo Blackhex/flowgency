@@ -567,18 +567,28 @@ def _posix_group_reason(
     return "descendants-still-running"
 
 
+def terminate_owned_posix_group(
+    group_identity: OwnedPosixProcessGroup,
+    *,
+    timeout: float,
+) -> Literal["empty", "active", "unknown", "reused"]:
+    """Kill the whole owned group and report whether it is gone; never reaps the leader."""
+    signal_status = _signal_owned_posix_group(group_identity, _POSIX_KILL_SIGNAL)
+    if signal_status == "unavailable":
+        return "unknown"
+    if signal_status == "signaled":
+        return _owned_posix_group_status(group_identity, time.monotonic() + timeout)
+    return "empty"
+
+
 def _terminate_owned_posix_group(
     group_identity: OwnedPosixProcessGroup,
     process: subprocess.Popen[bytes],
 ) -> Literal["empty", "active", "unknown", "reused"]:
     """Kill the whole owned group, not only the root, and confirm it is gone."""
-    signal_status = _signal_owned_posix_group(group_identity, _POSIX_KILL_SIGNAL)
-    if signal_status == "unavailable":
-        return "unknown"
-    if signal_status == "signaled":
-        group_status = _owned_posix_group_status(group_identity, time.monotonic() + 5)
-    else:
-        group_status = "empty"
+    group_status = terminate_owned_posix_group(group_identity, timeout=5)
+    if group_status == "unknown":
+        return group_status
     if _reap_posix_root(process, timeout=5) is None:
         return "active"
     return group_status

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import io
 import signal
+import subprocess
 import sys
 import time
 import threading
@@ -19,11 +20,13 @@ from flowgency.jobs.processes import (
     _owned_posix_group_state,
     _posix_process_identity_state,
     _read_posix_process_snapshot,
+    _terminate_owned_posix_group,
     process_identity_matches,
     process_identity_state,
     RuntimeProcessIdentity,
     read_process_identity,
     run_supervised,
+    terminate_owned_posix_group,
 )
 
 
@@ -881,6 +884,78 @@ def test_posix_output_limit_reports_missing_root_identity_not_live_descendants(
     assert result.outcome == "output-limit"
     assert result.process_stop_evidence.confirmed is False
     assert result.process_stop_evidence.reason == "root-identity-unavailable"
+
+
+def _owned_group(pid: int = 4321) -> OwnedPosixProcessGroup:
+    return OwnedPosixProcessGroup(
+        leader=RuntimeProcessIdentity(pid=pid, created_at="leader-created"),
+        process_group_id=pid,
+        session_id=pid,
+    )
+
+
+@pytest.mark.parametrize(
+    ("signal_status", "group_status", "expected"),
+    [
+        ("unavailable", "empty", "unknown"),
+        ("empty", "active", "empty"),
+        ("signaled", "empty", "empty"),
+        ("signaled", "active", "active"),
+        ("signaled", "reused", "reused"),
+    ],
+)
+def test_terminate_owned_posix_group_reports_group_status_without_reaping(
+    monkeypatch, signal_status, group_status, expected
+):
+    signals: list[int] = []
+    waits: list[float] = []
+
+    def fake_signal(group_identity, sig):
+        signals.append(sig)
+        return signal_status
+
+    def fake_status(group_identity, deadline):
+        waits.append(deadline - time.monotonic())
+        return group_status
+
+    monkeypatch.setattr("flowgency.jobs.processes._signal_owned_posix_group", fake_signal)
+    monkeypatch.setattr("flowgency.jobs.processes._owned_posix_group_status", fake_status)
+
+    assert terminate_owned_posix_group(_owned_group(), timeout=3) == expected
+    assert signals == [getattr(signal, "SIGKILL", signal.SIGTERM)]
+    if signal_status == "signaled":
+        assert len(waits) == 1 and 2 < waits[0] <= 3
+    else:
+        assert waits == []
+
+
+def test_headless_group_termination_still_reaps_root_after_group_stop(monkeypatch):
+    fake_process = _FakePosixProcess(4321)
+    fake_process.allow_reap = True
+    monkeypatch.setattr(
+        "flowgency.jobs.processes.terminate_owned_posix_group",
+        lambda group_identity, *, timeout: "empty",
+    )
+
+    assert _terminate_owned_posix_group(_owned_group(), fake_process) == "empty"
+    assert fake_process.wait_calls == [5]
+
+    def unreaped(timeout=None):
+        raise subprocess.TimeoutExpired("root", timeout)
+
+    fake_process.wait = unreaped
+    assert _terminate_owned_posix_group(_owned_group(), fake_process) == "active"
+
+
+def test_headless_group_termination_does_not_wait_on_root_when_group_is_unprovable(monkeypatch):
+    fake_process = _FakePosixProcess(4321)
+    monkeypatch.setattr(
+        "flowgency.jobs.processes.terminate_owned_posix_group",
+        lambda group_identity, *, timeout: "unknown",
+    )
+
+    assert _terminate_owned_posix_group(_owned_group(), fake_process) == "unknown"
+    assert fake_process.wait_calls == []
 
 
 def test_run_supervised_without_output_options_keeps_existing_behavior(tmp_path: Path):
