@@ -52,8 +52,11 @@ class ConnectedProcess(Protocol):
 
 
 # Trees whose stop could not be confirmed; they block new launches until a retry confirms them.
-_unconfirmed_lock = threading.Lock()
+# The condition also gates launches on any stop still deciding its outcome (see `_enter_stop`),
+# so a launch can never observe an empty pending list while that decision is unrecorded.
+_unconfirmed_lock = threading.Condition()
 _unconfirmed: list["_OwnedTerminal"] = []
+_stops_in_flight = 0
 
 
 def connected_process_available() -> bool:
@@ -102,6 +105,10 @@ def _validate_launch(launch: RuntimeLaunch) -> None:
 
 def _retry_unconfirmed() -> None:
     with _unconfirmed_lock:
+        # Wait for every in-flight stop to record its outcome before trusting the list;
+        # otherwise a stop that is about to fail could still look confirmed-clear.
+        while _stops_in_flight:
+            _unconfirmed_lock.wait()
         pending = list(_unconfirmed)
     for process in pending:
         process._stop_tree()
@@ -121,6 +128,19 @@ def _track(process: "_OwnedTerminal", confirmed: bool) -> None:
                 _unconfirmed.remove(process)
         elif process not in _unconfirmed:
             _unconfirmed.append(process)
+
+
+def _enter_stop() -> None:
+    global _stops_in_flight
+    with _unconfirmed_lock:
+        _stops_in_flight += 1
+
+
+def _exit_stop() -> None:
+    global _stops_in_flight
+    with _unconfirmed_lock:
+        _stops_in_flight -= 1
+        _unconfirmed_lock.notify_all()
 
 
 def _posix_group_proof_available() -> bool:
@@ -199,16 +219,22 @@ class _OwnedTerminal:
         with self._stop_lock:
             if self._stopped:
                 return True, "stopped"
-            deadline = time.monotonic() + _STOP_TIMEOUT_SECONDS
-            confirmed, reason = self._terminate_tree(deadline)
-            with self._io_lock:
-                self._io_closed = True
-            drained = self._release_reader(deadline if confirmed or self._reads_cancellable else time.monotonic())
-            if confirmed:
-                self._release(drained)
-                self._stopped = True
-        _track(self, confirmed)
-        return confirmed, reason
+            _enter_stop()
+            try:
+                deadline = time.monotonic() + _STOP_TIMEOUT_SECONDS
+                confirmed, reason = self._terminate_tree(deadline)
+                with self._io_lock:
+                    self._io_closed = True
+                drained = self._release_reader(deadline if confirmed or self._reads_cancellable else time.monotonic())
+                if confirmed:
+                    self._release(drained)
+                    self._stopped = True
+                # Recorded while still "in flight" so a concurrent launch check that is
+                # waiting on `_enter_stop`/`_exit_stop` never sees a stale, empty pending list.
+                _track(self, confirmed)
+                return confirmed, reason
+            finally:
+                _exit_stop()
 
     def _release_reader(self, deadline: float) -> bool:
         while True:

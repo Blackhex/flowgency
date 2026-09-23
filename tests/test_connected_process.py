@@ -243,3 +243,69 @@ def test_posix_group_capture_failure_cleans_up_spawned_child(tmp_path, monkeypat
     assert spawned
     with pytest.raises(ProcessLookupError):
         os.kill(spawned[0], 0)
+
+
+def test_launch_check_blocks_until_an_in_flight_stop_records_its_failure():
+    """A launch must never observe an empty pending-failure list while an earlier stop is
+    still deciding it failed; it has to wait for that decision to be recorded first."""
+    import flowgency.jobs.connected_process as connected_process
+
+    entered_terminate = threading.Event()
+    release_terminate = threading.Event()
+
+    class _BlockingTerminal(connected_process._OwnedTerminal):
+        def _terminate_tree(self, deadline):
+            entered_terminate.set()
+            release_terminate.wait(timeout=5)
+            return False, "active"
+
+        def _read_terminal(self, size):
+            return b""
+
+        def _write_terminal(self, data):
+            pass
+
+        def _resize_terminal(self, rows, cols):
+            pass
+
+        def _release(self, drained):
+            pass
+
+    terminal = _BlockingTerminal(pid=999999)
+    stop_result: dict[str, object] = {}
+
+    def run_stop():
+        stop_result["value"] = terminal._stop_tree()
+
+    stop_thread = threading.Thread(target=run_stop)
+    stop_thread.start()
+    assert entered_terminate.wait(timeout=5), "stop never reached the fake termination point"
+
+    retry_done = threading.Event()
+    retry_result: dict[str, object] = {}
+
+    def run_retry():
+        try:
+            connected_process._retry_unconfirmed()
+        except connected_process.ConnectedLaunchError as error:
+            retry_result["error"] = error
+        finally:
+            retry_done.set()
+
+    retry_thread = threading.Thread(target=run_retry)
+    retry_thread.start()
+    try:
+        # The in-flight stop has not recorded an outcome yet; a concurrent launch check
+        # must block rather than see an empty pending list and let a launch through.
+        assert not retry_done.wait(timeout=0.3), "launch check did not wait for the in-flight stop"
+    finally:
+        release_terminate.set()
+        stop_thread.join(timeout=5)
+        retry_thread.join(timeout=5)
+
+    assert stop_result["value"] == (False, "active")
+    assert isinstance(retry_result.get("error"), connected_process.ConnectedLaunchError)
+    assert retry_result["error"].cleanup_confirmed is False
+    with connected_process._unconfirmed_lock:
+        if terminal in connected_process._unconfirmed:
+            connected_process._unconfirmed.remove(terminal)
