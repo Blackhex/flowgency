@@ -16,7 +16,8 @@ unchanged would remove the interactive questions and approvals that setup needs.
 
 ## Goals
 
-1. Run the first Copilot setup conversation in a real terminal on the setup page.
+1. Run the first Copilot setup conversation in a real terminal on the setup
+  page where a safe Python-only PTY backend is available.
 2. Share invocation infrastructure between explicit `headless` and `connected`
    modes, without changing existing headless agent behavior.
 3. Keep the setup process alive across tab refreshes and brief disconnects.
@@ -36,6 +37,9 @@ unchanged would remove the interactive questions and approvals that setup needs.
   the revision-checked atomic configuration write.
 - Exposing terminal access to other devices or making localhost a security
   boundary against other processes and users on the same computer.
+- Adding Node.js or a compiled Rust bridge as a production requirement.
+- Enabling connected setup on Windows before process-tree ownership can be
+  established without a pre-assignment execution window.
 
 ## Execution Modes And Ownership
 
@@ -49,9 +53,13 @@ stop-confirmation primitives; do not force interactive setup through
 
 Copilot builds its existing setup command from the selected data root, bundled
 `flowgency-setup` skill, initial prompt, and `-i` interactive flag. Connected
-mode attaches that command to a Flowgency-owned PTY: ConPTY on Windows and a
-POSIX pseudo-terminal elsewhere, using maintained platform libraries. The
-same launch layer retains a pipe-based, noninteractive path for agent jobs.
+mode attaches that command to a Flowgency-owned POSIX pseudo-terminal on hosts
+with readable `/proc` process-group evidence, using `ptyprocess`. The same
+launch layer retains a pipe-based, noninteractive path for agent jobs. Windows
+uses the existing external-terminal setup and copyable command: pywinpty starts
+its ConPTY child before Flowgency can assign a Job Object, and a descendant can
+escape the proof of cleanup before assignment. Do not attempt that unsafe
+connected launch or require pywinpty in production.
 Interactive setup must not inherit headless-only flags such as
 `--no-ask-user`, `--autopilot`, `--output-format json`, or closed stdin.
 
@@ -60,8 +68,9 @@ Only Copilot setup consumes it in this feature. Other integrations and hosts
 without working PTY support keep their existing external-terminal behavior.
 The connected implementation may reuse lifecycle primitives from supervised
 jobs, but must extend them for PTY I/O instead of pretending a terminal is a
-captured subprocess pipe. A Windows ConPTY and a POSIX PTY smoke check are
-required before claiming connected support on either platform.
+captured subprocess pipe. A POSIX PTY smoke check is required before claiming
+connected support there. Windows fallback must be tested independently; a
+future Windows connected mode requires a separately reviewed safe backend.
 
 ## Setup Session
 
@@ -96,8 +105,8 @@ fallback path rather than pretending the old terminal can reconnect.
 
 ## Web Experience And Readiness
 
-After launch, replace the waiting panel with an embedded terminal in the
-existing setup page. Keep the selected data root and integration visible in a
+On a supported POSIX host, replace the waiting panel with an embedded terminal
+after launch. Keep the selected data root and integration visible in a
 compact header, and show connecting, connected, reconnecting, exited, and
 stopped states. Package the terminal renderer and its resizing support as
 local static assets so installed deployments work without a CDN. The fallback
@@ -157,12 +166,15 @@ sequences, and bound incoming controls and outbound queues.
   polling, relaunch after failure, and startup without PTY support.
 - Test the rendered setup and dashboard flow with Playwright; validate local
   terminal assets in an installed wheel and smoke-test a real interactive
-  Copilot CLI on Windows and a POSIX host before enabling each platform.
+  Copilot CLI on POSIX before enabling connected mode. On Windows, verify the
+  unchanged external launch and absence of any connected PTY process.
 
 ## Alternatives Considered
 
 - A separate local terminal server adds another service, ownership boundary,
   and access-control surface, especially on Windows.
+- A node-pty helper or Rust PTY bridge could provide a portable backend but
+  adds a new production runtime or compiled bridge. Neither is in scope.
 - A browser chat adapter to headless Copilot would not preserve the CLI's
   interactive prompts, approvals, or full-screen terminal behavior.
 - Mirroring an external console without input would not satisfy the requested
