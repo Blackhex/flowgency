@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Host first-run Copilot setup in a reconnectable browser terminal while preserving existing headless agent jobs and external-terminal fallback.
+**Goal:** Host first-run Copilot setup in a reconnectable browser terminal on supported POSIX hosts, preserving headless jobs and the external-terminal fallback on Windows.
 
 **Architecture:** A typed launch contract exposes `headless` and `connected` modes without turning setup into a team job. A PTY adapter and single-session manager own Copilot independently of the browser tab; local, browser-bound HTTP/WebSocket endpoints connect it to the setup page and a post-redirect dashboard link. Readiness still comes only from canonical configuration validation.
 
-**Tech Stack:** Python 3.11+, FastAPI/Starlette, pywinpty (Windows ConPTY), ptyprocess (POSIX), xterm.js with its fit addon and esbuild, Jinja2, pytest, and Playwright.
+**Tech Stack:** Python 3.11+, FastAPI/Starlette, ptyprocess (POSIX), xterm.js with its fit addon and esbuild, Jinja2, pytest, and Playwright. Node.js is a build-time tool, not a production runtime.
 
 ## Global Constraints
 
@@ -15,7 +15,7 @@
 - Configured agents remain `headless`; connected setup does not create a team job, change job records or policy, or add connected controls to agent pages.
 - Copilot alone gains connected setup in this feature; other integrations and unsupported PTY hosts retain the existing external-terminal launch and copyable command.
 - Connected Copilot uses `-i` with the selected data root and packaged skill. Do not inherit `--no-ask-user`, `--autopilot`, `--output-format json`, or closed stdin from headless jobs.
-- Use Windows ConPTY and a POSIX pseudo-terminal via maintained platform libraries; smoke-test both platforms before claiming support on either.
+- Use `ptyprocess` with `/proc` process-group evidence for connected setup on supported POSIX hosts. On Windows, never start a connected PTY: retain the existing external-terminal launch. Do not add Node.js, pywinpty or a Rust bridge to production dependencies; smoke-test POSIX connected mode and Windows fallback independently.
 - One running setup session per server, one input owner, at most 2 MiB of recent output, and at most 256 KiB queued for a slow WebSocket client. Stop after one hour without input or output or four hours total.
 - Do not persist terminal transcripts; reconnect after tab loss, but never promise replay after server restart. Confirm process-tree termination before relaunch after Stop or failed PTY startup.
 - Require a direct loopback client, loopback `Host`, same-origin `Origin` for unsafe HTTP and WebSocket upgrades, a browser-bound HTTP-only same-site cookie, and anti-CSRF token for launch and HTTP controls. Never put credentials in URLs or logs.
@@ -29,7 +29,7 @@
 
 - `flowgency/integrations/models.py`: typed `ExecutionMode` and `RuntimeLaunch` contract.
 - `flowgency/integrations/__init__.py`, `flowgency/integrations/flowgency/copilot.py`: optional connected setup capability and Copilot command/environment construction; preserve headless execution and existing external launch.
-- `flowgency/jobs/processes.py`, `flowgency/jobs/connected_process.py`: reuse process identity/termination primitives and add platform PTY I/O and process-tree ownership.
+- `flowgency/jobs/processes.py`, `flowgency/jobs/connected_process.py`: reuse process identity/termination primitives for POSIX PTY I/O and fail closed on Windows without starting a child.
 - `flowgency/web/setup_security.py`: loopback/Host/Origin checks, browser-bound credential, and CSRF checks independent of configuration.
 - `flowgency/web/setup_sessions.py`: single server-owned session, bounded output replay, input ownership, timers, and cleanup.
 - `flowgency/web/routes/admin_teams.py`: retain data-root validation and status authority; choose connected launch or unchanged external fallback.
@@ -37,7 +37,7 @@
 - `flowgency/web/setup_flow.py`, `flowgency/web/routes/__init__.py`: discover PTY-only Copilot setup and register the terminal router.
 - `flowgency/app.py`: attach manager to app lifespan, include terminal routes, and provide owner-only status to the team dashboard.
 - `flowgency/templates/setup.html`, `flowgency/templates/home.html`: integrated setup terminal and compact dashboard return/Stop control.
-- `tools/setup-terminal.js`, `package.json`, `package-lock.json`, `flowgency/static/setup-terminal.js`, `flowgency/static/setup-terminal.css`: locally bundled terminal renderer and generated assets; `pyproject.toml` gains platform PTY dependencies (its `static/*` wheel rule already packages generated assets).
+- `tools/setup-terminal.js`, `package.json`, `package-lock.json`, `flowgency/static/setup-terminal.js`, `flowgency/static/setup-terminal.css`: locally bundled terminal renderer and generated assets; `pyproject.toml` gains a POSIX-only PTY dependency (its `static/*` wheel rule already packages generated assets).
 - `tests/test_interactive_setup.py`, `tests/test_copilot_launch_arguments.py`: new mode contract and unchanged headless/external behavior.
 - `tests/_connected_setup_helpers.py`, `tests/test_connected_process.py`, `tests/test_setup_security.py`, `tests/test_setup_sessions.py`: one reusable fake PTY, platform supervision, local browser access, and in-memory session behavior.
 - `tests/test_setup_flow.py`, `tests/test_server.py`, `tests/test_dashboard.py`, `tests/test_setup_assets.py`, `tests/ui/setup.spec.ts`, `tests/ui/server.py`: selector/route, dashboard, wheel, and browser regressions using existing fixtures.
@@ -45,7 +45,7 @@
 
 ## Preflight
 
-From the feature worktree root, run `python -m pytest tests/ -q` before making implementation changes. Record the pass count and stop to investigate any baseline failure without editing unrelated tests. The approved design is `docs/superpowers/specs/2026-09-23-connected-copilot-setup-terminal-design.md` (commit `9ae6ea7`). After each task, review its focused diff and tests before starting a dependent task. Do not stage or rewrite the runtime-local `config.yaml`, locks, team state, or unrelated changes.
+From the feature worktree root, run `python -m pytest tests/ -q` before making implementation changes. Record the pass count and stop to investigate any baseline failure without editing unrelated tests. The approved design is `docs/superpowers/specs/2026-09-23-connected-copilot-setup-terminal-design.md` (revised at commit `94ebe48` to defer Windows connected mode). After each task, review its focused diff and tests before starting a dependent task. Do not stage or rewrite the runtime-local `config.yaml`, locks, team state, or unrelated changes.
 
 ### Task 1: Share A Typed Copilot Launch Contract
 
@@ -142,14 +142,14 @@ Within `CopilotIntegration.run`, after constructing `cmd_args` and `run_env`, cr
 ### Task 2: Run And Contain A Connected PTY
 
 **Files:**
-- Modify: `pyproject.toml` (platform-specific runtime dependencies).
+- Modify: `pyproject.toml` (POSIX-only runtime dependency; remove the unreviewed Windows pywinpty dependency).
 - Modify: `flowgency/jobs/processes.py` (extract reusable POSIX group stop primitive).
 - Create: `flowgency/jobs/connected_process.py` (PTY adapters and capability check).
 - Test: `tests/test_connected_process.py`, `tests/test_runtime_process_lifecycle.py`.
 
 **Interfaces:**
 - Consumes: Task 1's `RuntimeLaunch`; existing `RuntimeProcessLifecycle`, `ProcessStopEvidence`, `_capture_posix_group_identity`, `_signal_owned_posix_group`, `_owned_posix_group_status`, `_job_exit_status`, and `read_process_identity` from `flowgency.jobs.processes`.
-- Produces: `ConnectedLaunchError(IntegrationError)` with a `cleanup_confirmed: bool` field; `connected_process_available() -> bool`; `start_connected_process(launch: RuntimeLaunch, *, rows: int = 24, cols: int = 80) -> ConnectedProcess`; a `ConnectedProcess` protocol implemented by `PosixConnectedProcess` and `WindowsConnectedProcess`, with `pid: int`, `read(size: int = 65536) -> bytes`, `write(data: bytes) -> None`, `resize(rows: int, cols: int) -> None`, `alive() -> bool`, `exit_code() -> int | None`, and `stop(lifecycle: RuntimeProcessLifecycle) -> ProcessStopEvidence`. Task 4 owns the reader and calls these methods.
+- Produces: `ConnectedLaunchError(IntegrationError)` with a `cleanup_confirmed: bool` field; `connected_process_available() -> bool` (always false on Windows); `start_connected_process(launch: RuntimeLaunch, *, rows: int = 24, cols: int = 80) -> ConnectedProcess`; a `ConnectedProcess` protocol implemented by `PosixConnectedProcess`, with `pid: int`, `read(size: int = 65536) -> bytes`, `write(data: bytes) -> None`, `resize(rows: int, cols: int) -> None`, `alive() -> bool`, `exit_code() -> int | None`, and `stop(lifecycle: RuntimeProcessLifecycle) -> ProcessStopEvidence`. Task 4 owns the reader and calls these methods.
 
 - [ ] **Step 1: Write the failing platform and containment tests.** In `tests/test_connected_process.py`, test a mode rejection on both platforms and an interactive child on each supported host:
 
@@ -186,34 +186,24 @@ def test_posix_connected_process_has_tty_and_accepts_input(tmp_path):
         assert evidence.confirmed
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Windows ConPTY-only check")
-def test_windows_connected_process_has_tty_and_stops(tmp_path):
-    from tests.test_runtime_process_lifecycle import _native_python_launch
-    executable, env = _native_python_launch()
-    command = (executable, "-u", "-c", "import sys; print(sys.stdin.isatty(), flush=True); print(input(), flush=True)")
-    launch = RuntimeLaunch(command, tmp_path, env, "connected")
-    process = start_connected_process(launch)
-    try:
-        assert b"True" in process.read()
-        process.resize(30, 100)
-        process.write(b"approved\r")
-        assert b"approved" in process.read()
-    finally:
-        evidence = process.stop(RuntimeProcessLifecycle("setup", "windows-test"))
-        assert evidence.confirmed
+@pytest.mark.skipif(os.name != "nt", reason="Windows fallback check")
+def test_windows_connected_process_is_unavailable_without_spawning(tmp_path):
+    from flowgency.jobs.connected_process import ConnectedLaunchError, connected_process_available
+    launch = RuntimeLaunch((sys.executable, "-c", "print('must not run')"), tmp_path, os.environ.copy(), "connected")
+    assert connected_process_available() is False
+    with pytest.raises(ConnectedLaunchError) as raised:
+        start_connected_process(launch)
+    assert raised.value.cleanup_confirmed is True
+    assert "Windows" in str(raised.value)
 ```
 
-Add a process-tree test beside those cases (import `time` and `Path`). It must exercise both Windows and a POSIX host with `/proc`, and import the existing `_native_python_launch` test helper for Windows Store/venv installs:
+Add a process-tree test beside those cases (import `time` and `Path`). It runs on a POSIX host with `/proc`:
 
 ```python
 def test_connected_process_stop_reaps_child_tree(tmp_path):
-    if os.name != "nt" and not Path("/proc/self/stat").is_file():
+    if os.name == "nt" or not Path("/proc/self/stat").is_file():
         pytest.skip("POSIX group evidence requires /proc")
-    if os.name == "nt":
-        from tests.test_runtime_process_lifecycle import _native_python_launch
-        executable, env = _native_python_launch()
-    else:
-        executable, env = sys.executable, os.environ.copy()
+    executable, env = sys.executable, os.environ.copy()
     script = (
         "import subprocess,sys,time; "
         "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(120)']); "
@@ -231,11 +221,11 @@ def test_connected_process_stop_reaps_child_tree(tmp_path):
     assert process_identity_state(identity) != "alive"
 ```
 
-Also add a Windows-only assignment failure test that monkeypatches `win32job.AssignProcessToJobObject` to raise `pywintypes.error(5, "AssignProcessToJobObject", "access denied")`; `start_connected_process` must raise `IntegrationError` and report failed containment, never returning an uncontained `ConnectedProcess`. A POSIX failure test monkeypatches `_capture_posix_group_identity` to return `None` and asserts the spawned child is cleaned up. Skip POSIX smoke tests where `/proc/self/stat` is absent; those hosts use external fallback.
+Add a Windows-only test that monkeypatches `builtins.__import__` to fail if `winpty` is imported, then asserts `connected_process_available()` stays false and `start_connected_process()` raises `ConnectedLaunchError(cleanup_confirmed=True)` without attempting an import or spawn. It must pass even if pywinpty is **not installed**, since Windows no longer depends on it. A POSIX failure test monkeypatches `_capture_posix_group_identity` to return `None` and asserts the spawned child is cleaned up. Skip POSIX smoke tests where `/proc/self/stat` is absent; those hosts use external fallback.
 
 - [ ] **Step 2: Run the new tests to verify red.** Run `python -m pytest tests/test_connected_process.py -q`. Expected: import error because `flowgency.jobs.connected_process` does not exist.
 
-- [ ] **Step 3: Add runtime dependencies and implement the PTY adapter.** In `pyproject.toml` add `"pywinpty>=3,<4; sys_platform == 'win32'"` and `"ptyprocess>=0.7,<1; sys_platform != 'win32'"`. Install from the worktree with `python -m pip install -e .`. Define the `ConnectedProcess(Protocol)` signatures from the Interfaces block, implement each platform class, and use this strict mode gate in `connected_process.py`:
+- [ ] **Step 3: Add the POSIX dependency and implement the PTY adapter.** In `pyproject.toml` retain `"ptyprocess>=0.7,<1; sys_platform != 'win32'"` and remove the Windows `pywinpty` dependency from the previous Task 2 commit. Install from the worktree with `python -m pip install -e .`. Define the `ConnectedProcess(Protocol)` signatures from the Interfaces block, implement the POSIX class, and use this strict mode gate in `connected_process.py`:
 
 ```python
 class ConnectedLaunchError(IntegrationError):
@@ -248,38 +238,15 @@ def start_connected_process(launch: RuntimeLaunch, *, rows: int = 24, cols: int 
     if launch.mode != "connected":
         raise ValueError("A connected PTY requires connected launch mode")
     if os.name == "nt":
-        return WindowsConnectedProcess.spawn(launch, rows=rows, cols=cols)
+        raise ConnectedLaunchError("Connected setup is unavailable on Windows; use the external terminal", cleanup_confirmed=True)
     return PosixConnectedProcess.spawn(launch, rows=rows, cols=cols)
 ```
 
-On POSIX, require readable `/proc/self/stat` for existing group identity checks, use `PtyProcess.spawn(list(launch.argv), cwd=str(launch.cwd), env=dict(launch.env), dimensions=(rows, cols))`, immediately capture its process group, and fail closed if that capture is unavailable. Read/write bytes and call `setwinsize(rows, cols)` for resize. Extract `terminate_owned_posix_group(group_identity, *, timeout: float) -> Literal["empty", "active", "unknown", "reused"]` in `jobs/processes.py` from the signal/status part of `_terminate_owned_posix_group`; keep the headless call path using this same helper and retaining its existing root reaping. Check group status before reaping the leader: `ptyprocess.isalive()` calls `waitpid`, so using only that method can miss live descendants. Read `pty.exitstatus` only after group completion. Stop the PTY group, drain/close the PTY, and return `ProcessStopEvidence(lifecycle.job_id, lifecycle.generation, status == "empty", "stopped" if status == "empty" else status)`; refuse another launch when confirmation fails.
+On POSIX, require readable `/proc/self/stat` for existing group identity checks, use `PtyProcess.spawn(list(launch.argv), cwd=str(launch.cwd), env=dict(launch.env), dimensions=(rows, cols))`, immediately capture its process group, and fail closed if that capture is unavailable. Read/write bytes and call `setwinsize(rows, cols)` for resize. Extract `terminate_owned_posix_group(group_identity, *, timeout: float) -> Literal["empty", "active", "unknown", "reused"]` in `jobs/processes.py` from the signal/status part of `_terminate_owned_posix_group`; keep a shared lower-level signal/status helper so the headless path still skips root reaping when signaling was `unavailable`, but **does reap after a successful signal even if the later group status is `unknown`**, as it did before commit `83eceb9`. Update the headless regression tests for both cases. Check group status before reaping the leader: `ptyprocess.isalive()` calls `waitpid`, so using only that method can miss live descendants. Read `pty.exitstatus` only after group completion. Stop the PTY group, drain/close the PTY, and return `ProcessStopEvidence(lifecycle.job_id, lifecycle.generation, status == "empty", "stopped" if status == "empty" else status)`; refuse another launch when confirmation fails.
 
-On Windows, explicitly request ConPTY through `winpty.PTY(cols, rows, backend=winpty.Backend.ConPTY)`; pywinpty's high-level `PtyProcess.spawn` can override a requested ConPTY backend with the server's `PYWINPTY_BACKEND` environment variable. Spawn only the validated argv and allowlisted env using the same structured Windows argument quoting as the existing runner:
+On Windows, `connected_process_available()` always returns false and `start_connected_process()` rejects connected launches before importing pywinpty, constructing a PTY, or creating any child. Keep the existing external-terminal path as the only Windows setup launcher. On POSIX, availability requires `ptyprocess` and parsable `/proc/self/stat` process-group evidence. If POSIX startup fails before spawning, or cleanup is confirmed, raise `ConnectedLaunchError(message, cleanup_confirmed=True)`; if a spawned process cannot be proved stopped, raise with `cleanup_confirmed=False`. Only confirmed cleanup allows external fallback.
 
-```python
-arguments = " " + subprocess.list2cmdline(list(launch.argv[1:])) if len(launch.argv) > 1 else None
-environment = "\0".join(f"{name}={value}" for name, value in launch.env.items()) + "\0"
-pty = winpty.PTY(cols, rows, backend=winpty.Backend.ConPTY)
-pty.spawn(launch.argv[0], cmdline=arguments, cwd=str(launch.cwd), env=environment)
-job = win32job.CreateJobObject(None, "")
-limits = win32job.QueryInformationJobObject(job, win32job.JobObjectExtendedLimitInformation)
-limits["BasicLimitInformation"]["LimitFlags"] |= win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-win32job.SetInformationJobObject(job, win32job.JobObjectExtendedLimitInformation, limits)
-process_handle = win32api.OpenProcess(
-    win32con.PROCESS_SET_QUOTA | win32con.PROCESS_TERMINATE | win32con.PROCESS_QUERY_LIMITED_INFORMATION,
-    False, pty.pid,
-)
-try:
-    win32job.AssignProcessToJobObject(job, process_handle)
-finally:
-    win32api.CloseHandle(process_handle)
-```
-
-Immediately open `pty.pid` with `win32api.OpenProcess`, create a `win32job` Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, and assign that process before declaring startup successful. If assignment or identity capture fails, terminate the process and confirm it stopped before raising `IntegrationError`; do not start a fallback until then. `PTY.read(blocking=True)` yields text: encode as UTF-8 bytes for the shared interface; decode complete WebSocket input to text for `PTY.write`; use `PTY.set_size(cols, rows)` and `PTY.get_exitstatus()` for the exit code. Stop through `win32job.TerminateJobObject` and `_job_exit_status(handle, deadline)`, cancel PTY I/O to release the reader, and close the job handle only after recording confirmed exit. Natural root exit with active descendants still requires a group stop before considering the session finished.
-
-Make `connected_process_available()` return false when pywinpty/ConPTY or POSIX `/proc` group proof is unavailable. If startup fails before spawning, or cleanup is confirmed, raise `ConnectedLaunchError(message, cleanup_confirmed=True)`; if a spawned process cannot be proved stopped, raise with `cleanup_confirmed=False`. PTY startup failures must leave an explicit unsupported state; the existing external launcher remains the fallback only for confirmed cleanup.
-
-- [ ] **Step 4: Run PTY and headless lifecycle regressions to verify green.** Run `python -m pytest tests/test_connected_process.py tests/test_runtime_process_lifecycle.py -q`. Expected: mode gate, terminal I/O, resize, process-tree stop and existing headless containment tests pass on the current host; the opposite platform's native tests are skipped, not counted as a platform smoke pass.
+- [ ] **Step 4: Run PTY and headless lifecycle regressions to verify green.** Run `python -m pytest tests/test_connected_process.py tests/test_runtime_process_lifecycle.py tests/test_interactive_setup.py -q` on Windows and a POSIX host with `/proc`. Expected: Windows fail-closed gate and existing external launch pass without starting a connected process; native PTY I/O, resize, process-tree stop and headless containment pass on POSIX. A platform-only skip is never counted as a smoke pass.
 
 - [ ] **Step 5: Review and commit PTY supervision.** Inspect failure cleanup and `git diff --check`, then stage only Task 2 files and commit with `feat(runtime): supervise connected pty processes`.
 
@@ -789,7 +756,7 @@ def test_wheel_contains_connected_terminal_assets(built_wheel: Path):
                         assert archive.read(f"flowgency/static/{name}") == source.read_bytes()
 ```
 
-Extend the existing UI fixture in `tests/ui/server.py` with a `connected-setup` reset option. On reset, call `await app.state.setup_sessions.shutdown()` before replacing it with `SetupSessionManager(process_factory=lambda launch: FakeProcess())`; remove only the fixture runtime's `config.yaml`, use a test integration that returns a fixed `RuntimeLaunch` and fallback command, then rebuild `app.state.services` from the fixture config path. Add a test-only `GET /__ui/setup/meta` returning `{"data_root": str(runtime / "flowgency-data")}` and `POST /__ui/setup/ready` that atomically writes the existing complete fixture config through `_write_runtime_config` and refreshes services. Resetting to `default` must restore real integrations and a fresh non-fake session manager so tests remain order-independent. This fixture never invokes a real Copilot CLI.
+Extend the existing UI fixture in `tests/ui/server.py` with a `connected-setup` reset option. On reset, call `await app.state.setup_sessions.shutdown()` before replacing it with `SetupSessionManager(process_factory=lambda launch: FakeProcess())`; remove only the fixture runtime's `config.yaml`, use a test integration that returns a fixed `RuntimeLaunch` and fallback command, then rebuild `app.state.services` from the fixture config path. The UI server runs on Windows, where connected mode is deliberately unavailable: override `connected_process_available` in both `flowgency.web.setup_flow` and `flowgency.web.routes.admin_teams` **only for this fixture**, and restore the real functions on reset to `default`. This makes browser tests exercise the fake session, never a real Windows PTY. Add a test-only `GET /__ui/setup/meta` returning `{"data_root": str(runtime / "flowgency-data")}` and `POST /__ui/setup/ready` that atomically writes the existing complete fixture config through `_write_runtime_config` and refreshes services. Resetting to `default` must restore real integrations and a fresh non-fake session manager so tests remain order-independent. This fixture never invokes a real Copilot CLI.
 
 Add a Playwright test to `tests/ui/setup.spec.ts` using the existing `installBasePageSetup` setup and `assertNoConsoleErrors`/`assertNoTailwindCdnRequests` helpers:
 
@@ -995,15 +962,17 @@ Match the existing theme tokens for dark mode and mobile wrapping without changi
 - [ ] **Step 1: Write the user-facing guidance.** Replace the first-run paragraph in `kb/getting-started.md` with copy that includes these exact operational facts, and add a short Copilot sentence after the first-run paragraph in `README.md`:
 
 ```markdown
-Open setup from a browser on the same computer as Flowgency. GitHub Copilot
-setup runs in the page's terminal; refresh or reopen the page to reconnect.
-When the configuration is ready, Flowgency opens the dashboard while Copilot
-may continue running. Use the dashboard's Setup session link to return or Stop.
+Open setup from a browser on the same computer as Flowgency. On supported
+POSIX hosts, GitHub Copilot setup runs in the page's terminal; refresh or
+reopen the page to reconnect. When the configuration is ready, Flowgency opens
+the dashboard while Copilot may continue running. Use the dashboard's Setup
+session link to return or Stop.
 The setup CLI has the server user's access to files and tools; configured
-agent sandbox permissions do not apply before the first team exists. If a
-connected terminal cannot start, use the separate terminal and copyable
-fallback command. Closing the browser tab does not stop the session, but a
-server restart ends the in-memory connection and terminal transcript.
+agent sandbox permissions do not apply before the first team exists. Windows
+continues to launch Copilot in a separate console, with a copyable fallback
+command; it does not offer connected setup. On POSIX, use the external terminal
+if the PTY cannot start. Closing the browser tab does not stop a connected
+session, but a server restart ends its in-memory connection and transcript.
 ```
 
 Keep the existing data-root, packaged skill, project-workspace question, and atomic-write instructions in both documents. No claims of remote browser access, persisted terminal transcripts, or general connected agent runs.
@@ -1012,6 +981,6 @@ Keep the existing data-root, packaged skill, project-workspace question, and ato
 
 - [ ] **Step 3: Run the full automated gates from the feature worktree.** Run `python -m pytest tests/ -q`, `npm ci`, `npm run build:terminal`, `npm run build:css`, and `npm run test:ui -- tests/ui/setup.spec.ts`. Run any repository-wide Playwright UI suite required for frontend changes with `npm run test:ui`. Expected: green full Python and UI suites; generated terminal JS/CSS and Tailwind CSS match what is committed, not only local untracked build artifacts. Run `git diff --check` and `git status --short` afterward; generated runtime data and lock files under the fixture/runtime trees must not be staged.
 
-- [ ] **Step 4: Perform real-device/platform smoke gates.** On Windows with pywinpty installed, run `python -m pytest tests/test_connected_process.py tests/test_runtime_process_lifecycle.py -q`, then from the feature worktree set `$env:FLOWGENCY_CONFIG="$env:TEMP\flowgency-connected-smoke.yaml"` and start `python -m flowgency.cli serve --host 127.0.0.1 --port 8501` (use another free port if needed). Open `http://127.0.0.1:8501/setup` locally, start a Copilot session with a throwaway data root, verify an actual Copilot prompt appears, type a harmless reply, refresh to reconnect, and Stop; check that the process tree exits and that no unintended configuration was written. For a second throwaway session, gracefully restart the server and confirm the process tree stops and the page no longer offers a stale reconnect. Repeat the native PTY tests and actual Copilot interaction on a POSIX host with `/proc` support, setting `FLOWGENCY_CONFIG` to a throwaway absolute path there. If either platform cannot be exercised, keep connected capability disabled there and retain the external launch until its smoke test passes; do not report an untested host as supported. A setup page reached from another device must fail connected launch without creating the selected root.
+- [ ] **Step 4: Perform platform smoke gates.** On Windows, run `python -m pytest tests/test_connected_process.py tests/test_runtime_process_lifecycle.py tests/test_interactive_setup.py -q`. From the feature worktree set `$env:FLOWGENCY_CONFIG="$env:TEMP\flowgency-connected-smoke.yaml"` and start `python -m flowgency.cli serve --host 127.0.0.1 --port 8501` (use another free port if needed). Open `http://127.0.0.1:8501/setup` locally and select Copilot with a throwaway data root: confirm it opens the existing separate console, the fallback command is copyable, and no connected PTY session is created; close the console after a harmless reply. Do not claim an in-page Windows terminal. On a POSIX host with `/proc` support, run the native PTY and lifecycle tests, set `FLOWGENCY_CONFIG` to a throwaway absolute path, and start a real Copilot setup session in the page. Confirm an actual prompt appears, type a harmless reply, refresh to reconnect, and Stop; check that the process tree exits and that no unintended configuration was written. For a second throwaway POSIX session, gracefully restart the server and confirm the process tree stops and the page no longer offers a stale reconnect. If a real Copilot CLI is unavailable on the POSIX host, retain the external launch there until the smoke test passes. A setup page reached from another device must fail connected launch without creating the selected root.
 
-- [ ] **Step 5: Review before integration.** Review the whole branch against `docs/superpowers/specs/2026-09-23-connected-copilot-setup-terminal-design.md`, especially the exact headless flags/policy, one owner, configuration readiness, port/Origin checks, Windows child containment, no persisted transcript, and automatic redirect with background session. Repair any finding in its owning task and rerun its focused tests plus the full suites. Once review and tests pass, follow `AGENTS.md`: fast-forward `master` only (rebase feature and rerun tests first if `master` advanced), preserve/stash and restore any uncommitted master changes, rerun the full Python suite on master, push both `master` and the feature branch to origin, remove the worktree and prune stale entries, and retain the feature branch. Never fold unrelated runtime-local files or user changes into this feature. After integration, start `python -m flowgency.cli serve --host 127.0.0.1 --port 8501` from `master` (or another free port) and give the user its URL; the test server started from the removed worktree is not the final trial environment.
+- [ ] **Step 5: Review before integration.** Review the whole branch against `docs/superpowers/specs/2026-09-23-connected-copilot-setup-terminal-design.md`, especially the exact headless flags/policy, one owner, configuration readiness, port/Origin checks, Windows connected capability always disabled, unchanged external launch, POSIX group containment, no persisted transcript, and automatic redirect with background session. Repair any finding in its owning task and rerun its focused tests plus the full suites. Once review and tests pass, follow `AGENTS.md`: fast-forward `master` only (rebase feature and rerun tests first if `master` advanced), preserve/stash and restore any uncommitted master changes, rerun the full Python suite on master, push both `master` and the feature branch to origin, remove the worktree and prune stale entries, and retain the feature branch. Never fold unrelated runtime-local files or user changes into this feature. After integration, start `python -m flowgency.cli serve --host 127.0.0.1 --port 8501` from `master` (or another free port) and give the user its URL; the test server started from the removed worktree is not the final trial environment.
