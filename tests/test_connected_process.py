@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import sys
@@ -243,6 +244,149 @@ def test_posix_group_capture_failure_cleans_up_spawned_child(tmp_path, monkeypat
     assert spawned
     with pytest.raises(ProcessLookupError):
         os.kill(spawned[0], 0)
+
+
+@pytest.mark.skipif(os.name == "nt" or not Path("/proc/self/stat").is_file(), reason="POSIX /proc PTY check")
+def test_posix_group_capture_error_cleans_up_spawned_child(tmp_path, monkeypatch):
+    """A capture that raises (e.g. undecodable /proc bytes) instead of returning None must
+    still go through the confirmed-stop fallback rather than leaking the spawned child."""
+    from ptyprocess import PtyProcess
+
+    real_spawn = PtyProcess.spawn.__func__
+    spawned = []
+
+    def recording_spawn(cls, *args, **kwargs):
+        process = real_spawn(cls, *args, **kwargs)
+        spawned.append(process.pid)
+        return process
+
+    def raise_capture_error(pid):
+        raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid")
+
+    monkeypatch.setattr(PtyProcess, "spawn", classmethod(recording_spawn))
+    monkeypatch.setattr("flowgency.jobs.connected_process._capture_posix_group_identity", raise_capture_error)
+    launch = RuntimeLaunch((sys.executable, "-u", "-c", "import time; time.sleep(120)"), tmp_path, os.environ.copy(), "connected")
+
+    with pytest.raises(ConnectedLaunchError) as raised:
+        start_connected_process(launch)
+
+    assert raised.value.cleanup_confirmed is True
+    assert raised.value.__cause__ is not None and isinstance(raised.value.__cause__, UnicodeDecodeError)
+    assert spawned
+    with pytest.raises(ProcessLookupError):
+        os.kill(spawned[0], 0)
+
+
+@pytest.mark.skipif(os.name == "nt" or not Path("/proc/self/stat").is_file(), reason="POSIX /proc PTY check")
+def test_posix_group_capture_error_reports_unconfirmed_without_leaking(tmp_path, monkeypatch):
+    """When the group status can't be confirmed empty after the real kill, the fallback must
+    report cleanup_confirmed=False honestly -- it must not claim confirmation it never proved.
+    The kill signal here is real (unmocked); only the status *read* is forced to look inconclusive,
+    so this never leaves an actual child running."""
+    from ptyprocess import PtyProcess
+
+    real_spawn = PtyProcess.spawn.__func__
+    spawned = []
+
+    def recording_spawn(cls, *args, **kwargs):
+        process = real_spawn(cls, *args, **kwargs)
+        spawned.append(process.pid)
+        return process
+
+    def raise_capture_error(pid):
+        raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid")
+
+    monkeypatch.setattr(PtyProcess, "spawn", classmethod(recording_spawn))
+    monkeypatch.setattr("flowgency.jobs.connected_process._capture_posix_group_identity", raise_capture_error)
+    monkeypatch.setattr("flowgency.jobs.connected_process._group_exit_status", lambda group_id, deadline: "active")
+    launch = RuntimeLaunch((sys.executable, "-u", "-c", "import time; time.sleep(120)"), tmp_path, os.environ.copy(), "connected")
+
+    with pytest.raises(ConnectedLaunchError) as raised:
+        start_connected_process(launch)
+
+    assert raised.value.cleanup_confirmed is False
+    assert spawned
+    # Prove the real SIGKILL (sent by the unmocked termination path) actually reached the
+    # child, despite the forced-inconclusive status read reporting it as unconfirmed.
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        try:
+            os.kill(spawned[0], 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.02)
+    else:
+        pytest.fail("child was not actually killed despite the forced-unconfirmed status")
+    with contextlib.suppress(ChildProcessError):
+        os.waitpid(spawned[0], 0)
+
+
+@pytest.mark.skipif(os.name == "nt" or not Path("/proc/self/stat").is_file(), reason="POSIX /proc PTY check")
+def test_terminate_unproven_group_never_resignals_after_leader_reaped(tmp_path, monkeypatch):
+    """Once an unproven leader has been reaped, its numeric pid may already be recycled by the
+    OS for an unrelated process. A retry that still can't prove the group empty must revalidate
+    status only -- it must never signal that pid/pgid a second time."""
+    import flowgency.jobs.connected_process as connected_process
+    from flowgency.jobs.connected_process import PosixConnectedProcess
+    from ptyprocess import PtyProcess
+
+    launch = RuntimeLaunch((sys.executable, "-u", "-c", "import time; time.sleep(120)"), tmp_path, os.environ.copy(), "connected")
+    pty = PtyProcess.spawn(list(launch.argv), cwd=str(launch.cwd), env=dict(launch.env), dimensions=(24, 80))
+    process = PosixConnectedProcess(pty, None)  # simulate a group whose capture could not be proved
+
+    monkeypatch.setattr(connected_process, "_group_exit_status", lambda group_id, deadline: "active")
+
+    kill_calls: list[tuple[str, int]] = []
+    real_killpg, real_kill = os.killpg, os.kill
+
+    def recording_killpg(pgid, sig):
+        kill_calls.append(("killpg", pgid))
+        return real_killpg(pgid, sig)
+
+    def recording_kill(pid, sig):
+        kill_calls.append(("kill", pid))
+        return real_kill(pid, sig)
+
+    monkeypatch.setattr(os, "killpg", recording_killpg)
+    monkeypatch.setattr(os, "kill", recording_kill)
+
+    try:
+        confirmed, reason = process._stop_tree()
+        assert (confirmed, reason) == (False, "active")
+        assert kill_calls, "expected the first stop attempt to signal the unproven leader"
+        assert all(target == pty.pid for _, target in kill_calls)
+        with connected_process._unconfirmed_lock:
+            assert connected_process._unconfirmed.count(process) == 1
+
+        # Prove the first, real signal actually reached the child before its pid could be
+        # recycled, rather than relying on the forced-inconclusive status alone.
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            try:
+                real_kill(pty.pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.02)
+        else:
+            pytest.fail("child was not actually killed by the first stop attempt")
+
+        kill_calls.clear()
+
+        # Simulate `_retry_unconfirmed()` calling `_stop_tree()` again on the already-tracked,
+        # still-unconfirmed process while the group status remains inconclusive.
+        confirmed_again, reason_again = process._stop_tree()
+
+        assert kill_calls == [], (
+            f"a retry must never re-signal the already-reaped pid {pty.pid}: it may by now "
+            f"name a recycled, unrelated process; recorded calls: {kill_calls}"
+        )
+        assert (confirmed_again, reason_again) == (False, "active")
+    finally:
+        with connected_process._unconfirmed_lock:
+            while process in connected_process._unconfirmed:
+                connected_process._unconfirmed.remove(process)
+        with contextlib.suppress(ChildProcessError, ProcessLookupError):
+            os.waitpid(pty.pid, 0)
 
 
 def test_launch_check_blocks_until_an_in_flight_stop_records_its_failure():

@@ -272,6 +272,7 @@ class PosixConnectedProcess(_OwnedTerminal):
         self._group = group
         self._tree_finished = False
         self._exit_code: int | None = None
+        self._leader_reaped = False
 
     @classmethod
     def spawn(cls, launch: RuntimeLaunch, *, rows: int, cols: int) -> "PosixConnectedProcess":
@@ -297,7 +298,17 @@ class PosixConnectedProcess(_OwnedTerminal):
                 f"Could not start {launch.argv[0]} in a PTY: {error}",
                 cleanup_confirmed=True,
             ) from error
-        process = cls(pty, _capture_posix_group_identity(pty.pid))
+        try:
+            group = _capture_posix_group_identity(pty.pid)
+        except Exception as error:
+            # The PTY is already spawned; a raised capture must still go through the same
+            # safe stop path as a confirmed-absent group, not bypass it and leak the child.
+            confirmed, _ = cls(pty, None)._stop_tree()
+            raise ConnectedLaunchError(
+                "Could not prove ownership of the connected PTY process group",
+                cleanup_confirmed=confirmed,
+            ) from error
+        process = cls(pty, group)
         if process._group is None:
             confirmed, _ = process._stop_tree()
             raise ConnectedLaunchError(
@@ -351,12 +362,14 @@ class PosixConnectedProcess(_OwnedTerminal):
         return True, "stopped"
 
     def _terminate_unproven_group(self, deadline: float) -> tuple[bool, str]:
-        # The unreaped leader pins its pid, so neither number can name someone else's process or group.
-        for kill in (os.killpg, os.kill):
-            with contextlib.suppress(OSError):
-                kill(self.pid, _POSIX_KILL_SIGNAL)
-        if not self._reap_leader(deadline):
-            return False, "root-unreaped"
+        if not self._leader_reaped:
+            # The unreaped leader pins its pid, so neither number can name someone else's process
+            # or group yet. Once reaped, that pid may be recycled -- never signal it again below.
+            for kill in (os.killpg, os.kill):
+                with contextlib.suppress(OSError):
+                    kill(self.pid, _POSIX_KILL_SIGNAL)
+            if not self._reap_leader(deadline):
+                return False, "root-unreaped"
         status = _group_exit_status(self.pid, deadline)
         if status != "empty":
             return False, status
@@ -369,6 +382,7 @@ class PosixConnectedProcess(_OwnedTerminal):
                 if not self._pty.isalive():
                     status = self._pty.exitstatus
                     self._exit_code = status if status is not None else -int(self._pty.signalstatus or 0)
+                    self._leader_reaped = True
                     return True
             except Exception:
                 return False
