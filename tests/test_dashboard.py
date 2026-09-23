@@ -1048,7 +1048,7 @@ def test_startup_drain_failure_does_not_prevent_startup(monkeypatch):
     reached_yield = []
 
     async def run():
-        async with lifespan(None):
+        async with lifespan(app_mod.app):
             reached_yield.append(True)
 
     asyncio.run(run())

@@ -1,0 +1,531 @@
+"""Tests for the app-owned reconnectable setup session manager."""
+
+from __future__ import annotations
+
+import asyncio
+import queue
+import threading
+from pathlib import Path
+
+import pytest
+
+from flowgency.integrations.models import RuntimeLaunch
+from flowgency.jobs.processes import ProcessStopEvidence
+from flowgency.web.setup_sessions import SetupSessionConflict, SetupSessionManager
+
+from tests._connected_setup_helpers import FakeProcess
+
+
+class _UnconfirmedThenConfirmedProcess(FakeProcess):
+    """Its first Stop cannot prove the tree gone while the process stays
+    potentially alive; its second Stop confirms the tree is gone. The first
+    Stop deliberately does *not* wake the parked reader, so the interleaving is
+    deterministic and no natural-exit finalize can race the explicit Stop."""
+
+    def __init__(self):
+        super().__init__()
+        self.stop_calls = 0
+
+    def stop(self, lifecycle):
+        self.stop_calls += 1
+        if self.stop_calls == 1:
+            return ProcessStopEvidence(
+                lifecycle.job_id, lifecycle.generation, False, "descendants-still-running"
+            )
+        self.running = False
+        self.output.put(None)  # release the parked reader thread
+        return ProcessStopEvidence(lifecycle.job_id, lifecycle.generation, True, "stopped")
+
+
+def test_setup_session_reuses_owner_and_transfers_single_writer(tmp_path: Path):
+    async def exercise():
+        fake = FakeProcess()
+        launches = []
+
+        def start(launch):
+            launches.append(launch)
+            return fake
+
+        manager = SetupSessionManager(process_factory=start)
+        launch = RuntimeLaunch(("copilot",), tmp_path, {}, "connected")
+        first = await manager.start("owner", "copilot", launch, "copilot -i setup")
+        repeated = await manager.start("owner", "copilot", launch, "copilot -i setup")
+        assert first.state == repeated.state == "running"
+        assert len(launches) == 1
+        _, old_id, _ = await manager.attach("owner")
+        _, new_id, _ = await manager.attach("owner")
+        with pytest.raises(SetupSessionConflict):
+            await manager.send_input("owner", old_id, b"no")
+        await manager.send_input("owner", new_id, b"yes\r")
+        await manager.resize("owner", new_id, 30, 100)
+        assert fake.writes == [b"yes\r"]
+        assert fake.sizes == [(30, 100)]
+        with pytest.raises(SetupSessionConflict):
+            await manager.start("other", "copilot", launch, "copilot -i setup")
+        await manager.shutdown()
+        assert fake.running is False
+
+    asyncio.run(exercise())
+
+
+def test_setup_session_rejects_owner_relaunch_with_different_selection(tmp_path: Path):
+    async def exercise():
+        launches: list[RuntimeLaunch] = []
+
+        def start(launch):
+            launches.append(launch)
+            return FakeProcess()
+
+        manager = SetupSessionManager(process_factory=start)
+        root_a = tmp_path / "root_a"
+        root_b = tmp_path / "root_b"
+        root_a.mkdir()
+        root_b.mkdir()
+        launch_a = RuntimeLaunch(("copilot",), root_a, {}, "connected")
+        original = await manager.start("owner", "copilot", launch_a, "copilot -i setup")
+        assert original.state == "running"
+        assert len(launches) == 1
+
+        # Same owner, different root while running: an explicit Stop is required;
+        # the manager must not silently reattach to the old root nor spawn again.
+        launch_b = RuntimeLaunch(("copilot",), root_b, {}, "connected")
+        with pytest.raises(SetupSessionConflict) as different_root:
+            await manager.start("owner", "copilot", launch_b, "copilot -i setup")
+        assert "stop" in str(different_root.value).lower()
+
+        # Same owner, different integration while running: same rule.
+        with pytest.raises(SetupSessionConflict) as different_integration:
+            await manager.start("owner", "codex", launch_a, "copilot -i setup")
+        assert "stop" in str(different_integration.value).lower()
+
+        assert len(launches) == 1  # no second process was spawned
+        snapshot = manager.snapshot("owner")
+        assert snapshot.state == "running"
+        assert snapshot.data_root == root_a
+        assert snapshot.integration_name == "copilot"
+        await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_setup_session_bounds_output_and_expires_when_idle(tmp_path: Path):
+    async def exercise():
+        clock = [0.0]
+        fake = FakeProcess()
+        manager = SetupSessionManager(
+            process_factory=lambda launch: fake, now=lambda: clock[0],
+            replay_limit=8, client_limit=4,
+        )
+        await manager.start("owner", "copilot", RuntimeLaunch(("copilot",), tmp_path, {}, "connected"), "fallback")
+        _, connection_id, pending = await manager.attach("owner")
+        fake.output.put(b"abcdefghij")
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 1
+        while manager.snapshot("owner").output != b"cdefghij":
+            assert loop.time() < deadline
+            await asyncio.sleep(0.01)
+        assert manager.snapshot("owner").truncated is True
+        assert await asyncio.wait_for(pending.get(), timeout=1) is None
+        assert fake.running is True
+        clock[0] = 3601
+        await manager.enforce_limits()
+        assert manager.snapshot("owner").state == "stopped"
+        await manager.detach("owner", connection_id)
+        await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_setup_session_expires_after_four_hours(tmp_path: Path):
+    async def exercise():
+        clock = [0.0]
+        fake = FakeProcess()
+        manager = SetupSessionManager(process_factory=lambda launch: fake, now=lambda: clock[0])
+        await manager.start("owner", "copilot", RuntimeLaunch(("copilot",), tmp_path, {}, "connected"), "fallback")
+        _, connection_id, _ = await manager.attach("owner")
+        clock[0] = 14399
+        await manager.send_input("owner", connection_id, b"stay alive\r")
+        await manager.enforce_limits()
+        assert manager.snapshot("owner").state == "running"
+        clock[0] = 14401
+        await manager.enforce_limits()
+        assert manager.snapshot("owner").state == "stopped"
+        await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_setup_session_blocks_slot_when_stop_unconfirmed(tmp_path: Path):
+    async def exercise():
+        class Unconfirmed(FakeProcess):
+            def stop(self, lifecycle):
+                self.running = False
+                self.output.put(None)
+                return ProcessStopEvidence(
+                    lifecycle.job_id, lifecycle.generation, False, "descendants-still-running"
+                )
+
+        fake = Unconfirmed()
+        manager = SetupSessionManager(process_factory=lambda launch: fake)
+        launch = RuntimeLaunch(("copilot",), tmp_path, {}, "connected")
+        await manager.start("owner", "copilot", launch, "fallback")
+        evidence = await manager.stop("owner")
+        assert evidence.confirmed is False
+        assert manager.snapshot("owner").state == "failed"
+        with pytest.raises(SetupSessionConflict):
+            await manager.start("owner", "copilot", launch, "fallback")
+        await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_setup_session_holds_lifecycle_lock_across_spawn(tmp_path: Path):
+    async def exercise():
+        release = threading.Event()
+        entered: queue.Queue[bool] = queue.Queue()
+        calls: list[RuntimeLaunch] = []
+        fake = FakeProcess()
+
+        def factory(launch):
+            calls.append(launch)
+            entered.put(True)
+            release.wait(2)
+            return fake
+
+        manager = SetupSessionManager(process_factory=factory)
+        launch = RuntimeLaunch(("copilot",), tmp_path, {}, "connected")
+        start1 = asyncio.create_task(manager.start("owner", "copilot", launch, "fallback"))
+        await asyncio.to_thread(entered.get, True, 1)
+        # A competing start must not spawn a replacement while the first launch is in flight.
+        start2 = asyncio.create_task(manager.start("other", "copilot", launch, "fallback"))
+        await asyncio.sleep(0.05)
+        assert len(calls) == 1
+        assert not start1.done()
+        assert not start2.done()
+        release.set()
+        first = await start1
+        assert first.state == "running"
+        with pytest.raises(SetupSessionConflict):
+            await start2
+        assert len(calls) == 1
+        await manager.shutdown()
+        assert fake.running is False
+
+    asyncio.run(exercise())
+
+
+def test_setup_session_shutdown_settles_in_flight_start(tmp_path: Path):
+    async def exercise():
+        release = threading.Event()
+        entered: queue.Queue[bool] = queue.Queue()
+        fake = FakeProcess()
+
+        def factory(launch):
+            entered.put(True)
+            release.wait(2)
+            return fake
+
+        manager = SetupSessionManager(process_factory=factory)
+        launch = RuntimeLaunch(("copilot",), tmp_path, {}, "connected")
+        start1 = asyncio.create_task(manager.start("owner", "copilot", launch, "fallback"))
+        await asyncio.to_thread(entered.get, True, 1)
+        shutdown = asyncio.create_task(manager.shutdown())
+        await asyncio.sleep(0.05)
+        assert not shutdown.done()
+        assert fake.running is True
+        release.set()
+        await start1
+        await shutdown
+        assert fake.running is False
+        assert manager.snapshot("owner").state == "stopped"
+
+    asyncio.run(exercise())
+
+
+def test_setup_session_cancelled_start_reaps_and_frees_slot(tmp_path: Path):
+    async def exercise():
+        release = threading.Event()
+        entered: queue.Queue[bool] = queue.Queue()
+        fakes: list[FakeProcess] = []
+
+        def factory(launch):
+            entered.put(True)
+            release.wait(2)
+            fake = FakeProcess()
+            fakes.append(fake)
+            return fake
+
+        manager = SetupSessionManager(process_factory=factory)
+        launch = RuntimeLaunch(("copilot",), tmp_path, {}, "connected")
+        start1 = asyncio.create_task(manager.start("owner", "copilot", launch, "fallback"))
+        await asyncio.to_thread(entered.get, True, 1)
+        start1.cancel()
+        await asyncio.sleep(0.05)
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await start1
+        assert len(fakes) == 1
+        assert fakes[0].running is False
+        assert manager.snapshot("owner") is None
+        snap = await manager.start("owner", "copilot", launch, "fallback")
+        assert snap.state == "running"
+        assert len(fakes) == 2
+        await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_setup_session_finalizes_on_empty_eof_read(tmp_path: Path):
+    async def exercise():
+        # The PTY adapter reports end-of-stream as an empty read (b""), not a
+        # raised EOFError. The reader must treat that as terminal: confirm the
+        # tree stopped, mark the session exited, close subscribers, and never
+        # record the empty bytes as activity or spin on repeated empty reads.
+        class EofProcess(FakeProcess):
+            def __init__(self):
+                super().__init__()
+                self.reads = 0
+
+            def read(self, size: int = 65536) -> bytes:
+                self.reads += 1
+                chunk = self.output.get()
+                if chunk is None:
+                    raise EOFError
+                return chunk
+
+        fake = EofProcess()
+        manager = SetupSessionManager(process_factory=lambda launch: fake)
+        launch = RuntimeLaunch(("copilot",), tmp_path, {}, "connected")
+        await manager.start("owner", "copilot", launch, "fallback")
+        snap, connection_id, pending = await manager.attach("owner")
+        assert snap.state == "running"
+        reads_before = fake.reads
+        fake.output.put(b"")  # real EOF contract: empty bytes, not a sentinel
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 2
+        try:
+            while manager.snapshot("owner").state != "exited":
+                assert loop.time() < deadline, "reader never finalized on empty EOF read"
+                await asyncio.sleep(0.01)
+            final = manager.snapshot("owner")
+            assert final.state == "exited"
+            assert final.exit_code == 0
+            assert final.output == b""  # empty read is never recorded as output
+            assert fake.reads == reads_before + 1  # no repeated empty-read loop
+            assert fake.running is False  # confirmed stop of the whole tree
+            assert await asyncio.wait_for(pending.get(), timeout=1) is None
+        finally:
+            if fake.running:
+                fake.output.put(None)  # release any thread still blocked on read
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_setup_session_attach_after_exit_yields_end_of_stream(tmp_path: Path):
+    async def exercise():
+        # A browser that reconnects to an already-exited session must be handed
+        # the replay and a prompt end-of-stream. Finalization already notified —
+        # and cleared — the prior subscribers, so a fresh queue would otherwise
+        # never emit None and the Task 5 WebSocket would hang forever.
+        fake = FakeProcess()
+        manager = SetupSessionManager(process_factory=lambda launch: fake)
+        launch = RuntimeLaunch(("copilot",), tmp_path, {}, "connected")
+        await manager.start("owner", "copilot", launch, "fallback")
+        first_snap, _first_id, first_pending = await manager.attach("owner")
+        assert first_snap.state == "running"
+        fake.output.put(b"hello ")
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 2
+        while manager.snapshot("owner").output != b"hello ":
+            assert loop.time() < deadline
+            await asyncio.sleep(0.01)
+        fake.output.put(b"")  # natural EOF
+        while manager.snapshot("owner").state != "exited":
+            assert loop.time() < deadline
+            await asyncio.sleep(0.01)
+        # The original subscriber received its buffered bytes and then a closing
+        # end-of-stream at finalization.
+        drained: list[bytes | None] = []
+        while True:
+            item = await asyncio.wait_for(first_pending.get(), timeout=1)
+            drained.append(item)
+            if item is None:
+                break
+        assert drained[-1] is None
+        assert b"".join(chunk for chunk in drained if chunk) == b"hello "
+        # Reconnecting must not hang: end-of-stream arrives promptly and replay
+        # is still available through the snapshot.
+        snap, connection_id, pending = await manager.attach("owner")
+        assert snap.state == "exited"
+        assert snap.output == b"hello "
+        assert await asyncio.wait_for(pending.get(), timeout=1) is None
+        # No writer is granted on an exited session.
+        with pytest.raises(SetupSessionConflict):
+            await manager.send_input("owner", connection_id, b"x")
+        await manager.detach("owner", connection_id)
+        await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_setup_session_natural_exit_wins_finalization_race(tmp_path: Path):
+    async def exercise():
+        # EOF (the child exiting on its own) reaches the reader first, but an
+        # explicit Stop then races into finalization. The coherent outcome is a
+        # natural exit with a real exit code, not a user abort with exit_code
+        # None. A barrier on the fake's first Stop makes the interleaving
+        # deterministic: the reader observes EOF and enters its natural-exit
+        # Stop (blocked), and only then does the explicit Stop win the race.
+        class RacingProcess(FakeProcess):
+            def __init__(self):
+                super().__init__()
+                self.stop_calls = 0
+                self.first_stop_entered = threading.Event()
+                self.release_first_stop = threading.Event()
+
+            def read(self, size: int = 65536) -> bytes:
+                chunk = self.output.get()
+                if chunk is None:
+                    self.running = False  # child exited naturally
+                    raise EOFError
+                return chunk
+
+            def stop(self, lifecycle):
+                self.stop_calls += 1
+                if self.stop_calls == 1:
+                    self.first_stop_entered.set()
+                    self.release_first_stop.wait(2)
+                self.running = False
+                return ProcessStopEvidence(
+                    lifecycle.job_id, lifecycle.generation, True, "stopped"
+                )
+
+        fake = RacingProcess()
+        manager = SetupSessionManager(process_factory=lambda launch: fake)
+        launch = RuntimeLaunch(("copilot",), tmp_path, {}, "connected")
+        await manager.start("owner", "copilot", launch, "fallback")
+        await manager.attach("owner")
+        fake.output.put(None)  # EOF: reader enters natural-exit Stop, blocks
+        await asyncio.to_thread(fake.first_stop_entered.wait, 2)
+        stop_task = asyncio.create_task(manager.stop("owner"))
+        await asyncio.sleep(0.05)  # let the explicit Stop win finalization
+        fake.release_first_stop.set()
+        await stop_task
+        final = manager.snapshot("owner")
+        assert final.state == "exited"
+        assert final.exit_code == 0
+        await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_setup_session_rejects_input_after_eof_before_finalize(tmp_path: Path):
+    async def exercise():
+        # Once the reader observes EOF it sets eof_seen=True and then blocks in
+        # the (still-running) explicit Stop. During that window state is still
+        # "running", so a writer must not be able to push input or resize into a
+        # child that has already gone away.
+        class EofBlockingProcess(FakeProcess):
+            def __init__(self):
+                super().__init__()
+                self.stop_entered = threading.Event()
+                self.release_stop = threading.Event()
+
+            def read(self, size: int = 65536) -> bytes:
+                chunk = self.output.get()
+                if chunk is None:
+                    self.running = False  # child exited naturally
+                    raise EOFError
+                return chunk
+
+            def stop(self, lifecycle):
+                self.stop_entered.set()
+                self.release_stop.wait(2)
+                self.running = False
+                return ProcessStopEvidence(
+                    lifecycle.job_id, lifecycle.generation, True, "stopped"
+                )
+
+        fake = EofBlockingProcess()
+        manager = SetupSessionManager(process_factory=lambda launch: fake)
+        launch = RuntimeLaunch(("copilot",), tmp_path, {}, "connected")
+        try:
+            await manager.start("owner", "copilot", launch, "fallback")
+            _, writer_id, _ = await manager.attach("owner")
+            fake.output.put(None)  # EOF: reader sets eof_seen, blocks in Stop
+            await asyncio.to_thread(fake.stop_entered.wait, 2)
+            # eof_seen is True and state is still "running" here.
+            with pytest.raises(SetupSessionConflict):
+                await manager.send_input("owner", writer_id, b"late")
+            with pytest.raises(SetupSessionConflict):
+                await manager.resize("owner", writer_id, 30, 100)
+            assert fake.writes == []
+            assert fake.sizes == []
+        finally:
+            fake.release_stop.set()  # unblock the parked Stop before teardown
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_setup_session_owner_stop_retries_unconfirmed_until_confirmed(tmp_path: Path):
+    async def exercise():
+        # A Stop that cannot confirm the whole tree is gone must block the slot
+        # *without* wedging it forever: a later explicit owner Stop retries
+        # process.stop under the same lifecycle lock and, only once the tree is
+        # proven gone, records `stopped` and frees the slot for a replacement.
+        fake = _UnconfirmedThenConfirmedProcess()
+        manager = SetupSessionManager(process_factory=lambda launch: fake)
+        launch = RuntimeLaunch(("copilot",), tmp_path, {}, "connected")
+        try:
+            await manager.start("owner", "copilot", launch, "fallback")
+            first = await manager.stop("owner")
+            assert first.confirmed is False
+            assert manager.snapshot("owner").state == "failed"
+            assert fake.stop_calls == 1
+            # Refused while the previous tree is not proven gone.
+            with pytest.raises(SetupSessionConflict):
+                await manager.start("owner", "copilot", launch, "fallback")
+            # An explicit owner Stop retries and now proves the tree gone.
+            second = await manager.stop("owner")
+            assert second.confirmed is True
+            assert fake.stop_calls == 2
+            assert manager.snapshot("owner").state == "stopped"
+            # Only confirmed evidence frees the slot for a replacement.
+            replacement = await manager.start("owner", "copilot", launch, "fallback")
+            assert replacement.state == "running"
+        finally:
+            if fake.running:
+                fake.output.put(None)  # release any parked reader thread
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_setup_session_shutdown_retries_unconfirmed_stop(tmp_path: Path):
+    async def exercise():
+        # shutdown() must also retry an earlier unconfirmed cleanup before it
+        # returns, rather than skipping a still-finalized-but-unproven session
+        # and leaving an owned tree behind.
+        fake = _UnconfirmedThenConfirmedProcess()
+        manager = SetupSessionManager(process_factory=lambda launch: fake)
+        launch = RuntimeLaunch(("copilot",), tmp_path, {}, "connected")
+        try:
+            await manager.start("owner", "copilot", launch, "fallback")
+            first = await manager.stop("owner")
+            assert first.confirmed is False
+            assert manager.snapshot("owner").state == "failed"
+            assert fake.stop_calls == 1
+            # Refused while the previous tree is not proven gone.
+            with pytest.raises(SetupSessionConflict):
+                await manager.start("owner", "copilot", launch, "fallback")
+            await manager.shutdown()
+            assert fake.stop_calls == 2  # shutdown retried the unconfirmed stop
+            assert manager.snapshot("owner").state == "stopped"
+            assert fake.running is False
+        finally:
+            if fake.running:
+                fake.output.put(None)  # release any parked reader thread
+
+    asyncio.run(exercise())

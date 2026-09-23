@@ -70,6 +70,8 @@ from flowgency.web.logs import collect_agent_logs
 from flowgency.web.logs import collect_logs as _collect_logs
 from flowgency.web.logs import describe_log_file, log_belongs_to_agent, with_log_links
 from flowgency.web.log_preview import read_log_preview
+from flowgency.web.setup_security import SetupBrowserAccess
+from flowgency.web.setup_sessions import SetupSessionManager
 from flowgency.web.state import flowgency_settings, runtime_team
 from flowgency.web.team_navigation import build_team_context
 from flowgency.web.routes import (
@@ -366,13 +368,20 @@ async def lifespan(app: FastAPI):
             )
         except Exception:
             log.exception("startup drain failed")
-    yield
+    app.state.setup_sessions = SetupSessionManager()
+    try:
+        yield
+    finally:
+        await app.state.setup_sessions.shutdown()
 
 
 app = FastAPI(title="Flowgency Dashboard", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 app.state.templates = templates
+# One browser-scoped setup credential secret per server process, available even to
+# tests that hit the app through TestClient without entering the lifespan.
+app.state.setup_access = SetupBrowserAccess()
 app.state.theme_css_getter = get_theme_css
 app.state.workspace_types_json_getter = _workspace_types_json
 app.state.build_services = build_services
