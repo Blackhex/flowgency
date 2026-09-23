@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from flowgency.integrations.models import RuntimeLaunch
+from flowgency.jobs.connected_process import ConnectedLaunchError
 from flowgency.jobs.processes import ProcessStopEvidence
 from flowgency.web.setup_sessions import SetupSessionConflict, SetupSessionManager
 
@@ -527,5 +528,219 @@ def test_setup_session_shutdown_retries_unconfirmed_stop(tmp_path: Path):
         finally:
             if fake.running:
                 fake.output.put(None)  # release any parked reader thread
+
+    asyncio.run(exercise())
+
+
+def test_setup_session_default_replay_budget_retains_2mib(tmp_path: Path):
+    async def exercise():
+        # The production default replay budget is 2 MiB, not 256 KiB. Output
+        # larger than 256 KiB (the per-client budget) must survive untruncated,
+        # while output beyond 2 MiB is trimmed to the last 2 MiB.
+        fake = FakeProcess()
+        manager = SetupSessionManager(process_factory=lambda launch: fake)
+        try:
+            await manager.start(
+                "owner", "copilot", RuntimeLaunch(("copilot",), tmp_path, {}, "connected"), "fallback"
+            )
+            loop = asyncio.get_running_loop()
+
+            async def wait_for_len(expected: int) -> None:
+                deadline = loop.time() + 2
+                while len(manager.snapshot("owner").output) != expected:
+                    assert loop.time() < deadline
+                    await asyncio.sleep(0.005)
+
+            big = b"a" * (300 * 1024)  # 300 KiB > 256 KiB per-client budget
+            fake.output.put(big)
+            await wait_for_len(len(big))
+            assert manager.snapshot("owner").truncated is False
+
+            overflow = b"b" * (2 * 1024 * 1024)  # push total beyond the 2 MiB budget
+            fake.output.put(overflow)
+            await wait_for_len(2 * 1024 * 1024)
+            assert manager.snapshot("owner").truncated is True
+        finally:
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_setup_session_cancelled_start_with_unconfirmed_error_blocks_slot(tmp_path: Path):
+    async def exercise():
+        # A cancelled Start whose shielded spawn then raises an *unconfirmed*
+        # ConnectedLaunchError must fail closed: keep the session blocked as
+        # `failed` and refuse a fresh Start, exactly like the normal spawn path.
+        release = threading.Event()
+        entered: queue.Queue[bool] = queue.Queue()
+
+        def factory(launch):
+            entered.put(True)
+            release.wait(2)
+            raise ConnectedLaunchError("launch aborted mid-cleanup", cleanup_confirmed=False)
+
+        manager = SetupSessionManager(process_factory=factory)
+        launch = RuntimeLaunch(("copilot",), tmp_path, {}, "connected")
+        start1 = asyncio.create_task(manager.start("owner", "copilot", launch, "fallback"))
+        await asyncio.to_thread(entered.get, True, 1)
+        start1.cancel()
+        await asyncio.sleep(0.05)
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await start1
+        snapshot = manager.snapshot("owner")
+        assert snapshot is not None
+        assert snapshot.state == "failed"
+        with pytest.raises(SetupSessionConflict):
+            await manager.start("owner", "copilot", launch, "fallback")
+        await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_setup_session_cancelled_start_unconfirmed_stop_preserves_handle_for_retry(tmp_path: Path):
+    async def exercise():
+        # A cancelled Start whose shielded spawn *succeeds* but whose immediate
+        # cleanup Stop is unconfirmed must retain the process handle and the
+        # evidence, block the slot, and let a later owner Stop retry cleanup
+        # under the same lifecycle lock until the tree is proven gone.
+        release = threading.Event()
+        entered: queue.Queue[bool] = queue.Queue()
+        fake = _UnconfirmedThenConfirmedProcess()
+
+        def factory(launch):
+            entered.put(True)
+            release.wait(2)
+            return fake
+
+        manager = SetupSessionManager(process_factory=factory)
+        launch = RuntimeLaunch(("copilot",), tmp_path, {}, "connected")
+        try:
+            start1 = asyncio.create_task(manager.start("owner", "copilot", launch, "fallback"))
+            await asyncio.to_thread(entered.get, True, 1)
+            start1.cancel()
+            await asyncio.sleep(0.05)
+            release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await start1
+            snapshot = manager.snapshot("owner")
+            assert snapshot is not None
+            assert snapshot.state == "failed"
+            assert fake.stop_calls == 1  # the immediate reap Stop was unconfirmed
+            with pytest.raises(SetupSessionConflict):
+                await manager.start("owner", "copilot", launch, "fallback")
+            # The preserved handle lets an explicit owner Stop retry and confirm.
+            evidence = await manager.stop("owner")
+            assert evidence.confirmed is True
+            assert fake.stop_calls == 2
+            assert manager.snapshot("owner").state == "stopped"
+            replacement = await manager.start("owner", "copilot", launch, "fallback")
+            assert replacement.state == "running"
+        finally:
+            if fake.running:
+                fake.output.put(None)  # release any parked reader thread
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_setup_session_failed_spawn_releases_starting_subscriber(tmp_path: Path):
+    async def exercise():
+        # A subscriber that attached while the session was still `starting`
+        # must be released (queue receives None) when a clean spawn failure
+        # frees the slot, so no WebSocket writer lingers on a dead session.
+        release = threading.Event()
+        entered: queue.Queue[bool] = queue.Queue()
+
+        def factory(launch):
+            entered.put(True)
+            release.wait(2)
+            raise ConnectedLaunchError("no pty backend", cleanup_confirmed=True)
+
+        manager = SetupSessionManager(process_factory=factory)
+        launch = RuntimeLaunch(("copilot",), tmp_path, {}, "connected")
+        start1 = asyncio.create_task(manager.start("owner", "copilot", launch, "fallback"))
+        await asyncio.to_thread(entered.get, True, 1)
+        snapshot, _connection_id, pending = await manager.attach("owner")
+        assert snapshot.state == "starting"
+        release.set()
+        with pytest.raises(ConnectedLaunchError):
+            await start1
+        assert await asyncio.wait_for(pending.get(), timeout=1) is None
+        assert manager.snapshot("owner") is None  # clean failure frees the slot
+        await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_setup_session_unproven_spawn_error_blocks_slot_and_releases_subscriber(tmp_path: Path):
+    async def exercise():
+        # An arbitrary exception from the spawn (not a confirmed-clean
+        # ConnectedLaunchError) is no proof the process tree was cleaned up.
+        # It must fail closed exactly like an unconfirmed ConnectedLaunchError:
+        # keep the slot blocked as `failed`, refuse a fresh Start, and still
+        # release any subscriber that attached while `starting`.
+        release = threading.Event()
+        entered: queue.Queue[bool] = queue.Queue()
+        calls = 0
+
+        def factory(launch):
+            nonlocal calls
+            calls += 1
+            entered.put(True)
+            release.wait(2)
+            raise RuntimeError("unexpected after possible spawn")
+
+        manager = SetupSessionManager(process_factory=factory)
+        launch = RuntimeLaunch(("copilot",), tmp_path, {}, "connected")
+        start1 = asyncio.create_task(manager.start("owner", "copilot", launch, "fallback"))
+        await asyncio.to_thread(entered.get, True, 1)
+        snapshot, _connection_id, pending = await manager.attach("owner")
+        assert snapshot.state == "starting"
+        release.set()
+        with pytest.raises(RuntimeError):
+            await start1
+        assert await asyncio.wait_for(pending.get(), timeout=1) is None
+        failed = manager.snapshot("owner")
+        assert failed is not None
+        assert failed.state == "failed"
+        assert failed.message
+        with pytest.raises(SetupSessionConflict):
+            await manager.start("owner", "copilot", launch, "fallback")
+        assert calls == 1  # blocked slot refuses a second factory call
+        await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_setup_session_confirmed_cancel_releases_starting_subscriber(tmp_path: Path):
+    async def exercise():
+        # A subscriber that attached during `starting` must also be released
+        # when a cancelled Start confirms its cleanup and frees the slot.
+        release = threading.Event()
+        entered: queue.Queue[bool] = queue.Queue()
+        fakes: list[FakeProcess] = []
+
+        def factory(launch):
+            entered.put(True)
+            release.wait(2)
+            fake = FakeProcess()
+            fakes.append(fake)
+            return fake
+
+        manager = SetupSessionManager(process_factory=factory)
+        launch = RuntimeLaunch(("copilot",), tmp_path, {}, "connected")
+        start1 = asyncio.create_task(manager.start("owner", "copilot", launch, "fallback"))
+        await asyncio.to_thread(entered.get, True, 1)
+        _snapshot, _connection_id, pending = await manager.attach("owner")
+        start1.cancel()
+        await asyncio.sleep(0.05)
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await start1
+        assert await asyncio.wait_for(pending.get(), timeout=1) is None
+        assert manager.snapshot("owner") is None  # confirmed clean cancel frees the slot
+        assert fakes[0].running is False
+        await manager.shutdown()
 
     asyncio.run(exercise())

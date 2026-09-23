@@ -45,7 +45,7 @@ _MIN_COLS, _MAX_COLS = 20, 400
 _IDLE_TIMEOUT_SECONDS = 3600.0
 _MAX_LIFETIME_SECONDS = 14400.0
 _SWEEP_INTERVAL_SECONDS = 30.0
-_DEFAULT_REPLAY_LIMIT = 1 << 18
+_DEFAULT_REPLAY_LIMIT = 2 * 1024 * 1024
 _DEFAULT_CLIENT_LIMIT = 1 << 18
 
 ProcessFactory = Callable[[RuntimeLaunch], ConnectedProcess]
@@ -222,42 +222,63 @@ class SetupSessionManager:
     async def _reap_cancelled_spawn(
         self, session: _Session, spawn_task: "asyncio.Task[ConnectedProcess]"
     ) -> None:
-        process = await self._await_shielded(spawn_task)
-        confirmed = True
-        if process is not None:
-            evidence = await asyncio.to_thread(process.stop, session.lifecycle)
-            confirmed = evidence.confirmed
-        async with self._state_lock:
-            if self._session is session:
-                if confirmed:
-                    self._session = None
-                else:
-                    session.state = "failed"
-                    session.message = "Cancelled setup launch could not be confirmed stopped"
-                    session.finalized = True
-
-    @staticmethod
-    async def _await_shielded(spawn_task: "asyncio.Task[ConnectedProcess]") -> ConnectedProcess | None:
-        # The spawn was shielded, so it keeps running even though we were cancelled.
-        # Wait it out to completion before deciding how to clean up.
+        # The spawn was shielded, so it keeps running even though our Start was
+        # cancelled. Wait it out, then fail closed: only a *proven*-clean outcome
+        # frees the slot; anything unconfirmed keeps the slot blocked. Suppress
+        # whatever the wait raises (our own re-cancellation or the spawn's own
+        # error) and inspect the finished task explicitly below.
         while not spawn_task.done():
-            with contextlib.suppress(asyncio.CancelledError):
+            with contextlib.suppress(BaseException):
                 await asyncio.shield(spawn_task)
-        if spawn_task.cancelled() or spawn_task.exception() is not None:
-            return None
-        return spawn_task.result()
+        if spawn_task.cancelled():
+            # The spawn itself was cancelled; nothing was created to clean up.
+            async with self._state_lock:
+                if self._session is session:
+                    self._close_subscribers(session)
+                    self._session = None
+            return
+        error = spawn_task.exception()
+        if error is not None:
+            # A spawn that raised is cleaned up exactly like the normal failure
+            # path, so an unconfirmed ConnectedLaunchError still blocks the slot.
+            await self._fail_spawn(session, error)
+            return
+        process = spawn_task.result()
+        evidence = await asyncio.to_thread(process.stop, session.lifecycle)
+        async with self._state_lock:
+            if self._session is not session:
+                return
+            if evidence.confirmed:
+                self._close_subscribers(session)
+                self._session = None
+            else:
+                # Keep the returned handle and the evidence so a later Stop or
+                # shutdown can retry cleanup; block the slot until the tree is
+                # proven gone rather than dropping an unconfirmed process.
+                session.process = process
+                session.stop_evidence = evidence
+                session.state = "failed"
+                session.message = "Cancelled setup launch could not be confirmed stopped"
+                session.finalized = True
+                self._close_subscribers(session)
 
     async def _fail_spawn(self, session: _Session, error: BaseException) -> None:
         async with self._state_lock:
             if self._session is not session:
                 return
-            if isinstance(error, ConnectedLaunchError) and not error.cleanup_confirmed:
+            if isinstance(error, ConnectedLaunchError) and error.cleanup_confirmed:
+                # A confirmed-clean failed start frees the slot for an external fallback.
+                self._session = None
+            else:
+                # Only a proven-clean ConnectedLaunchError may free the slot; any
+                # other error (including an unconfirmed ConnectedLaunchError) is
+                # no evidence the process tree was cleaned up, so fail closed.
                 session.state = "failed"
                 session.message = str(error)
                 session.finalized = True
-            else:
-                # A confirmed-clean failed start frees the slot for an external fallback.
-                self._session = None
+            # Release any subscriber that attached while the session was still
+            # `starting`, so no WebSocket writer lingers on a dead session.
+            self._close_subscribers(session)
 
     # ── Attach / streaming ───────────────────────────────────────────────
 
