@@ -18,7 +18,7 @@
 - Use `ptyprocess` with `/proc` process-group evidence for connected setup on supported POSIX hosts. On Windows, never start a connected PTY: retain the existing external-terminal launch. Do not add Node.js, pywinpty or a Rust bridge to production dependencies; smoke-test POSIX connected mode and Windows fallback independently.
 - One running setup session per server, one input owner, at most 2 MiB of recent output, and at most 256 KiB queued for a slow WebSocket client. Stop after one hour without input or output or four hours total.
 - Do not persist terminal transcripts; reconnect after tab loss, but never promise replay after server restart. Confirm process-tree termination before relaunch after Stop or failed PTY startup.
-- Require a direct loopback client, loopback `Host`, same-origin `Origin` for unsafe HTTP and WebSocket upgrades, a browser-bound HTTP-only same-site cookie, and anti-CSRF token for launch and HTTP controls. Never put credentials in URLs or logs.
+- Require a direct loopback client, loopback `Host`, same-origin `Origin` for unsafe HTTP and WebSocket upgrades, a browser-bound HTTP-only same-site cookie, and anti-CSRF token for ALL setup launch POSTs (external and connected) and HTTP controls. Guard before integration discovery or data-root preparation; a remote POST cannot create a root or start an agent. Never put credentials in URLs or logs.
 - Treat interactive setup as running with the server user's privileges, not a configured agent's sandbox; say so in the UI. Do not permit arbitrary argv or shell commands from the browser.
 - Redirect automatically when validated configuration becomes ready; leave Copilot running until exit, Stop, or timeout. Show only its owner's dashboard link back to the terminal and Stop control while it runs.
 - Package all terminal JS/CSS in the wheel for offline use. Run Python tests from the active worktree root and preserve unrelated files and runtime state.
@@ -40,7 +40,7 @@
 - `tools/setup-terminal.js`, `package.json`, `package-lock.json`, `flowgency/static/setup-terminal.js`, `flowgency/static/setup-terminal.css`: locally bundled terminal renderer and generated assets; `pyproject.toml` gains a POSIX-only PTY dependency (its `static/*` wheel rule already packages generated assets).
 - `tests/test_interactive_setup.py`, `tests/test_copilot_launch_arguments.py`: new mode contract and unchanged headless/external behavior.
 - `tests/_connected_setup_helpers.py`, `tests/test_connected_process.py`, `tests/test_setup_security.py`, `tests/test_setup_sessions.py`: one reusable fake PTY, platform supervision, local browser access, and in-memory session behavior.
-- `tests/test_setup_flow.py`, `tests/test_server.py`, `tests/test_dashboard.py`, `tests/test_setup_assets.py`, `tests/ui/setup.spec.ts`, `tests/ui/server.py`: selector/route, dashboard, wheel, and browser regressions using existing fixtures.
+- `tests/test_setup_flow.py`, `tests/test_server.py`, `tests/test_team_settings.py`, `tests/test_dashboard.py`, `tests/test_setup_assets.py`, `tests/ui/setup.spec.ts`, `tests/ui/server.py`: selector/route, legacy bootstrap, dashboard, wheel, and browser regressions using existing fixtures.
 - `kb/getting-started.md`, `README.md`: local-access, permissions, reconnect, and fallback guidance.
 
 ## Preflight
@@ -552,7 +552,7 @@ Use one loop task to call `enforce_limits()` periodically; compare `now - last_a
 - Modify: `flowgency/web/routes/admin_teams.py` (local launch, form token, unchanged readiness).
 - Create: `flowgency/web/routes/setup_terminal.py` (state, view, Stop, WebSocket).
 - Modify: `flowgency/web/routes/__init__.py`, `flowgency/app.py` (router registration before the team catch-all).
-- Test: `tests/test_setup_flow.py`, `tests/test_server.py`.
+- Test: `tests/test_setup_flow.py`, `tests/test_server.py`, `tests/test_team_settings.py`.
 
 **Interfaces:**
 - Consumes: `CopilotIntegration.connected_setup_launch`, `connected_process_available`, `SetupBrowserAccess`, `SetupSessionManager`, and existing `inspect_setup_status`/`_setup_status_with_fresh_services`.
@@ -572,6 +572,7 @@ In `tests/test_server.py`, add a connected test double alongside `_LaunchIntegra
 
 ```python
 from flowgency.integrations.models import RuntimeLaunch
+from flowgency.web.setup_sessions import SetupSessionManager
 from tests._connected_setup_helpers import FakeProcess
 
 
@@ -597,13 +598,14 @@ def test_connected_launch_is_local_idempotent_and_streams_output(tmp_path, monke
         lambda integrations, data_root: (integration,),
     )
     monkeypatch.setattr("flowgency.web.routes.admin_teams.connected_process_available", lambda: True)
+    process = FakeProcess()
+    launches = []
+    def start(launch):
+        launches.append(launch)
+        return process
+    manager = SetupSessionManager(process_factory=start)
+    monkeypatch.setattr(app_mod, "SetupSessionManager", lambda: manager)
     with TestClient(app_mod.app, base_url="http://127.0.0.1:8500", client=("127.0.0.1", 50001)) as client:
-        process = FakeProcess()
-        launches = []
-        def start(launch):
-            launches.append(launch)
-            return process
-        app_mod.app.state.setup_sessions._process_factory = start
         page = client.get("/setup")
         csrf = re.search(r'name="setup_csrf" value="([^"]+)"', page.text).group(1)
         form = {"data_root": str(root), "integration": "copilot", "setup_csrf": csrf}
@@ -617,33 +619,34 @@ def test_connected_launch_is_local_idempotent_and_streams_output(tmp_path, monke
         assert integration.requests == []
         assert not config_path.exists()
         assert client.get("/setup/session/state").json()["state"] == "running"
-        with client.websocket_connect("/setup/session/ws", headers=headers) as ws:
+        with client.websocket_connect("ws://127.0.0.1:8500/setup/session/ws", headers=headers) as ws:
             assert ws.receive_json()["state"] == "running"
             process.output.put(b"Hello from Copilot")
             assert ws.receive_bytes() == b"Hello from Copilot"
             ws.send_json({"type": "input", "data": "yes\r"})
 ```
 
-The second POST should call `connected_setup_launch` twice to validate the same request but the manager's `process_factory` only once; count calls there too. Add route tests for a remote peer with a missing root (403, root not created), an invalid CSRF/Origin, a foreign cookie on state/WS (403/1008), malformed/overlong WS messages (1003/1009), and failure to confirm PTY cleanup (409; no fallback launch). After writing a ready config using existing `_materialize_ready_config`, assert `/setup/status` still returns exactly `{"state":"ready","redirect":"/"}` while `GET /setup/session` returns 200 for the owner; `POST /setup/session/stop` then returns 303 and confirms process Stop. Repeat one existing external fallback test unchanged.
+The second POST should call `connected_setup_launch` twice to validate the same request but the manager's `process_factory` only once; count calls there too. Add route tests for a remote peer with a missing root (403, root not created, no launch even when the form carries a token copied from a local browser), an invalid CSRF/Origin, a foreign cookie on state/WS (403/1008), malformed/overlong WS messages (1003/1009), and failure to confirm PTY cleanup (409; no fallback launch). A generic/unexpected connected spawn error also returns an error without an external fallback; only `ConnectedLaunchError(cleanup_confirmed=True)` permits a fallback launch. Cover a WS connection attached during `starting` when a clean launch failure removes the session: its `None` close marker must not dereference a missing snapshot or emit an ASGI task exception. Update all six existing `/setup/launch` POST tests in `tests/test_server.py` and `test_setup_launch_preserves_existing_bootstrap_config` in `tests/test_team_settings.py` to GET `/setup` first with a direct-loopback TestClient, then send the signed cookie, form `setup_csrf`, and matching `Origin`; keep their existing invalid-integration/relative-root error assertions. After writing a ready config using existing `_materialize_ready_config`, assert `/setup/status` still returns exactly `{"state":"ready","redirect":"/"}` while `GET /setup/session` returns 200 for the owner; `POST /setup/session/stop` then returns 303 and confirms process Stop. Repeat one existing external fallback test through the authenticated local launch path.
 
 - [ ] **Step 2: Run red.** Run `python -m pytest tests/test_setup_flow.py::test_launchable_integrations_keeps_copilot_when_only_pty_exists tests/test_server.py::test_connected_launch_is_local_idempotent_and_streams_output -q`. Expected: missing connected selector and session routes.
 
-- [ ] **Step 3: Wire connected launch without changing readiness.** In `setup_flow.launchable_integrations`, accept an integration if the old `interactive_setup_available()` is true or its connected capability and the host PTY check both pass; retain existing detection sort order. Use `getattr(integration, "connected_setup_available", lambda: False)` for existing duck-typed test integrations. In `_setup_response`, add `connected`, `session_view`, and `setup_csrf` template values; on the initial local `GET /setup`, call `app.state.setup_access.ensure_browser`, set its cookie on the returned response, and place the token in the form. If that same owner has a session and config is not ready, redirect `GET /setup` to `/setup/session`; once config is ready, keep its existing redirect to `/`. Remote viewers may still see the external setup form, but cannot start a connected process. In `POST /setup/launch`, validate the request's integration first, then check `require_http(request, form.get("setup_csrf"), unsafe=True)` **before** `prepare_writable_directory` when Copilot connected mode is selected:
+- [ ] **Step 3: Wire connected launch without changing readiness.** In `setup_flow.launchable_integrations`, accept an integration if the old `interactive_setup_available()` is true or its connected capability and the host PTY check both pass; retain existing detection sort order. Use `getattr(integration, "connected_setup_available", lambda: False)` for existing duck-typed test integrations. In `_setup_response`, add `connected`, `session_view`, and `setup_csrf` template values; on the initial local `GET /setup`, call `app.state.setup_access.ensure_browser`, set its cookie on the returned response, and place the token in the form. If that same owner has a session and config is not ready, redirect `GET /setup` to `/setup/session`; once config is ready, keep its existing redirect to `/`. Remote viewers may still see the external setup form, but cannot start an agent. In `POST /setup/launch`, parse the form and check `require_http(request, form.get("setup_csrf"), unsafe=True)` for BOTH external and connected modes before the readiness redirect, `_setup_integrations`, data-root validation, or `prepare_writable_directory`. A missing/invalid local credential returns 403 without probing folders or launching anything. Only after this guard, keep the existing readiness redirect, integration selection/invalid-choice response and root-validation errors for local clients:
 
 ```python
+form = await request.form()
+try:
+    owner = request.app.state.setup_access.require_http(
+        request, str(form.get("setup_csrf", "")), unsafe=True,
+    )
+except SetupAccessDenied:
+    return JSONResponse({"error": "Local setup access required."}, status_code=403)
+
+integration = launchable_by_name[requested_integration]
 connected = (
     requested_integration == "copilot"
     and integration.connected_setup_available()
     and connected_process_available()
 )
-if connected:
-    try:
-        owner = request.app.state.setup_access.require_http(
-            request, str(form.get("setup_csrf", "")), unsafe=True,
-        )
-    except SetupAccessDenied:
-        return JSONResponse({"error": "Local setup access required."}, status_code=403)
-
 resolved_data_root = prepare_writable_directory(Path(data_root_value), label="Flowgency data root")
 setup_request = InteractiveSetupRequest(
     data_root=resolved_data_root,
@@ -657,7 +660,7 @@ if connected:
     return RedirectResponse("/setup/session", status_code=303)
 ```
 
-Keep the existing path validation/error rendering around the excerpt above and the external `.launch_interactive_setup` path for other integrations/unsupported PTYs. Catch `ConnectedLaunchError`: only when `cleanup_confirmed` is true may the route try the existing external launcher and display its fallback command; otherwise return 409 naming the unconfirmed stop and leave the slot blocked. Map `SetupSessionConflict` to 409 with the existing session link; never replace a running session for a different root or browser. Import/export `setup_terminal_router` through `flowgency/web/routes/__init__.py` and include it in `app.py` before `/{team}/`.
+Keep the existing path validation/error rendering around the excerpt above and the external `.launch_interactive_setup` path for other integrations/unsupported PTYs (after the same local-access guard). Catch `ConnectedLaunchError`: only when `cleanup_confirmed` is true may the route try the existing external launcher and display its fallback command; otherwise return 409 naming the unconfirmed stop and leave the slot blocked. Map any other unexpected spawn exception to a safe error without a fallback launch, since the manager must retain a blocked slot without proof of cleanup. Map `SetupSessionConflict` to 409 with the existing session link; never replace a running session for a different root or browser. Import/export `setup_terminal_router` through `flowgency/web/routes/__init__.py` and include it in `app.py` before `/{team}/`.
 
 - [ ] **Step 4: Implement owner-only state, terminal view, Stop and WebSocket.** Provide a route-local HTTP guard mapping `SetupAccessDenied` to 403:
 
@@ -720,6 +723,9 @@ async def _send_output(websocket: WebSocket, manager: SetupSessionManager, owner
         chunk = await pending.get()
         if chunk is None:
             state = manager.snapshot(owner)
+            if state is None:
+                await websocket.send_json({"type": "state", "state": "unavailable", "message": "Setup session is no longer available."})
+                return
             await websocket.send_json({"type": "state", "state": state.state, "message": state.message})
             return
         await websocket.send_bytes(chunk)
@@ -728,7 +734,7 @@ async def _send_output(websocket: WebSocket, manager: SetupSessionManager, owner
 
 In the WebSocket route, start those two tasks after `accept()`, the initial state JSON and replay; `await asyncio.wait({sender, receiver}, return_when=asyncio.FIRST_COMPLETED)`, cancel/gather pending tasks, and `await manager.detach(owner, connection_id)` in `finally`. Catch `WebSocketDisconnect` at the handler boundary so a closed tab only detaches. A disconnect or redirect never stops the PTY. Do not interpolate PTY text into HTML.
 
-- [ ] **Step 5: Run focused server regressions to verify green.** Run `python -m pytest tests/test_setup_flow.py tests/test_server.py tests/test_interactive_setup.py -q`. Expected: local connected session controls pass, existing fallback tests still pass, and readiness status remains configuration-derived.
+- [ ] **Step 5: Run focused server regressions to verify green.** Run `python -m pytest tests/test_setup_flow.py tests/test_server.py tests/test_team_settings.py tests/test_interactive_setup.py -q`. Expected: local connected session controls and bootstrap tests pass, existing external fallback tests remain green under the local guard, and readiness status remains configuration-derived.
 
 - [ ] **Step 6: Review and commit the routes.** Check `git diff --check`, verify security checks precede filesystem preparation, stage only Task 5 files and commit with `feat(setup): serve connected copilot session`.
 
