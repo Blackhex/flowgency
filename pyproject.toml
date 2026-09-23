@@ -18,7 +18,6 @@ dependencies = [
     "markupsafe",
     "python-multipart",
     "pywin32; sys_platform == 'win32'",
-    "pywinpty>=3,<4; sys_platform == 'win32'",
     "ptyprocess>=0.7,<1; sys_platform != 'win32'",
     "tomli-w>=1,<2",
     "unidiff>=0.7.5,<0.8",

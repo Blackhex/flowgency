@@ -567,18 +567,28 @@ def _posix_group_reason(
     return "descendants-still-running"
 
 
+def _signal_then_status_owned_posix_group(
+    group_identity: OwnedPosixProcessGroup,
+    *,
+    timeout: float,
+) -> tuple[Literal["signaled", "empty", "unavailable"], Literal["empty", "active", "unknown", "reused"]]:
+    """Signal the owned group and report both the signal outcome and the resulting status."""
+    signal_status = _signal_owned_posix_group(group_identity, _POSIX_KILL_SIGNAL)
+    if signal_status == "unavailable":
+        return signal_status, "unknown"
+    if signal_status == "signaled":
+        return signal_status, _owned_posix_group_status(group_identity, time.monotonic() + timeout)
+    return signal_status, "empty"
+
+
 def terminate_owned_posix_group(
     group_identity: OwnedPosixProcessGroup,
     *,
     timeout: float,
 ) -> Literal["empty", "active", "unknown", "reused"]:
     """Kill the whole owned group and report whether it is gone; never reaps the leader."""
-    signal_status = _signal_owned_posix_group(group_identity, _POSIX_KILL_SIGNAL)
-    if signal_status == "unavailable":
-        return "unknown"
-    if signal_status == "signaled":
-        return _owned_posix_group_status(group_identity, time.monotonic() + timeout)
-    return "empty"
+    _, group_status = _signal_then_status_owned_posix_group(group_identity, timeout=timeout)
+    return group_status
 
 
 def _terminate_owned_posix_group(
@@ -586,8 +596,9 @@ def _terminate_owned_posix_group(
     process: subprocess.Popen[bytes],
 ) -> Literal["empty", "active", "unknown", "reused"]:
     """Kill the whole owned group, not only the root, and confirm it is gone."""
-    group_status = terminate_owned_posix_group(group_identity, timeout=5)
-    if group_status == "unknown":
+    signal_status, group_status = _signal_then_status_owned_posix_group(group_identity, timeout=5)
+    if signal_status == "unavailable":
+        # The root's identity was never proven, so it must not be reaped.
         return group_status
     if _reap_posix_root(process, timeout=5) is None:
         return "active"

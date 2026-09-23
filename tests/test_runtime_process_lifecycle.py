@@ -933,8 +933,8 @@ def test_headless_group_termination_still_reaps_root_after_group_stop(monkeypatc
     fake_process = _FakePosixProcess(4321)
     fake_process.allow_reap = True
     monkeypatch.setattr(
-        "flowgency.jobs.processes.terminate_owned_posix_group",
-        lambda group_identity, *, timeout: "empty",
+        "flowgency.jobs.processes._signal_then_status_owned_posix_group",
+        lambda group_identity, *, timeout: ("signaled", "empty"),
     )
 
     assert _terminate_owned_posix_group(_owned_group(), fake_process) == "empty"
@@ -947,15 +947,29 @@ def test_headless_group_termination_still_reaps_root_after_group_stop(monkeypatc
     assert _terminate_owned_posix_group(_owned_group(), fake_process) == "active"
 
 
-def test_headless_group_termination_does_not_wait_on_root_when_group_is_unprovable(monkeypatch):
+def test_headless_group_termination_does_not_wait_on_root_when_signal_is_unavailable(monkeypatch):
     fake_process = _FakePosixProcess(4321)
     monkeypatch.setattr(
-        "flowgency.jobs.processes.terminate_owned_posix_group",
-        lambda group_identity, *, timeout: "unknown",
+        "flowgency.jobs.processes._signal_then_status_owned_posix_group",
+        lambda group_identity, *, timeout: ("unavailable", "unknown"),
     )
 
     assert _terminate_owned_posix_group(_owned_group(), fake_process) == "unknown"
     assert fake_process.wait_calls == []
+
+
+def test_headless_group_termination_reaps_root_even_when_status_is_unknown_after_signaling(monkeypatch):
+    """A successful signal must still reap the root even if the later group status is
+    unknown (regression: commit 83eceb9 skipped reaping for any "unknown" group status)."""
+    fake_process = _FakePosixProcess(4321)
+    fake_process.allow_reap = True
+    monkeypatch.setattr(
+        "flowgency.jobs.processes._signal_then_status_owned_posix_group",
+        lambda group_identity, *, timeout: ("signaled", "unknown"),
+    )
+
+    assert _terminate_owned_posix_group(_owned_group(), fake_process) == "unknown"
+    assert fake_process.wait_calls == [5]
 
 
 def test_run_supervised_without_output_options_keeps_existing_behavior(tmp_path: Path):

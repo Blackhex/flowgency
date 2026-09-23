@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import codecs
 import contextlib
 import os
 import signal
-import subprocess
 import threading
 import time
 from pathlib import Path
@@ -20,7 +18,6 @@ from flowgency.jobs.processes import (
     RuntimeProcessLifecycle,
     _capture_posix_group_identity,
     _group_exit_status,
-    _job_exit_status,
     _owned_posix_group_state,
     _parse_proc_stat_snapshot,
     terminate_owned_posix_group,
@@ -60,16 +57,9 @@ _unconfirmed: list["_OwnedTerminal"] = []
 
 
 def connected_process_available() -> bool:
+    # Windows has no supported connected-PTY backend; it must never attempt to import one.
     if os.name == "nt":
-        try:
-            import win32job  # noqa: F401
-            import winpty
-
-            probe = winpty.PTY(80, 24, backend=winpty.Backend.ConPTY)
-        except Exception:
-            return False
-        del probe
-        return True
+        return False
     try:
         import ptyprocess  # noqa: F401
     except ImportError:
@@ -80,11 +70,14 @@ def connected_process_available() -> bool:
 def start_connected_process(launch: RuntimeLaunch, *, rows: int = 24, cols: int = 80) -> ConnectedProcess:
     if launch.mode != "connected":
         raise ValueError("A connected PTY requires connected launch mode")
+    if os.name == "nt":
+        raise ConnectedLaunchError(
+            "Connected setup is unavailable on Windows; use the external terminal",
+            cleanup_confirmed=True,
+        )
     _validate_size(rows, cols)
     _validate_launch(launch)
     _retry_unconfirmed()
-    if os.name == "nt":
-        return WindowsConnectedProcess.spawn(launch, rows=rows, cols=cols)
     return PosixConnectedProcess.spawn(launch, rows=rows, cols=cols)
 
 
@@ -362,358 +355,3 @@ class PosixConnectedProcess(_OwnedTerminal):
         if drained:
             with contextlib.suppress(Exception):
                 self._pty.close(force=True)
-
-
-_WINDOWS_ESCAPE_ACCESS = 0x1000 | 0x0001 | 0x00100000  # QUERY_LIMITED_INFORMATION | TERMINATE | SYNCHRONIZE
-_WINDOWS_QUERY_ACCESS = 0x1000
-_WINDOWS_ERROR_INVALID_PARAMETER = 87
-
-
-class WindowsConnectedProcess(_OwnedTerminal):
-    _reads_cancellable = True
-
-    def __init__(self, pty, job, pid: int) -> None:
-        super().__init__(pid)
-        self._pty = pty
-        self._job = job
-        self._handle = None
-        self._assigned = False
-        self._lineage: dict[int, object] = {}
-        self._lineage_lock = threading.Lock()
-        self._decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
-        self._exit_code: int | None = None
-
-    @classmethod
-    def spawn(cls, launch: RuntimeLaunch, *, rows: int, cols: int) -> "WindowsConnectedProcess":
-        try:
-            import win32api
-            import winpty
-        except ImportError as error:
-            raise ConnectedLaunchError(f"Windows ConPTY support is unavailable: {error}", cleanup_confirmed=True) from error
-        arguments = " " + subprocess.list2cmdline(list(launch.argv[1:])) if len(launch.argv) > 1 else None
-        environment = "\0".join(f"{name}={value}" for name, value in launch.env.items()) + "\0"
-        try:
-            job = _create_kill_on_close_job()
-        except Exception as error:
-            raise ConnectedLaunchError(f"Could not create a Job Object: {error}", cleanup_confirmed=True) from error
-        try:
-            # Request ConPTY explicitly; PtyProcess.spawn would let PYWINPTY_BACKEND override it.
-            pty = winpty.PTY(cols, rows, backend=winpty.Backend.ConPTY)
-        except Exception as error:
-            win32api.CloseHandle(job)
-            raise ConnectedLaunchError(f"ConPTY is unavailable: {error}", cleanup_confirmed=True) from error
-        spawn_error: Exception | None = None
-        try:
-            spawned = pty.spawn(str(launch.argv[0]), cmdline=arguments, cwd=str(launch.cwd), env=environment)
-        except Exception as error:
-            spawned, spawn_error = False, error
-        try:
-            pid = pty.pid
-        except Exception:
-            pid = None
-        if not pid:
-            del pty
-            win32api.CloseHandle(job)
-            raise ConnectedLaunchError(
-                f"ConPTY could not start {launch.argv[0]}: {spawn_error or 'spawn was refused'}",
-                cleanup_confirmed=True,
-            )
-        process = cls(pty, job, int(pid))
-        try:
-            process._contain()
-            if not spawned:
-                raise spawn_error or RuntimeError("ConPTY reported a failed spawn")
-        except Exception as error:
-            confirmed, _ = process._stop_tree()
-            raise ConnectedLaunchError(
-                f"Could not contain the connected process tree: {error}",
-                cleanup_confirmed=confirmed,
-            ) from error
-        return process
-
-    def _capture_root(self) -> None:
-        import win32api
-        import win32con
-        import win32process
-
-        # pywinpty holds its own process handle, so this pid cannot be reused before we open it.
-        if self._handle is None:
-            self._handle = win32api.OpenProcess(
-                win32con.PROCESS_SET_QUOTA
-                | win32con.PROCESS_TERMINATE
-                | win32con.PROCESS_QUERY_LIMITED_INFORMATION
-                | win32con.SYNCHRONIZE,
-                False,
-                self.pid,
-            )
-        if self.pid not in self._lineage:
-            self._lineage[self.pid] = win32process.GetProcessTimes(self._handle)["CreationTime"]
-
-    def _contain(self) -> None:
-        import win32job
-
-        self._capture_root()
-        win32job.AssignProcessToJobObject(self._job, self._handle)
-        self._assigned = True
-        # The root ran unsuspended until assignment; anything it started before then is outside the job.
-        escaped = self._scan_uncontained()
-        if escaped is None:
-            raise RuntimeError("the process tree could not be inspected after Job assignment")
-        for _, handle in escaped:
-            handle.Close()
-        if escaped:
-            raise RuntimeError(f"{len(escaped)} descendant process(es) started outside the Job Object")
-
-    def alive(self) -> bool:
-        job = self._job
-        if self._stopped or job is None:
-            return False
-        if _job_exit_status(job, time.monotonic()) != "empty":
-            return True
-        # Brokered creation (for example packaged apps) leaves a descendant outside the job.
-        uncontained = self._scan_uncontained()
-        if uncontained is None:
-            return True
-        _close_all(uncontained)
-        return bool(uncontained)
-
-    def exit_code(self) -> int | None:
-        if self._exit_code is None and not self.alive():
-            self._record_exit()
-        return self._exit_code
-
-    def _record_exit(self) -> None:
-        pty = self._pty
-        if pty is not None:
-            with contextlib.suppress(Exception):
-                self._exit_code = pty.get_exitstatus()
-
-    def _read_terminal(self, size: int) -> bytes:
-        pty = self._pty
-        if pty is None:
-            return b""
-        try:
-            text = pty.read(blocking=True)
-        except Exception:
-            return b""
-        return text.encode("utf-8", errors="replace")
-
-    def _write_terminal(self, data: bytes) -> None:
-        pty = self._pty
-        if pty is None:
-            raise BrokenPipeError("The connected process has been stopped")
-        text = self._decoder.decode(data)
-        if not text:
-            return
-        # PTY.write reports 0 even after a complete write, so its count must not drive a retry loop.
-        try:
-            pty.write(text)
-        except Exception as error:
-            raise BrokenPipeError(str(error)) from error
-
-    def _resize_terminal(self, rows: int, cols: int) -> None:
-        pty = self._pty
-        if pty is None:
-            raise BrokenPipeError("The connected process has been stopped")
-        pty.set_size(cols, rows)
-
-    def _cancel_reads(self) -> None:
-        pty = self._pty
-        if pty is not None:
-            with contextlib.suppress(Exception):
-                pty.cancel_io()
-
-    def _terminate_tree(self, deadline: float) -> tuple[bool, str]:
-        import win32job
-        import win32process
-
-        with contextlib.suppress(Exception):
-            self._capture_root()
-        uncontained = self._scan_uncontained()
-        if self._assigned:
-            with contextlib.suppress(Exception):
-                win32job.TerminateJobObject(self._job, 1)
-        elif self._handle is not None:
-            with contextlib.suppress(Exception):
-                win32process.TerminateProcess(self._handle, 1)
-        descendants_stopped = self._stop_uncontained(uncontained, deadline)
-        if self._assigned:
-            status = _job_exit_status(self._job, deadline)
-            if status == "unknown":
-                return False, "job-accounting-unavailable"
-            if status == "active":
-                return False, "job-active-processes"
-        if self._handle is None or not _wait_for_handle(self._handle, deadline):
-            return False, "root-exit-unconfirmed"
-        if not descendants_stopped:
-            return False, "uncontained-descendants"
-        return True, "stopped"
-
-    def _stop_uncontained(self, pending, deadline: float) -> bool:
-        import win32process
-
-        while True:
-            if pending is None:
-                return False
-            if not pending:
-                return True
-            for _, handle in pending:
-                with contextlib.suppress(Exception):
-                    win32process.TerminateProcess(handle, 1)
-            for _, handle in pending:
-                _wait_for_handle(handle, deadline)
-                handle.Close()
-            pending = self._scan_uncontained()
-            if pending and time.monotonic() >= deadline:
-                for _, handle in pending:
-                    handle.Close()
-                return False
-
-    def _scan_uncontained(self):
-        """Live descendants outside the job (all of them before assignment); None if unprovable."""
-        with self._lineage_lock:
-            return self._scan_uncontained_locked()
-
-    def _scan_uncontained_locked(self):
-        import pywintypes
-        import win32api
-        import win32job
-        import win32process
-
-        if self.pid not in self._lineage:
-            return None
-        try:
-            parents = _windows_parent_pids()
-        except OSError:
-            return None
-        found: list[tuple[int, object]] = []
-        visited: set[int] = {self.pid}
-        progressed = True
-        while progressed:
-            progressed = False
-            for pid, parent in parents.items():
-                if pid in visited or (pid not in self._lineage and parent not in self._lineage):
-                    continue
-                visited.add(pid)
-                try:
-                    handle = win32api.OpenProcess(_WINDOWS_ESCAPE_ACCESS, False, pid)
-                    killable = True
-                except pywintypes.error as error:
-                    if error.winerror == _WINDOWS_ERROR_INVALID_PARAMETER:
-                        continue
-                    try:
-                        handle = win32api.OpenProcess(_WINDOWS_QUERY_ACCESS, False, pid)
-                        killable = False
-                    except pywintypes.error as retry_error:
-                        if retry_error.winerror == _WINDOWS_ERROR_INVALID_PARAMETER:
-                            continue
-                        return _close_all(found)
-                try:
-                    created = win32process.GetProcessTimes(handle)["CreationTime"]
-                except pywintypes.error:
-                    handle.Close()
-                    return _close_all(found)
-                known = self._lineage.get(pid) == created
-                # A recycled parent id names an older, unrelated process.
-                if not known and (parent not in self._lineage or created < self._lineage[parent]):
-                    handle.Close()
-                    continue
-                if not known:
-                    self._lineage[pid] = created
-                    progressed = True
-                if self._assigned and win32job.IsProcessInJob(handle, self._job):
-                    handle.Close()
-                    continue
-                if not killable:
-                    handle.Close()
-                    return _close_all(found)
-                found.append((pid, handle))
-        return found
-
-    def _release(self, drained: bool) -> None:
-        import win32api
-
-        self._record_exit()
-        self._pty = None
-        for handle in (self._handle, self._job):
-            if handle is not None:
-                with contextlib.suppress(Exception):
-                    win32api.CloseHandle(handle)
-        self._handle = None
-        self._job = None
-
-
-def _close_all(found) -> None:
-    for _, handle in found:
-        with contextlib.suppress(Exception):
-            handle.Close()
-    return None
-
-
-def _wait_for_handle(handle, deadline: float) -> bool:
-    import win32event
-
-    remaining = max(0, int((deadline - time.monotonic()) * 1000))
-    try:
-        return win32event.WaitForSingleObject(handle, remaining) == win32event.WAIT_OBJECT_0
-    except Exception:
-        return False
-
-
-def _create_kill_on_close_job():
-    import win32api
-    import win32job
-
-    job = win32job.CreateJobObject(None, "")
-    try:
-        limits = win32job.QueryInformationJobObject(job, win32job.JobObjectExtendedLimitInformation)
-        limits["BasicLimitInformation"]["LimitFlags"] |= win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-        win32job.SetInformationJobObject(job, win32job.JobObjectExtendedLimitInformation, limits)
-    except Exception:
-        win32api.CloseHandle(job)
-        raise
-    return job
-
-
-def _windows_parent_pids() -> dict[int, int]:
-    import ctypes
-    from ctypes import wintypes
-
-    class ProcessEntry(ctypes.Structure):
-        _fields_ = [
-            ("dwSize", wintypes.DWORD),
-            ("cntUsage", wintypes.DWORD),
-            ("th32ProcessID", wintypes.DWORD),
-            ("th32DefaultHeapID", ctypes.c_size_t),
-            ("th32ModuleID", wintypes.DWORD),
-            ("cntThreads", wintypes.DWORD),
-            ("th32ParentProcessID", wintypes.DWORD),
-            ("pcPriClassBase", wintypes.LONG),
-            ("dwFlags", wintypes.DWORD),
-            ("szExeFile", wintypes.WCHAR * 260),
-        ]
-
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.CreateToolhelp32Snapshot.argtypes = (wintypes.DWORD, wintypes.DWORD)
-    kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
-    for name in ("Process32FirstW", "Process32NextW"):
-        function = getattr(kernel32, name)
-        function.argtypes = (wintypes.HANDLE, ctypes.POINTER(ProcessEntry))
-        function.restype = wintypes.BOOL
-    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
-    snapshot = kernel32.CreateToolhelp32Snapshot(0x00000002, 0)  # TH32CS_SNAPPROCESS
-    if not snapshot or snapshot == ctypes.c_void_p(-1).value:
-        raise ctypes.WinError(ctypes.get_last_error())
-    try:
-        entry = ProcessEntry()
-        entry.dwSize = ctypes.sizeof(ProcessEntry)
-        parents: dict[int, int] = {}
-        more = kernel32.Process32FirstW(snapshot, ctypes.byref(entry))
-        while more:
-            parents[int(entry.th32ProcessID)] = int(entry.th32ParentProcessID)
-            more = kernel32.Process32NextW(snapshot, ctypes.byref(entry))
-        if ctypes.get_last_error() != 18:  # ERROR_NO_MORE_FILES
-            raise ctypes.WinError(ctypes.get_last_error())
-        return parents
-    finally:
-        kernel32.CloseHandle(snapshot)
