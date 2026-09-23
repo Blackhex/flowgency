@@ -40,7 +40,7 @@
 - `tools/setup-terminal.js`, `package.json`, `package-lock.json`, `flowgency/static/setup-terminal.js`, `flowgency/static/setup-terminal.css`: locally bundled terminal renderer and generated assets; `pyproject.toml` gains a POSIX-only PTY dependency (its `static/*` wheel rule already packages generated assets).
 - `tests/test_interactive_setup.py`, `tests/test_copilot_launch_arguments.py`: new mode contract and unchanged headless/external behavior.
 - `tests/_connected_setup_helpers.py`, `tests/test_connected_process.py`, `tests/test_setup_security.py`, `tests/test_setup_sessions.py`: one reusable fake PTY, platform supervision, local browser access, and in-memory session behavior.
-- `tests/test_setup_flow.py`, `tests/test_server.py`, `tests/test_team_settings.py`, `tests/test_dashboard.py`, `tests/test_setup_assets.py`, `tests/ui/setup.spec.ts`, `tests/ui/server.py`: selector/route, legacy bootstrap, dashboard, wheel, and browser regressions using existing fixtures.
+- `tests/test_setup_flow.py`, `tests/test_server.py`, `tests/test_team_settings.py`, `tests/test_dashboard.py`, `tests/test_setup_assets.py`, `tests/ui/setup.spec.ts`, `tests/ui/server.py`: selector/route, prior bootstrap, dashboard, wheel, and browser regressions using existing fixtures.
 - `kb/getting-started.md`, `README.md`: local-access, permissions, reconnect, and fallback guidance.
 
 ## Preflight
