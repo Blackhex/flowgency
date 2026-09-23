@@ -644,7 +644,7 @@ except SetupAccessDenied:
 integration = launchable_by_name[requested_integration]
 connected = (
     requested_integration == "copilot"
-    and integration.connected_setup_available()
+    and getattr(integration, "connected_setup_available", lambda: False)()
     and connected_process_available()
 )
 resolved_data_root = prepare_writable_directory(Path(data_root_value), label="Flowgency data root")
