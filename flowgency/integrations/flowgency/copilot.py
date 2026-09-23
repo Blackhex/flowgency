@@ -45,6 +45,7 @@ from flowgency.integrations.models import (
     InteractiveSetupResult,
     ResolvedPermissionRule,
     RuntimeCapabilities,
+    RuntimeLaunch,
 )
 from flowgency.integrations.ticket_tools import write_copilot_ticket_config
 from flowgency.integrations.tool_catalog import ToolCatalog, ToolDescriptor
@@ -438,6 +439,13 @@ class CopilotIntegration(BaseIntegration):
             return False
         return True
 
+    def connected_setup_available(self) -> bool:
+        try:
+            self._interactive_setup_command_prefix()
+        except IntegrationError:
+            return False
+        return True
+
     @staticmethod
     def _command_exists(cmd: str) -> bool:
         path = Path(cmd)
@@ -568,6 +576,15 @@ class CopilotIntegration(BaseIntegration):
         request: InteractiveSetupRequest,
     ) -> str:
         return format_interactive_command(self._interactive_setup_command(request))
+
+    def connected_setup_launch(self, request: InteractiveSetupRequest) -> RuntimeLaunch:
+        data_root = request.data_root.resolve(strict=True)
+        return RuntimeLaunch(
+            argv=tuple(self._interactive_setup_command(request)),
+            cwd=data_root,
+            env=self._launch_environment(None),
+            mode="connected",
+        )
 
     # Copilot native file-edit tools that mutate the filesystem. Read-only
     # tools like "view" are intentionally excluded. Shell edits are not
@@ -1133,6 +1150,12 @@ class CopilotIntegration(BaseIntegration):
         # used by production dispatchers.
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         run_env = self._launch_environment(job_home)
+        launch = RuntimeLaunch(
+            argv=tuple(cmd_args),
+            cwd=request.launch_dir,
+            env=run_env,
+            mode="headless",
+        )
         try:
             process_stop_evidence = None
             if (
@@ -1140,9 +1163,9 @@ class CopilotIntegration(BaseIntegration):
                 and request.ticket_tools.lifecycle is not None
             ):
                 completed = run_supervised(
-                    cmd_args,
-                    cwd=request.launch_dir,
-                    env=run_env,
+                    list(launch.argv),
+                    cwd=launch.cwd,
+                    env=dict(launch.env),
                     timeout=request.timeout,
                     lifecycle=request.ticket_tools.lifecycle,
                 )
@@ -1153,12 +1176,12 @@ class CopilotIntegration(BaseIntegration):
                 process_stop_evidence = completed.process_stop_evidence
             else:
                 result = subprocess.run(
-                    cmd_args,
+                    list(launch.argv),
                     capture_output=True, text=True, timeout=request.timeout,
-                    cwd=str(request.launch_dir),
+                    cwd=str(launch.cwd),
                     stdin=subprocess.DEVNULL,
                     creationflags=creationflags,
-                    env=run_env,
+                    env=dict(launch.env),
                 )
                 result_stdout = result.stdout
                 result_stderr = result.stderr

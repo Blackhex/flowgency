@@ -26,6 +26,7 @@ from flowgency.integrations.models import (
     InteractiveSetupResult,
     ProjectorCapabilities,
     RuntimeCapabilities,
+    RuntimeLaunch,
     TicketToolLaunch,
 )
 
@@ -365,6 +366,14 @@ class BaseIntegration:
     ) -> str:
         raise IntegrationError(
             f"{self.display_name or self.name or 'Integration'} does not support interactive setup fallback commands."
+        )
+
+    def connected_setup_available(self) -> bool:
+        return False
+
+    def connected_setup_launch(self, request: InteractiveSetupRequest) -> RuntimeLaunch:
+        raise IntegrationError(
+            f"{self.display_name or self.name or 'Integration'} does not support connected setup."
         )
 
     @staticmethod

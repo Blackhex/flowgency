@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from flowgency.jobs.processes import RuntimeProcessLifecycle
 
 PermissionMode = Literal["restricted", "unrestricted"]
+ExecutionMode = Literal["headless", "connected"]
 LiveTicketTransport = Literal["mcp-http"]
 
 ANY_TOOL = "*"
@@ -168,6 +169,14 @@ class IntegrationRunRequest:
     enforce_validation: bool = True
     memory_working_dir: Path | None = None
     ticket_tools: TicketToolLaunch | None = None
+
+
+@dataclass(frozen=True)
+class RuntimeLaunch:
+    argv: tuple[str, ...]
+    cwd: Path
+    env: Mapping[str, str]
+    mode: ExecutionMode
 
 
 @dataclass(frozen=True)

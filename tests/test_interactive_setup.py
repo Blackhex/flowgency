@@ -32,6 +32,31 @@ def test_base_integration_does_not_advertise_interactive_setup(tmp_path: Path) -
         integration.interactive_setup_fallback_command(request)
 
 
+def test_base_integration_does_not_support_connected_setup(tmp_path: Path) -> None:
+    integration = BaseIntegration()
+    request = InteractiveSetupRequest(tmp_path, tmp_path / "config.yaml", "Set up Flowgency.")
+    assert integration.connected_setup_available() is False
+    with pytest.raises(IntegrationError):
+        integration.connected_setup_launch(request)
+
+
+def test_copilot_connected_setup_launch_uses_interactive_command_without_private_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(CopilotIntegration, "_interactive_setup_command_prefix", lambda self: ("copilot",))
+    monkeypatch.setenv("FLOWGENCY_PRIVATE_KEY", "not-for-copilot")
+    request = InteractiveSetupRequest(tmp_path, tmp_path / "config.yaml", "Use the flowgency-setup skill.")
+    launch = CopilotIntegration().connected_setup_launch(request)
+    assert launch.mode == "connected"
+    assert launch.cwd == tmp_path.resolve()
+    assert launch.argv == (
+        "copilot", "-C", str(tmp_path.resolve()), "--add-dir",
+        str(copilot_discovery_root()), "-i", request.prompt, "--name", "Flowgency setup",
+    )
+    assert "FLOWGENCY_PRIVATE_KEY" not in launch.env
+    assert "--no-ask-user" not in launch.argv
+
+
 def test_copilot_launches_interactive_setup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     captured: dict[str, object] = {}
 
