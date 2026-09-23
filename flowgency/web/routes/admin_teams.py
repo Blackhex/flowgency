@@ -24,6 +24,7 @@ from flowgency.configuration import (
 )
 from flowgency.integrations import BaseIntegration, REGISTRY
 from flowgency.integrations.models import InteractiveSetupRequest
+from flowgency.jobs.connected_process import ConnectedLaunchError, connected_process_available
 from flowgency.jobs.store import revision_bound_team_operation
 from flowgency.web.dependencies import FlowgencyServices, build_services, get_services
 from flowgency.web.directory_browser import DirectoryBrowseError, list_directories
@@ -33,6 +34,8 @@ from flowgency.web.setup_flow import (
     launchable_integrations,
     startup_error_status,
 )
+from flowgency.web.setup_security import SetupAccessDenied
+from flowgency.web.setup_sessions import SetupSessionConflict
 
 
 router = APIRouter()
@@ -121,6 +124,8 @@ def _setup_response(
     *,
     status,
     waiting: bool = False,
+    connected: bool = False,
+    session_view: bool = False,
     data_root_value: str = "",
     selected_integration: str = "",
     selected_integration_name: str = "",
@@ -128,6 +133,7 @@ def _setup_response(
     fallback_command: str = "",
     launch_notice: str = "",
     error: str = "",
+    setup_csrf: str = "",
     status_code: int = 200,
 ):
     return _templates(request).TemplateResponse(
@@ -143,12 +149,15 @@ def _setup_response(
             "status_state": status.state,
             "status_message": status.message,
             "waiting": waiting,
+            "connected": connected,
+            "session_view": session_view,
             "data_root_value": data_root_value,
             "selected_integration": selected_integration,
             "selected_integration_name": selected_integration_name,
             "integrations": integrations,
             "fallback_command": fallback_command,
             "launch_notice": launch_notice,
+            "setup_csrf": setup_csrf,
         },
         status_code=status_code,
     )
@@ -378,18 +387,92 @@ async def setup_page(
     services, status = _setup_status_with_fresh_services(request, services)
     if status.state == "ready":
         return RedirectResponse("/", status_code=303)
+    try:
+        credential, csrf, _issued = request.app.state.setup_access.ensure_browser(request)
+    except SetupAccessDenied:
+        credential, csrf = None, ""
+    if credential is not None:
+        sessions = getattr(request.app.state, "setup_sessions", None)
+        if sessions is not None and sessions.snapshot(credential) is not None:
+            response = RedirectResponse("/setup/session", status_code=303)
+            request.app.state.setup_access.set_cookie(response, credential, request)
+            return response
     integrations = _setup_integrations(services, "")
     selected_integration, selected_integration_name = _select_integration(
         integrations,
         "",
     )
-    return _setup_response(
+    response = _setup_response(
         request,
         services,
         status=status,
         integrations=integrations,
         selected_integration=selected_integration,
         selected_integration_name=selected_integration_name,
+        setup_csrf=csrf,
+    )
+    if credential is not None:
+        request.app.state.setup_access.set_cookie(response, credential, request)
+    return response
+
+
+async def _external_setup_launch(
+    request: Request,
+    services: FlowgencyServices,
+    status,
+    integrations: tuple[BaseIntegration, ...],
+    requested_integration: str,
+    selected_integration_name: str,
+    integration: BaseIntegration,
+    setup_request: InteractiveSetupRequest,
+    resolved_data_root: Path,
+    *,
+    launch_notice: str = "",
+    setup_csrf: str = "",
+):
+    fallback_command = ""
+    try:
+        result = await run_in_threadpool(
+            integration.launch_interactive_setup,
+            setup_request,
+        )
+        if result.fallback_command:
+            fallback_command = result.fallback_command
+        else:
+            fallback_command = integration.interactive_setup_fallback_command(
+                setup_request
+            )
+    except Exception as launch_error:
+        if not launch_notice:
+            launch_notice = str(launch_error).strip() or "Interactive setup could not be launched."
+        try:
+            fallback_command = integration.interactive_setup_fallback_command(
+                setup_request
+            )
+        except Exception:
+            return _setup_response(
+                request,
+                services,
+                status=status,
+                data_root_value=str(resolved_data_root),
+                integrations=integrations,
+                selected_integration=requested_integration,
+                selected_integration_name=selected_integration_name,
+                error=launch_notice,
+                setup_csrf=setup_csrf,
+            )
+    return _setup_response(
+        request,
+        services,
+        status=status,
+        waiting=True,
+        data_root_value=str(resolved_data_root),
+        integrations=integrations,
+        selected_integration=requested_integration,
+        selected_integration_name=selected_integration_name,
+        fallback_command=fallback_command,
+        launch_notice=launch_notice,
+        setup_csrf=setup_csrf,
     )
 
 
@@ -398,10 +481,18 @@ async def setup_launch(
     request: Request,
     services: FlowgencyServices = Depends(get_services),
 ):
+    form = await request.form()
+    csrf_token = str(form.get("setup_csrf", ""))
+    try:
+        owner = request.app.state.setup_access.require_http(
+            request, csrf_token, unsafe=True,
+        )
+    except SetupAccessDenied:
+        return JSONResponse({"error": "Local setup access required."}, status_code=403)
+
     status = inspect_setup_status(services.config_store)
     if status.state == "ready":
         return RedirectResponse("/", status_code=303)
-    form = await request.form()
     data_root_value = str(form.get("data_root", "")).strip()
     requested_integration = str(form.get("integration", "")).strip()
     integrations = _setup_integrations(services, data_root_value)
@@ -420,6 +511,7 @@ async def setup_launch(
             selected_integration=selected_integration,
             selected_integration_name=selected_integration_name,
             error="Choose an available integration.",
+            setup_csrf=csrf_token,
         )
     try:
         resolved_data_root = prepare_writable_directory(
@@ -436,6 +528,7 @@ async def setup_launch(
             selected_integration=selected_integration,
             selected_integration_name=selected_integration_name,
             error=str(exc),
+            setup_csrf=csrf_token,
         )
     integration = launchable_by_name[requested_integration]
     setup_request = InteractiveSetupRequest(
@@ -447,49 +540,61 @@ async def setup_launch(
             selected_integration=requested_integration,
         ),
     )
-    fallback_command = ""
-    launch_notice = ""
-    try:
-        result = await run_in_threadpool(
-            integration.launch_interactive_setup,
-            setup_request,
-        )
-        if result.fallback_command:
-            fallback_command = result.fallback_command
-        else:
-            fallback_command = integration.interactive_setup_fallback_command(
-                setup_request
-            )
-    except Exception as launch_error:
-        launch_notice = str(launch_error).strip() or "Interactive setup could not be launched."
+    connected = (
+        requested_integration == "copilot"
+        and getattr(integration, "connected_setup_available", lambda: False)()
+        and connected_process_available()
+    )
+    if connected:
+        fallback_command = integration.interactive_setup_fallback_command(setup_request)
+        launch = integration.connected_setup_launch(setup_request)
         try:
-            fallback_command = integration.interactive_setup_fallback_command(
-                setup_request
+            await request.app.state.setup_sessions.start(
+                owner, integration.name, launch, fallback_command
             )
-        except Exception:
-            return _setup_response(
+        except SetupSessionConflict as exc:
+            return JSONResponse(
+                {"error": str(exc), "session": "/setup/session"},
+                status_code=409,
+            )
+        except ConnectedLaunchError as exc:
+            if not exc.cleanup_confirmed:
+                return JSONResponse({"error": str(exc)}, status_code=409)
+            # A confirmed-clean failure frees the slot; fall back to the
+            # existing external launcher rather than leaving the user stuck.
+            return await _external_setup_launch(
                 request,
                 services,
-                status=status,
-                data_root_value=str(resolved_data_root),
-                integrations=integrations,
-                selected_integration=requested_integration,
-                selected_integration_name=launchable_by_name[
-                    requested_integration
-                ].display_name,
-                error=launch_notice,
+                status,
+                integrations,
+                requested_integration,
+                selected_integration_name,
+                integration,
+                setup_request,
+                resolved_data_root,
+                launch_notice=str(exc),
+                setup_csrf=csrf_token,
             )
-    return _setup_response(
+        except Exception as exc:
+            # No evidence the spawn attempt was cleaned up; never fall back
+            # to an external launch that could race a still-blocked slot.
+            return JSONResponse(
+                {"error": str(exc).strip() or "Setup session could not be started."},
+                status_code=409,
+            )
+        return RedirectResponse("/setup/session", status_code=303)
+
+    return await _external_setup_launch(
         request,
         services,
-        status=status,
-        waiting=True,
-        data_root_value=str(resolved_data_root),
-        integrations=integrations,
-        selected_integration=requested_integration,
-        selected_integration_name=launchable_by_name[requested_integration].display_name,
-        fallback_command=fallback_command,
-        launch_notice=launch_notice,
+        status,
+        integrations,
+        requested_integration,
+        selected_integration_name,
+        integration,
+        setup_request,
+        resolved_data_root,
+        setup_csrf=csrf_token,
     )
 
 

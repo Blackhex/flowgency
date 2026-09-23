@@ -7,6 +7,7 @@ from .agent_routines import router as agent_routines_router
 from .agents import router as agents_router
 from .git_evidence import router as git_evidence_router
 from .jobs import router as jobs_router
+from .setup_terminal import router as setup_terminal_router
 from .tickets import router as tickets_router
 from .workflow_library import router as workflow_library_router
 from .workflow_settings import router as workflow_settings_router
@@ -22,6 +23,7 @@ __all__ = [
     "agents_router",
     "git_evidence_router",
     "jobs_router",
+    "setup_terminal_router",
     "tickets_router",
     "workflow_library_router",
     "workflow_settings_router",

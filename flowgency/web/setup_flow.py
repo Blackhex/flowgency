@@ -8,6 +8,7 @@ import yaml
 
 from flowgency.configuration import ConfigStore, ValidationFailed
 from flowgency.integrations import BaseIntegration
+from flowgency.jobs.connected_process import connected_process_available
 
 
 SetupState = Literal["waiting", "invalid", "incomplete", "ready"]
@@ -87,7 +88,12 @@ def launchable_integrations(
     resolved_data_root = Path(data_root).expanduser().resolve()
     candidates: list[tuple[bool, int, str, str, BaseIntegration]] = []
     for integration in integrations.values():
-        if not integration.interactive_setup_available():
+        connected_available = getattr(
+            integration, "connected_setup_available", lambda: False
+        )()
+        if not integration.interactive_setup_available() and not (
+            connected_available and connected_process_available()
+        ):
             continue
         detected = integration.detect(resolved_data_root)
         candidates.append(

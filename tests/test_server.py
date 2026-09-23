@@ -1,5 +1,6 @@
 """Tests for web server startup and reload configuration."""
 
+import re
 from dataclasses import replace
 from pathlib import Path
 
@@ -11,6 +12,24 @@ import yaml
 from flowgency import app as app_mod
 from flowgency.configuration import ValidationFailed
 from flowgency.integrations import IntegrationError
+from flowgency.integrations.models import RuntimeLaunch
+from flowgency.jobs.connected_process import ConnectedLaunchError
+from flowgency.web.setup_sessions import SetupSessionConflict, SetupSessionManager
+from tests._connected_setup_helpers import FakeProcess
+
+_LOCAL_BASE_URL = "http://127.0.0.1:8500"
+_LOCAL_PEER = ("127.0.0.1", 50000)
+
+
+def _local_client() -> TestClient:
+    return TestClient(app_mod.app, base_url=_LOCAL_BASE_URL, client=_LOCAL_PEER)
+
+
+def _setup_csrf(client: TestClient) -> str:
+    page = client.get("/setup")
+    match = re.search(r'name="setup_csrf" value="([^"]+)"', page.text)
+    assert match is not None, page.text
+    return match.group(1)
 
 
 def _configure_existing_config(tmp_path: Path, monkeypatch) -> Path:
@@ -108,6 +127,22 @@ class _LaunchIntegration:
         if self._fallback_error is not None:
             raise self._fallback_error
         return self._fallback_command
+
+
+class _ConnectedLaunchIntegration(_LaunchIntegration):
+    def __init__(self, *args, connected_error: Exception | None = None, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.connected_requests = []
+        self._connected_error = connected_error
+
+    def connected_setup_available(self) -> bool:
+        return True
+
+    def connected_setup_launch(self, request) -> RuntimeLaunch:
+        self.connected_requests.append(request)
+        if self._connected_error is not None:
+            raise self._connected_error
+        return RuntimeLaunch(("copilot", "-i", request.prompt), request.data_root, {}, "connected")
 
 
 def test_run_server_normal_mode_uses_in_memory_app(tmp_path, monkeypatch):
@@ -378,9 +413,12 @@ def test_setup_launch_rejects_relative_data_root(tmp_path, monkeypatch):
         "flowgency.web.routes.admin_teams.launchable_integrations",
         lambda integrations, root: (_LaunchIntegration(),),
     )
-    response = TestClient(app_mod.app).post(
+    client = _local_client()
+    csrf = _setup_csrf(client)
+    response = client.post(
         "/setup/launch",
-        data={"data_root": "relative/Flowgency", "integration": "copilot"},
+        data={"data_root": "relative/Flowgency", "integration": "copilot", "setup_csrf": csrf},
+        headers={"Origin": _LOCAL_BASE_URL},
     )
 
     assert response.status_code == 200
@@ -395,15 +433,103 @@ def test_setup_launch_rejects_unavailable_integration(tmp_path, monkeypatch):
         "flowgency.web.routes.admin_teams.launchable_integrations",
         lambda integrations, root: (_LaunchIntegration("claude-code", "Claude Code"),),
     )
-    client = TestClient(app_mod.app)
+    client = _local_client()
+    csrf = _setup_csrf(client)
 
     response = client.post(
         "/setup/launch",
-        data={"data_root": str(data_root.resolve()), "integration": "copilot"},
+        data={"data_root": str(data_root.resolve()), "integration": "copilot", "setup_csrf": csrf},
+        headers={"Origin": _LOCAL_BASE_URL},
     )
 
     assert response.status_code == 200
     assert "Choose an available integration." in response.text
+
+
+def test_setup_launch_error_response_preserves_csrf_for_retry(tmp_path, monkeypatch):
+    _configure_missing_config(tmp_path, monkeypatch)
+    data_root = tmp_path / "Flowgency"
+    data_root.mkdir()
+    monkeypatch.setattr(
+        "flowgency.web.routes.admin_teams.launchable_integrations",
+        lambda integrations, root: (_LaunchIntegration(),),
+    )
+    client = _local_client()
+    csrf = _setup_csrf(client)
+
+    response = client.post(
+        "/setup/launch",
+        data={
+            "data_root": str(data_root.resolve()),
+            "integration": "not-registered",
+            "setup_csrf": csrf,
+        },
+        headers={"Origin": _LOCAL_BASE_URL},
+    )
+
+    assert response.status_code == 200
+    match = re.search(r'name="setup_csrf" value="([^"]+)"', response.text)
+    assert match is not None, response.text
+    retry_csrf = match.group(1)
+    assert retry_csrf == csrf
+
+    retry = client.post(
+        "/setup/launch",
+        data={
+            "data_root": str(data_root.resolve()),
+            "integration": "copilot",
+            "setup_csrf": retry_csrf,
+        },
+        headers={"Origin": _LOCAL_BASE_URL},
+    )
+    assert retry.status_code == 200
+    assert "Waiting for setup to complete" in retry.text
+
+
+def test_setup_launch_waiting_response_preserves_csrf_for_relaunch(tmp_path, monkeypatch):
+    _configure_missing_config(tmp_path, monkeypatch)
+    data_root = tmp_path / "Flowgency"
+    data_root.mkdir()
+    integration = _LaunchIntegration(
+        name="custom-launcher",
+        display_name="Custom Launcher",
+        fallback_command="custom-launcher --resume-setup",
+        error=IntegrationError("Launch failed."),
+    )
+    monkeypatch.setattr(
+        "flowgency.web.routes.admin_teams.launchable_integrations",
+        lambda integrations, root: (integration,),
+    )
+    client = _local_client()
+    csrf = _setup_csrf(client)
+
+    response = client.post(
+        "/setup/launch",
+        data={
+            "data_root": str(data_root.resolve()),
+            "integration": "custom-launcher",
+            "setup_csrf": csrf,
+        },
+        headers={"Origin": _LOCAL_BASE_URL},
+    )
+    assert response.status_code == 200
+    assert "Waiting for setup to complete" in response.text
+    match = re.search(r'name="setup_csrf" value="([^"]+)"', response.text)
+    assert match is not None, response.text
+    relaunch_csrf = match.group(1)
+    assert relaunch_csrf == csrf
+
+    relaunch = client.post(
+        "/setup/launch",
+        data={
+            "data_root": str(data_root.resolve()),
+            "integration": "custom-launcher",
+            "setup_csrf": relaunch_csrf,
+        },
+        headers={"Origin": _LOCAL_BASE_URL},
+    )
+    assert relaunch.status_code == 200
+    assert "Waiting for setup to complete" in relaunch.text
 
 
 def test_setup_launch_does_not_write_config(tmp_path, monkeypatch):
@@ -426,11 +552,13 @@ def test_setup_launch_does_not_write_config(tmp_path, monkeypatch):
         "flowgency.web.routes.admin_teams.run_in_threadpool",
         fake_run_in_threadpool,
     )
-    client = TestClient(app_mod.app)
+    client = _local_client()
+    csrf = _setup_csrf(client)
 
     response = client.post(
         "/setup/launch",
-        data={"data_root": str(data_root.resolve()), "integration": "copilot"},
+        data={"data_root": str(data_root.resolve()), "integration": "copilot", "setup_csrf": csrf},
+        headers={"Origin": _LOCAL_BASE_URL},
     )
 
     assert response.status_code == 200
@@ -507,14 +635,17 @@ def test_setup_launch_uses_integration_owned_fallback_when_launch_fails(
         "flowgency.web.routes.admin_teams.run_in_threadpool",
         fake_run_in_threadpool,
     )
-    client = TestClient(app_mod.app)
+    client = _local_client()
+    csrf = _setup_csrf(client)
 
     response = client.post(
         "/setup/launch",
         data={
             "data_root": str(data_root.resolve()),
             "integration": "custom-launcher",
+            "setup_csrf": csrf,
         },
+        headers={"Origin": _LOCAL_BASE_URL},
     )
 
     assert response.status_code == 200
@@ -532,11 +663,13 @@ def test_setup_launch_creates_and_uses_missing_data_root(tmp_path, monkeypatch):
         "flowgency.web.routes.admin_teams.launchable_integrations",
         lambda integrations, root: (integration,),
     )
-    client = TestClient(app_mod.app)
+    client = _local_client()
+    csrf = _setup_csrf(client)
 
     response = client.post(
         "/setup/launch",
-        data={"data_root": str(data_root), "integration": "copilot"},
+        data={"data_root": str(data_root), "integration": "copilot", "setup_csrf": csrf},
+        headers={"Origin": _LOCAL_BASE_URL},
     )
 
     assert response.status_code == 200
@@ -561,16 +694,383 @@ def test_setup_launch_returns_to_form_when_launch_and_fallback_fail(
         "flowgency.web.routes.admin_teams.launchable_integrations",
         lambda integrations, root: (integration,),
     )
+    client = _local_client()
+    csrf = _setup_csrf(client)
 
-    response = TestClient(app_mod.app).post(
+    response = client.post(
         "/setup/launch",
-        data={"data_root": str(data_root), "integration": "copilot"},
+        data={"data_root": str(data_root), "integration": "copilot", "setup_csrf": csrf},
+        headers={"Origin": _LOCAL_BASE_URL},
     )
 
     assert response.status_code == 200
     assert data_root.is_dir()
     assert "Bundled setup skill is unavailable." in response.text
     assert "Waiting for setup to complete" not in response.text
+
+
+def test_connected_launch_is_local_idempotent_and_streams_output(tmp_path, monkeypatch):
+    config_path = _configure_missing_config(tmp_path, monkeypatch)
+    root = tmp_path / "Flowgency"
+    integration = _ConnectedLaunchIntegration()
+    monkeypatch.setattr(
+        "flowgency.web.routes.admin_teams.launchable_integrations",
+        lambda integrations, data_root: (integration,),
+    )
+    monkeypatch.setattr("flowgency.web.routes.admin_teams.connected_process_available", lambda: True)
+    process = FakeProcess()
+    launches = []
+
+    def start(launch):
+        launches.append(launch)
+        return process
+
+    manager = SetupSessionManager(process_factory=start)
+    monkeypatch.setattr(app_mod, "SetupSessionManager", lambda: manager)
+    with TestClient(app_mod.app, base_url="http://127.0.0.1:8500", client=("127.0.0.1", 50001)) as client:
+        page = client.get("/setup")
+        csrf = re.search(r'name="setup_csrf" value="([^"]+)"', page.text).group(1)
+        form = {"data_root": str(root), "integration": "copilot", "setup_csrf": csrf}
+        headers = {"Origin": "http://127.0.0.1:8500"}
+        first = client.post("/setup/launch", data=form, headers=headers, follow_redirects=False)
+        assert first.status_code == 303 and first.headers["location"] == "/setup/session"
+        repeat = client.post("/setup/launch", data=form, headers=headers, follow_redirects=False)
+        assert repeat.status_code == 303 and repeat.headers["location"] == "/setup/session"
+        assert len(integration.connected_requests) == 2
+        assert len(launches) == 1
+        assert integration.requests == []
+        assert not config_path.exists()
+        assert client.get("/setup/session/state").json()["state"] == "running"
+        with client.websocket_connect("ws://127.0.0.1:8500/setup/session/ws", headers=headers) as ws:
+            assert ws.receive_json()["state"] == "running"
+            process.output.put(b"Hello from Copilot")
+            assert ws.receive_bytes() == b"Hello from Copilot"
+            ws.send_json({"type": "input", "data": "yes\r"})
+
+
+def test_setup_launch_rejects_remote_peer_without_creating_root_or_launching(
+    tmp_path, monkeypatch
+):
+    _configure_missing_config(tmp_path, monkeypatch)
+    data_root = tmp_path / "Flowgency"
+    integration = _LaunchIntegration()
+    monkeypatch.setattr(
+        "flowgency.web.routes.admin_teams.launchable_integrations",
+        lambda integrations, root: (integration,),
+    )
+    local_client = _local_client()
+    csrf = _setup_csrf(local_client)
+    remote_client = TestClient(app_mod.app)
+
+    response = remote_client.post(
+        "/setup/launch",
+        data={"data_root": str(data_root), "integration": "copilot", "setup_csrf": csrf},
+    )
+
+    assert response.status_code == 403
+    assert not data_root.exists()
+    assert integration.requests == []
+
+
+def test_setup_launch_rejects_invalid_csrf(tmp_path, monkeypatch):
+    _configure_missing_config(tmp_path, monkeypatch)
+    data_root = tmp_path / "Flowgency"
+    integration = _LaunchIntegration()
+    monkeypatch.setattr(
+        "flowgency.web.routes.admin_teams.launchable_integrations",
+        lambda integrations, root: (integration,),
+    )
+    client = _local_client()
+    _setup_csrf(client)
+
+    response = client.post(
+        "/setup/launch",
+        data={"data_root": str(data_root), "integration": "copilot", "setup_csrf": "not-the-token"},
+        headers={"Origin": _LOCAL_BASE_URL},
+    )
+
+    assert response.status_code == 403
+    assert not data_root.exists()
+    assert integration.requests == []
+
+
+def test_setup_launch_rejects_mismatched_origin(tmp_path, monkeypatch):
+    _configure_missing_config(tmp_path, monkeypatch)
+    data_root = tmp_path / "Flowgency"
+    integration = _LaunchIntegration()
+    monkeypatch.setattr(
+        "flowgency.web.routes.admin_teams.launchable_integrations",
+        lambda integrations, root: (integration,),
+    )
+    client = _local_client()
+    csrf = _setup_csrf(client)
+
+    response = client.post(
+        "/setup/launch",
+        data={"data_root": str(data_root), "integration": "copilot", "setup_csrf": csrf},
+        headers={"Origin": "http://evil.example"},
+    )
+
+    assert response.status_code == 403
+    assert not data_root.exists()
+    assert integration.requests == []
+
+
+def _start_connected_session(tmp_path, monkeypatch, *, process_factory=None):
+    config_path = _configure_missing_config(tmp_path, monkeypatch)
+    root = tmp_path / "Flowgency"
+    integration = _ConnectedLaunchIntegration()
+    monkeypatch.setattr(
+        "flowgency.web.routes.admin_teams.launchable_integrations",
+        lambda integrations, data_root: (integration,),
+    )
+    monkeypatch.setattr("flowgency.web.routes.admin_teams.connected_process_available", lambda: True)
+    process = FakeProcess()
+    manager = SetupSessionManager(process_factory=process_factory or (lambda launch: process))
+    monkeypatch.setattr(app_mod, "SetupSessionManager", lambda: manager)
+    return config_path, root, integration, process, manager
+
+
+def test_connected_session_stop_confirms_process_and_redirects(tmp_path, monkeypatch):
+    config_path, root, integration, process, manager = _start_connected_session(tmp_path, monkeypatch)
+    with TestClient(app_mod.app, base_url=_LOCAL_BASE_URL, client=("127.0.0.1", 50002)) as client:
+        csrf = _setup_csrf(client)
+        headers = {"Origin": _LOCAL_BASE_URL}
+        launch = client.post(
+            "/setup/launch",
+            data={"data_root": str(root), "integration": "copilot", "setup_csrf": csrf},
+            headers=headers,
+            follow_redirects=False,
+        )
+        assert launch.status_code == 303
+
+        stop = client.post(
+            "/setup/session/stop",
+            data={"setup_csrf": csrf},
+            headers=headers,
+            follow_redirects=False,
+        )
+
+        assert stop.status_code == 303
+        assert stop.headers["location"] == "/setup"
+        assert process.running is False
+
+
+def test_setup_session_view_and_status_stay_ready_while_session_runs(
+    tmp_path, monkeypatch, raw_config
+):
+    config_path, root, integration, process, manager = _start_connected_session(tmp_path, monkeypatch)
+    with TestClient(app_mod.app, base_url=_LOCAL_BASE_URL, client=("127.0.0.1", 50003)) as client:
+        csrf = _setup_csrf(client)
+        headers = {"Origin": _LOCAL_BASE_URL}
+        launch = client.post(
+            "/setup/launch",
+            data={"data_root": str(root), "integration": "copilot", "setup_csrf": csrf},
+            headers=headers,
+            follow_redirects=False,
+        )
+        assert launch.status_code == 303
+
+        config_path.write_text(
+            yaml.safe_dump(_materialize_ready_config(tmp_path, raw_config), sort_keys=False),
+            encoding="utf-8",
+        )
+
+        assert client.get("/setup/status").json() == {"state": "ready", "redirect": "/"}
+        assert client.get("/setup/session").status_code == 200
+
+        stop = client.post(
+            "/setup/session/stop",
+            data={"setup_csrf": csrf},
+            headers=headers,
+            follow_redirects=False,
+        )
+        assert stop.status_code == 303
+        assert stop.headers["location"] == "/"
+
+
+def test_setup_session_state_and_ws_reject_foreign_cookie(tmp_path, monkeypatch):
+    config_path, root, integration, process, manager = _start_connected_session(tmp_path, monkeypatch)
+    with TestClient(app_mod.app, base_url=_LOCAL_BASE_URL, client=("127.0.0.1", 50004)) as client:
+        csrf = _setup_csrf(client)
+        headers = {"Origin": _LOCAL_BASE_URL}
+        launch = client.post(
+            "/setup/launch",
+            data={"data_root": str(root), "integration": "copilot", "setup_csrf": csrf},
+            headers=headers,
+            follow_redirects=False,
+        )
+        assert launch.status_code == 303
+
+        client.cookies.set("flowgency_setup", "forged.notarealsignature")
+
+        state_response = client.get("/setup/session/state")
+        assert state_response.status_code == 403
+
+        from starlette.websockets import WebSocketDisconnect
+
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            with client.websocket_connect("ws://127.0.0.1:8500/setup/session/ws", headers=headers):
+                pass
+        assert exc_info.value.code == 1008
+
+
+def test_setup_session_ws_rejects_malformed_and_oversized_messages(tmp_path, monkeypatch):
+    config_path, root, integration, process, manager = _start_connected_session(tmp_path, monkeypatch)
+    with TestClient(app_mod.app, base_url=_LOCAL_BASE_URL, client=("127.0.0.1", 50005)) as client:
+        csrf = _setup_csrf(client)
+        headers = {"Origin": _LOCAL_BASE_URL}
+        launch = client.post(
+            "/setup/launch",
+            data={"data_root": str(root), "integration": "copilot", "setup_csrf": csrf},
+            headers=headers,
+            follow_redirects=False,
+        )
+        assert launch.status_code == 303
+
+        from starlette.websockets import WebSocketDisconnect
+
+        with pytest.raises(WebSocketDisconnect) as malformed:
+            with client.websocket_connect("ws://127.0.0.1:8500/setup/session/ws", headers=headers) as ws:
+                ws.receive_json()
+                ws.send_text("not json")
+                ws.receive_text()
+        assert malformed.value.code == 1003
+
+        with pytest.raises(WebSocketDisconnect) as oversized:
+            with client.websocket_connect("ws://127.0.0.1:8500/setup/session/ws", headers=headers) as ws:
+                ws.receive_json()
+                ws.send_text("x" * 70000)
+                ws.receive_text()
+        assert oversized.value.code == 1009
+
+
+def test_connected_launch_reports_unconfirmed_cleanup_without_fallback(tmp_path, monkeypatch):
+    def failing_factory(launch):
+        raise ConnectedLaunchError("could not confirm stopped", cleanup_confirmed=False)
+
+    config_path, root, integration, process, manager = _start_connected_session(
+        tmp_path, monkeypatch, process_factory=failing_factory
+    )
+    with _local_client() as client:
+        csrf = _setup_csrf(client)
+
+        response = client.post(
+            "/setup/launch",
+            data={"data_root": str(root), "integration": "copilot", "setup_csrf": csrf},
+            headers={"Origin": _LOCAL_BASE_URL},
+        )
+
+        assert response.status_code == 409
+        assert integration.requests == []
+
+
+def test_connected_launch_reports_generic_spawn_error_without_fallback(tmp_path, monkeypatch):
+    def failing_factory(launch):
+        raise RuntimeError("boom")
+
+    config_path, root, integration, process, manager = _start_connected_session(
+        tmp_path, monkeypatch, process_factory=failing_factory
+    )
+    with _local_client() as client:
+        csrf = _setup_csrf(client)
+
+        response = client.post(
+            "/setup/launch",
+            data={"data_root": str(root), "integration": "copilot", "setup_csrf": csrf},
+            headers={"Origin": _LOCAL_BASE_URL},
+        )
+
+        assert response.status_code == 409
+        assert integration.requests == []
+
+
+def test_connected_launch_confirmed_clean_failure_falls_back_to_external_launch(
+    tmp_path, monkeypatch
+):
+    def failing_factory(launch):
+        raise ConnectedLaunchError("cleaned up", cleanup_confirmed=True)
+
+    config_path, root, integration, process, manager = _start_connected_session(
+        tmp_path, monkeypatch, process_factory=failing_factory
+    )
+    with _local_client() as client:
+        csrf = _setup_csrf(client)
+
+        response = client.post(
+            "/setup/launch",
+            data={"data_root": str(root), "integration": "copilot", "setup_csrf": csrf},
+            headers={"Origin": _LOCAL_BASE_URL},
+        )
+
+        assert response.status_code == 200
+        assert "Waiting for setup to complete" in response.text
+        assert integration.requests != []
+
+
+def test_connected_launch_conflict_never_replaces_running_session(tmp_path, monkeypatch):
+    config_path, root, integration, process, manager = _start_connected_session(tmp_path, monkeypatch)
+    with TestClient(app_mod.app, base_url=_LOCAL_BASE_URL, client=("127.0.0.1", 50006)) as client:
+        csrf = _setup_csrf(client)
+        headers = {"Origin": _LOCAL_BASE_URL}
+        launch = client.post(
+            "/setup/launch",
+            data={"data_root": str(root), "integration": "copilot", "setup_csrf": csrf},
+            headers=headers,
+            follow_redirects=False,
+        )
+        assert launch.status_code == 303
+
+        other_root = root.parent / "Other"
+        conflict = client.post(
+            "/setup/launch",
+            data={"data_root": str(other_root), "integration": "copilot", "setup_csrf": csrf},
+            headers=headers,
+            follow_redirects=False,
+        )
+
+        assert conflict.status_code == 409
+        assert conflict.json()["session"] == "/setup/session"
+        assert client.get("/setup/session/state").json()["state"] == "running"
+
+
+def test_send_output_reports_unavailable_when_session_vanishes_without_snapshot():
+    import asyncio
+
+    from flowgency.web.routes.setup_terminal import _send_output
+
+    class _FakeWebSocket:
+        def __init__(self):
+            self.sent_json = []
+
+        async def send_json(self, payload):
+            self.sent_json.append(payload)
+
+        async def send_bytes(self, data):  # pragma: no cover - not exercised here
+            raise AssertionError("no output expected")
+
+    class _FakeManager:
+        def snapshot(self, owner):
+            return None
+
+        async def consumed(self, owner, connection_id, byte_count):  # pragma: no cover
+            raise AssertionError("not reached")
+
+    async def _run():
+        websocket = _FakeWebSocket()
+        manager = _FakeManager()
+        pending: asyncio.Queue[bytes | None] = asyncio.Queue()
+        pending.put_nowait(None)
+        await _send_output(websocket, manager, "owner", "connection", pending)
+        assert websocket.sent_json == [
+            {
+                "type": "state",
+                "state": "unavailable",
+                "message": "Setup session is no longer available.",
+            }
+        ]
+
+    asyncio.run(_run())
 
 
 def test_setup_browse_returns_directory_listing(tmp_path, monkeypatch):

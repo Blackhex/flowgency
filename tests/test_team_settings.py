@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shutil
 from copy import deepcopy
 from html.parser import HTMLParser
@@ -10,6 +11,20 @@ from fastapi.testclient import TestClient
 
 from flowgency.configuration.store import ConfigStore
 from flowgency import app as app_mod
+
+_LOCAL_BASE_URL = "http://127.0.0.1:8500"
+_LOCAL_PEER = ("127.0.0.1", 50000)
+
+
+def _local_client() -> TestClient:
+    return TestClient(app_mod.app, base_url=_LOCAL_BASE_URL, client=_LOCAL_PEER)
+
+
+def _setup_csrf(client: TestClient) -> str:
+    page = client.get("/setup")
+    match = re.search(r'name="setup_csrf" value="([^"]+)"', page.text)
+    assert match is not None, page.text
+    return match.group(1)
 
 
 class _FormParser(HTMLParser):
@@ -233,14 +248,17 @@ def test_setup_launch_preserves_existing_bootstrap_config(monkeypatch, tmp_path)
         "flowgency.web.routes.admin_teams.launchable_integrations",
         lambda integrations, root: (integration,),
     )
-    client = TestClient(app_mod.app)
+    client = _local_client()
+    csrf = _setup_csrf(client)
 
     response = client.post(
         "/setup/launch",
         data={
             "data_root": str(data_root.resolve()),
             "integration": "copilot",
+            "setup_csrf": csrf,
         },
+        headers={"Origin": _LOCAL_BASE_URL},
         follow_redirects=False,
     )
 

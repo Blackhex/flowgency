@@ -94,6 +94,7 @@
           <form method="POST" action="/setup/launch">
             <input type="hidden" name="data_root" value="{{ data_root_value }}">
             <input type="hidden" name="integration" value="{{ selected_integration }}">
+            <input type="hidden" name="setup_csrf" value="{{ setup_csrf }}">
             <button type="submit" class="px-4 py-2.5 bg-flowgency-600 text-white text-sm font-semibold rounded-lg hover:bg-flowgency-700 transition-colors">
               Relaunch {{ selected_integration_name }}
             </button>
@@ -102,6 +103,7 @@
       </div>
       {% else %}
       <form method="POST" action="/setup/launch" class="space-y-5">
+        <input type="hidden" name="setup_csrf" value="{{ setup_csrf }}">
         <div>
           <label for="data_root" class="block text-sm font-medium text-gray-700 mb-1.5">Flowgency data root</label>
           <div class="flex flex-col gap-3 md:flex-row">

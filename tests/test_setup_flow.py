@@ -278,18 +278,31 @@ def test_status_is_ready_only_with_a_team(tmp_path: Path, raw_config) -> None:
 
 
 class _Integration(BaseIntegration):
-    def __init__(self, name: str, display_name: str, priority: int, *, interactive: bool, detected: bool) -> None:
+    def __init__(
+        self,
+        name: str,
+        display_name: str,
+        priority: int,
+        *,
+        interactive: bool,
+        detected: bool,
+        connected: bool = False,
+    ) -> None:
         self.name = name
         self.display_name = display_name
         self.detect_priority = priority
         self._interactive = interactive
         self._detected = detected
+        self._connected = connected
 
     def interactive_setup_available(self) -> bool:
         return self._interactive
 
     def detect(self, agent_dir: Path) -> bool:
         return self._detected
+
+    def connected_setup_available(self) -> bool:
+        return self._connected
 
 
 def test_launchable_integrations_filter_and_order(tmp_path: Path) -> None:
@@ -314,6 +327,22 @@ def test_launchable_integrations_prefers_lower_priority_for_nondetected(tmp_path
     result = launchable_integrations(integrations, tmp_path)
 
     assert tuple(item.name for item in result) == ("earlier", "later")
+
+
+def test_launchable_integrations_keeps_copilot_when_only_pty_exists(tmp_path: Path, monkeypatch):
+    integration = _Integration("copilot", "GitHub Copilot", 5, interactive=False, detected=False)
+    monkeypatch.setattr(integration, "connected_setup_available", lambda: True)
+    monkeypatch.setattr("flowgency.web.setup_flow.connected_process_available", lambda: True)
+    assert launchable_integrations({"copilot": integration}, tmp_path) == (integration,)
+
+
+def test_launchable_integrations_drops_connected_only_integration_without_host_pty(
+    tmp_path: Path, monkeypatch
+) -> None:
+    integration = _Integration("copilot", "GitHub Copilot", 5, interactive=False, detected=False)
+    monkeypatch.setattr(integration, "connected_setup_available", lambda: True)
+    monkeypatch.setattr("flowgency.web.setup_flow.connected_process_available", lambda: False)
+    assert launchable_integrations({"copilot": integration}, tmp_path) == ()
 
 
 def test_list_directories_returns_only_sorted_child_directories(
