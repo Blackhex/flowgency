@@ -209,6 +209,11 @@ async def setup_session_ws(websocket: WebSocket) -> None:
         # loops without either one closing the socket; send the close frame
         # here so the ASGI task always finishes instead of hanging forever.
         if websocket.application_state == WebSocketState.CONNECTED:
-            await websocket.close()
+            try:
+                await websocket.close()
+            except WebSocketDisconnect:
+                # The peer already disconnected (e.g. a real transport raises
+                # on send once the client is gone); nothing left to notify.
+                pass
     finally:
         await manager.detach(owner, connection_id)

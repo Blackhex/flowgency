@@ -946,6 +946,59 @@ def test_setup_session_ws_rejects_malformed_and_oversized_messages(tmp_path, mon
         assert oversized.value.code == 1009
 
 
+def test_setup_session_ws_survives_late_close_after_client_disconnect(tmp_path, monkeypatch):
+    """A real transport raises when the server tries to close after the peer
+    already disconnected; Starlette converts that OSError into
+    WebSocketDisconnect(1006). TestClient's in-memory transport never fails
+    this way on its own, so simulate the failure directly on WebSocket.close.
+    """
+    from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
+
+    original_close = WebSocket.close
+
+    async def close_like_a_dead_transport(self, code: int = 1000, reason: str | None = None) -> None:
+        if self.client_state == WebSocketState.DISCONNECTED:
+            self.application_state = WebSocketState.DISCONNECTED
+            raise WebSocketDisconnect(code=1006)
+        await original_close(self, code=code, reason=reason)
+
+    monkeypatch.setattr(WebSocket, "close", close_like_a_dead_transport)
+
+    original_detach = SetupSessionManager.detach
+    detach_completed = threading.Event()
+
+    async def detach_and_signal(self, owner: str, connection_id: str) -> None:
+        try:
+            await original_detach(self, owner, connection_id)
+        finally:
+            detach_completed.set()
+
+    monkeypatch.setattr(SetupSessionManager, "detach", detach_and_signal)
+
+    config_path, root, integration, process, manager = _start_connected_session(tmp_path, monkeypatch)
+    with TestClient(app_mod.app, base_url=_LOCAL_BASE_URL, client=("127.0.0.1", 50008)) as client:
+        csrf = _setup_csrf(client)
+        headers = {"Origin": _LOCAL_BASE_URL}
+        launch = client.post(
+            "/setup/launch",
+            data={"data_root": str(root), "integration": "copilot", "setup_csrf": csrf},
+            headers=headers,
+            follow_redirects=False,
+        )
+        assert launch.status_code == 303
+
+        session = client.websocket_connect("ws://127.0.0.1:8500/setup/session/ws", headers=headers)
+        ws = session.__enter__()
+        try:
+            assert ws.receive_json()["state"] == "running"
+            ws.close()  # simulate the browser tab closing
+            assert detach_completed.wait(timeout=5), "server never finished handling the disconnect"
+        finally:
+            session.__exit__(None, None, None)
+
+        assert client.get("/setup/session/state").json()["state"] == "running"
+
+
 def test_setup_session_ws_attached_during_starting_survives_confirmed_clean_launch_failure(
     tmp_path, monkeypatch
 ):
