@@ -1,6 +1,7 @@
 """Tests for web server startup and reload configuration."""
 
 import re
+import threading
 from dataclasses import replace
 from pathlib import Path
 
@@ -943,6 +944,87 @@ def test_setup_session_ws_rejects_malformed_and_oversized_messages(tmp_path, mon
                 ws.send_text("x" * 70000)
                 ws.receive_text()
         assert oversized.value.code == 1009
+
+
+def test_setup_session_ws_attached_during_starting_survives_confirmed_clean_launch_failure(
+    tmp_path, monkeypatch
+):
+    from starlette.websockets import WebSocketDisconnect
+
+    factory_entered = threading.Event()
+    release_factory = threading.Event()
+
+    def blocking_then_clean_failure(launch):
+        factory_entered.set()
+        assert release_factory.wait(timeout=5), "test never released the fake spawn"
+        raise ConnectedLaunchError("cleaned up", cleanup_confirmed=True)
+
+    config_path, root, integration, process, manager = _start_connected_session(
+        tmp_path, monkeypatch, process_factory=blocking_then_clean_failure
+    )
+    launch_result: dict[str, object] = {}
+    ws_result: dict[str, object] = {}
+    with TestClient(app_mod.app, base_url=_LOCAL_BASE_URL, client=("127.0.0.1", 50007)) as client:
+        csrf = _setup_csrf(client)
+        headers = {"Origin": _LOCAL_BASE_URL}
+
+        def run_launch() -> None:
+            try:
+                launch_result["response"] = client.post(
+                    "/setup/launch",
+                    data={"data_root": str(root), "integration": "copilot", "setup_csrf": csrf},
+                    headers=headers,
+                    follow_redirects=False,
+                )
+            except Exception as exc:  # pragma: no cover - asserted below
+                launch_result["error"] = exc
+
+        launch_thread = threading.Thread(target=run_launch, daemon=True)
+        launch_thread.start()
+        try:
+            assert factory_entered.wait(timeout=5), "connected launch never reached the fake spawn"
+
+            def run_ws() -> None:
+                try:
+                    with client.websocket_connect(
+                        "ws://127.0.0.1:8500/setup/session/ws", headers=headers
+                    ) as ws:
+                        ws_result["starting"] = ws.receive_json()
+                        release_factory.set()
+                        ws_result["unavailable"] = ws.receive_json()
+                        ws.receive_text()
+                except WebSocketDisconnect as exc:
+                    ws_result["disconnect_code"] = exc.code
+                except Exception as exc:  # pragma: no cover - asserted below
+                    ws_result["error"] = exc
+
+            ws_thread = threading.Thread(target=run_ws, daemon=True)
+            ws_thread.start()
+            ws_thread.join(timeout=5)
+            assert not ws_thread.is_alive(), (
+                "WS attach-during-starting handling hung instead of closing cleanly"
+            )
+        finally:
+            release_factory.set()
+            launch_thread.join(timeout=5)
+            assert not launch_thread.is_alive(), "connected launch fallback hung"
+
+        assert "error" not in ws_result, ws_result.get("error")
+        assert ws_result["starting"]["state"] == "starting"
+        assert ws_result["unavailable"] == {
+            "type": "state",
+            "state": "unavailable",
+            "message": "Setup session is no longer available.",
+        }
+        assert ws_result.get("disconnect_code") == 1000
+
+        assert "error" not in launch_result, launch_result.get("error")
+        response = launch_result["response"]
+        assert response.status_code == 200
+        assert "Waiting for setup to complete" in response.text
+        assert integration.requests != []
+
+        assert client.get("/setup/session/state").status_code == 404
 
 
 def test_connected_launch_reports_unconfirmed_cleanup_without_fallback(tmp_path, monkeypatch):
