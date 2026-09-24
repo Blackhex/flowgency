@@ -8,6 +8,7 @@ import json
 import anyio
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, RedirectResponse
+from starlette.websockets import WebSocketState
 
 from flowgency.web.dependencies import FlowgencyServices, get_services
 from flowgency.web.routes.admin_teams import _setup_response, _setup_status_with_fresh_services
@@ -204,5 +205,10 @@ async def setup_session_ws(websocket: WebSocket) -> None:
         async with anyio.create_task_group() as task_group:
             task_group.start_soon(_run_sender, task_group)
             task_group.start_soon(_run_receiver, task_group)
+        # A terminal state message (e.g. the session vanished) ends both
+        # loops without either one closing the socket; send the close frame
+        # here so the ASGI task always finishes instead of hanging forever.
+        if websocket.application_state == WebSocketState.CONNECTED:
+            await websocket.close()
     finally:
         await manager.detach(owner, connection_id)
