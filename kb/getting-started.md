@@ -26,6 +26,8 @@ continues to launch Copilot in a separate console, with a copyable fallback
 command; it does not offer connected setup. On POSIX, use the external terminal
 if the PTY cannot start. Closing the browser tab does not stop a connected
 session, but a server restart ends its in-memory connection and transcript.
+This release's native Windows checks do not qualify POSIX connected mode;
+validate it on a native POSIX host before relying on it in production.
 
 On first run, open `/setup` and choose the data root and supported integration to launch `flowgency-setup`. After setup, create reusable blueprints, Agent Skills, and shared prompts in Agent Library. Open the team's Agents page to add explicit instances that select a blueprint and integration. Configure identity, private prompts, runtime overrides, routines, and semantic memory from Agent Detail.
 

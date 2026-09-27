@@ -57,6 +57,8 @@ On supported POSIX hosts, open setup from a browser on the same computer as
 Flowgency to run GitHub Copilot setup in the page's terminal; Windows keeps
 launching Copilot in a separate console with a copyable fallback command, and
 a server restart ends an in-memory connected session and its transcript.
+Native Windows checks do not qualify POSIX connected mode; validate it on a
+native POSIX host before relying on it in production.
 
 ## Configuration
 
