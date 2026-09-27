@@ -167,6 +167,9 @@ sequences, and bound incoming controls and outbound queues.
   WebSocket paths, including remote clients and cross-origin browser requests.
   Cover both connected and external launch POSTs: a remote request naming a
   missing data root returns 403 without creating the root or launching an agent.
+  A client from a separate OS network stack is sufficient for the live remote
+  smoke check when the server logs a non-loopback peer and the rejected launch
+  leaves its selected root absent; a separate physical device is not required.
 - Test configuration readiness separately from process exit, automatic
   redirect with Copilot still running, dashboard return and Stop, disconnected
   polling, relaunch after failure, and startup without PTY support.
