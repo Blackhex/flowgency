@@ -22,6 +22,7 @@ COORDINATION_PATHS = (
 )
 CONTENT_SCAN_EXCLUSIONS = (
     ":(exclude)flowgency/static/lucide.min.js",
+    ":(exclude)flowgency/static/setup-terminal.js",
     ":(exclude)package-lock.json",
 )
 

@@ -28,6 +28,10 @@ test = [
     "pytest>=7",
     "httpx>=0.24",
     "Pillow>=10",
+    # The production Windows uvicorn dependency intentionally omits websocket
+    # support (connected setup is disabled there); the Playwright UI harness
+    # still needs a real WebSocket upgrade to exercise the connected terminal.
+    "websockets>=12,<14",
 ]
 
 [project.scripts]

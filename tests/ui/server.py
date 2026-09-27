@@ -20,12 +20,15 @@ from urllib.request import urlopen
 
 import yaml
 from fastapi import HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 
 from flowgency.configuration.models import MemorySelector
 from flowgency.configuration.store import ConfigStore
 from flowgency.fs.atomic import atomic_write_bytes
 from flowgency.fs.locks import exclusive_lock
-from flowgency.integrations import REGISTRY
+from flowgency.integrations import REGISTRY, BaseIntegration
+from flowgency.integrations.models import InteractiveSetupRequest, RuntimeLaunch
+from flowgency.jobs.connected_process import connected_process_available as _REAL_CONNECTED_PROCESS_AVAILABLE
 from flowgency.jobs.models import JobHandle
 from flowgency.jobs.authority import JobStore
 from flowgency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
@@ -45,7 +48,13 @@ FIXED_NOW = "2026-07-16T12:00:00+00:00"
 UI_RESET_PATH = "/__ui/reset"
 ACTIVITY_LOGS_FIXTURE = "agent-activity-logs"
 GIT_EVIDENCE_FIXTURE = "git-evidence"
-SUPPORTED_UI_FIXTURES = frozenset({"default", ACTIVITY_LOGS_FIXTURE, GIT_EVIDENCE_FIXTURE})
+CONNECTED_SETUP_FIXTURE = "connected-setup"
+SUPPORTED_UI_FIXTURES = frozenset(
+    {"default", ACTIVITY_LOGS_FIXTURE, GIT_EVIDENCE_FIXTURE, CONNECTED_SETUP_FIXTURE}
+)
+# Small enough that a browser test can exceed it deliberately (via the emit
+# endpoint below) without pushing megabytes through a fake PTY queue.
+CONNECTED_SETUP_REPLAY_LIMIT = 4096
 GIT_EVIDENCE_TICKET_ID = "fixture-git-evidence"
 GIT_EVIDENCE_REF = "refs/heads/main"
 GIT_EVIDENCE_INDEX = "fixture-index"
@@ -162,7 +171,92 @@ def _ui_submit_job_request(request, launcher=None) -> JobHandle:
     return JobHandle(spec.job_id, "queued", authority.path, None)
 
 
+class FakeConnectedCopilotIntegration(BaseIntegration):
+    """Stands in for the real Copilot integration only while the
+    ``connected-setup`` fixture is active, so a browser test never resolves
+    or launches a genuine Copilot CLI. It always reports itself as detected
+    with the lowest possible ``detect_priority`` so it sorts first among
+    launchable integrations regardless of what is actually installed on the
+    machine running the tests."""
+
+    name = "copilot"
+    display_name = "GitHub Copilot"
+    detect_priority = 0
+
+    def detect(self, agent_dir: Path) -> bool:
+        del agent_dir
+        return True
+
+    def interactive_setup_available(self) -> bool:
+        return False
+
+    def connected_setup_available(self) -> bool:
+        return True
+
+    def interactive_setup_fallback_command(self, request: InteractiveSetupRequest) -> str:
+        return f"copilot -C {request.data_root} -i <prompt> --name \"Flowgency setup\""
+
+    def connected_setup_launch(self, request: InteractiveSetupRequest) -> RuntimeLaunch:
+        return RuntimeLaunch(
+            argv=("connected-setup-fixture",),
+            cwd=request.data_root,
+            env={},
+            mode="connected",
+        )
+
+
+_REAL_COPILOT_INTEGRATION: BaseIntegration | None = None
+_CURRENT_FAKE_PROCESS = None
+
+
+def _connected_setup_process_factory(launch):
+    del launch
+    global _CURRENT_FAKE_PROCESS
+    from tests._connected_setup_helpers import FakeProcess
+
+    process = FakeProcess()
+    _CURRENT_FAKE_PROCESS = process
+    return process
+
+
+async def _reset_connected_setup_runtime(fixture: str) -> None:
+    """Restore real integrations/availability and a fresh, non-fake setup
+    session manager, then — only for the ``connected-setup`` fixture —
+    replace them with test doubles that never touch a real Copilot CLI or
+    Windows PTY. Running the restore unconditionally on every reset keeps
+    fixtures order-independent."""
+    global _CURRENT_FAKE_PROCESS
+    import flowgency.web.routes.admin_teams as admin_teams_module
+    import flowgency.web.setup_flow as setup_flow_module
+    from flowgency.app import app
+    from flowgency.web.setup_sessions import SetupSessionManager
+
+    setup_flow_module.connected_process_available = _REAL_CONNECTED_PROCESS_AVAILABLE
+    admin_teams_module.connected_process_available = _REAL_CONNECTED_PROCESS_AVAILABLE
+    if _REAL_COPILOT_INTEGRATION is not None:
+        REGISTRY["copilot"] = _REAL_COPILOT_INTEGRATION
+
+    manager = getattr(app.state, "setup_sessions", None)
+    if manager is not None:
+        await manager.shutdown()
+    _CURRENT_FAKE_PROCESS = None
+    app.state.setup_sessions = SetupSessionManager()
+
+    if fixture != CONNECTED_SETUP_FIXTURE:
+        return
+
+    setup_flow_module.connected_process_available = lambda: True
+    admin_teams_module.connected_process_available = lambda: True
+    REGISTRY["copilot"] = FakeConnectedCopilotIntegration()
+    await app.state.setup_sessions.shutdown()
+    app.state.setup_sessions = SetupSessionManager(
+        process_factory=_connected_setup_process_factory,
+        replay_limit=CONNECTED_SETUP_REPLAY_LIMIT,
+    )
+
+
 def _install_ui_test_runtime() -> None:
+    global _REAL_COPILOT_INTEGRATION
     import flowgency.jobs.submission as submission_module
     import flowgency.web.dependencies as web_dependencies
     from flowgency.app import app
@@ -173,6 +267,8 @@ def _install_ui_test_runtime() -> None:
         display_name = "UI Ticket Test Runtime"
 
     REGISTRY["ticket-test"] = UITicketRuntimeIntegration()
+    if _REAL_COPILOT_INTEGRATION is None:
+        _REAL_COPILOT_INTEGRATION = REGISTRY.get("copilot")
     submission_module.submit_job_request = _ui_submit_job_request
     web_dependencies.submit_job_request = _ui_submit_job_request
 
@@ -198,7 +294,59 @@ def _install_ui_test_runtime() -> None:
                 fixture = str(raw_fixture or "default").strip() or "default"
         if fixture not in SUPPORTED_UI_FIXTURES:
             raise HTTPException(status_code=400, detail="Unsupported fixture")
+        await _reset_connected_setup_runtime(fixture)
         _reset_runtime_state(runtime_root, fixture=fixture)
+        return Response(status_code=204)
+
+    @app.get("/__ui/setup/meta", include_in_schema=False)
+    async def connected_setup_meta() -> Response:
+        runtime_root = Path(os.environ["FLOWGENCY_UI_RUNTIME"])
+        return JSONResponse({"data_root": str(runtime_root / "flowgency-data")})
+
+    @app.post("/__ui/setup/ready", include_in_schema=False)
+    async def connected_setup_ready() -> Response:
+        runtime_root = Path(os.environ["FLOWGENCY_UI_RUNTIME"])
+        raw = yaml.safe_load(FIXTURE_CONFIG.read_text(encoding="utf-8"))
+        config = _replace_runtime(raw, runtime_root)
+        _write_runtime_config(runtime_root / "config.yaml", config)
+        from flowgency.web.dependencies import build_services
+
+        app.state.services = build_services(runtime_root / "config.yaml")
+        return Response(status_code=204)
+
+    @app.get("/__ui/setup/session/writes", include_in_schema=False)
+    async def connected_setup_session_writes() -> Response:
+        if _CURRENT_FAKE_PROCESS is None:
+            raise HTTPException(status_code=404, detail="No connected-setup fixture session")
+        return JSONResponse(
+            {
+                "writes": [chunk.decode("utf-8", errors="replace") for chunk in _CURRENT_FAKE_PROCESS.writes],
+                "sizes": [list(size) for size in _CURRENT_FAKE_PROCESS.sizes],
+            }
+        )
+
+    @app.post("/__ui/setup/session/emit", include_in_schema=False)
+    async def connected_setup_session_emit(request: Request) -> Response:
+        if _CURRENT_FAKE_PROCESS is None:
+            raise HTTPException(status_code=404, detail="No connected-setup fixture session")
+        payload = await request.json()
+        text = payload.get("text")
+        if text is not None:
+            if not isinstance(text, str):
+                raise HTTPException(status_code=400, detail="text must be a string")
+            _CURRENT_FAKE_PROCESS.output.put(text.encode("utf-8"))
+            return Response(status_code=204)
+        if payload.get("eof"):
+            # FakeProcess.read() raises EOFError on a queued None, matching
+            # a real PTY's natural end-of-stream so the manager finalizes
+            # the session as "exited" rather than "stopped".
+            _CURRENT_FAKE_PROCESS.output.put(None)
+            return Response(status_code=204)
+        remaining = int(payload.get("length", 0))
+        while remaining > 0:
+            chunk = min(remaining, 1024)
+            _CURRENT_FAKE_PROCESS.output.put(b"x" * chunk)
+            remaining -= chunk
         return Response(status_code=204)
 
     app.state.ui_reset_route_installed = True
@@ -1342,6 +1490,17 @@ def _safe_remove_runtime(runtime: Path) -> None:
 
 
 def _reset_runtime_state(runtime: Path, *, fixture: str = "default") -> None:
+    if fixture == CONNECTED_SETUP_FIXTURE:
+        # No teams config yet: the setup page must render its guided form
+        # (state "waiting") rather than the ready dashboard.
+        (runtime / "config.yaml").unlink(missing_ok=True)
+        (runtime / "flowgency-data").mkdir(parents=True, exist_ok=True)
+        from flowgency.app import app
+        from flowgency.web.dependencies import build_services
+
+        app.state.services = build_services(runtime / "config.yaml")
+        return
+
     raw = yaml.safe_load(FIXTURE_CONFIG.read_text(encoding="utf-8"))
     config = _replace_runtime(raw, runtime)
     if fixture == GIT_EVIDENCE_FIXTURE:

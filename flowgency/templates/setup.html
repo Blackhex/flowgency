@@ -8,6 +8,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300..700;1,9..40,300..700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/tailwind.css">
+  {% if connected %}
+  <link rel="stylesheet" href="/static/setup-terminal.css">
+  {% endif %}
 </head>
 <body class="h-full bg-flowgency-950 font-sans flex items-center justify-center p-4">
   <div class="w-full max-w-4xl">
@@ -58,6 +61,55 @@
       {% endif %}
 
       {% if waiting %}
+      {% if connected %}
+      <div class="space-y-4">
+        <div class="grid gap-4 md:grid-cols-2">
+          <div class="rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Flowgency data root</div>
+            <div class="mt-1 font-mono text-sm text-gray-900 break-all">{{ data_root_value }}</div>
+          </div>
+          <div class="rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Integration</div>
+            <div class="mt-1 text-sm font-medium text-gray-900">{{ selected_integration_name }}</div>
+          </div>
+        </div>
+
+        <div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <p class="text-sm text-amber-900">Interactive setup can use this computer's server-user access to files and tools.</p>
+        </div>
+
+        <p id="status-message" class="text-sm text-gray-500" aria-live="polite">
+          {% if status_message %}
+          {{ status_message }}
+          {% else %}
+          We’ll keep checking for a complete configuration.
+          {% endif %}
+        </p>
+
+        <div id="setup-terminal" class="h-96 w-full min-w-0 overflow-hidden rounded-xl border border-gray-200 bg-black md:h-[34rem]" data-session-view="{{ 'true' if session_view else 'false' }}"></div>
+        <p id="terminal-connection" role="status" aria-live="polite" class="text-sm text-gray-700">Connecting</p>
+
+        <details class="rounded-xl border border-gray-200 bg-gray-50 p-4">
+          <summary class="cursor-pointer text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-flowgency-500 focus:border-flowgency-500">Fallback command</summary>
+          <textarea id="fallback-command" readonly class="mt-3 w-full min-h-28 px-3 py-2.5 border border-gray-300 rounded-lg text-sm font-mono text-gray-900 bg-gray-50 focus:ring-2 focus:ring-flowgency-500 focus:border-flowgency-500">{{ fallback_command }}</textarea>
+        </details>
+
+        <div class="flex flex-wrap gap-3">
+          <form method="POST" action="/setup/session/stop">
+            <input type="hidden" name="setup_csrf" value="{{ setup_csrf }}">
+            <button type="submit" title="Stop setup session" class="px-4 py-2.5 bg-gray-900 text-white text-sm font-semibold rounded-lg hover:bg-gray-800 transition-colors focus:ring-2 focus:ring-flowgency-500 focus:border-flowgency-500">Stop</button>
+          </form>
+          <form method="POST" action="/setup/launch" id="terminal-relaunch" class="hidden">
+            <input type="hidden" name="data_root" value="{{ data_root_value }}">
+            <input type="hidden" name="integration" value="{{ selected_integration }}">
+            <input type="hidden" name="setup_csrf" value="{{ setup_csrf }}">
+            <button type="submit" class="px-4 py-2.5 bg-flowgency-600 text-white text-sm font-semibold rounded-lg hover:bg-flowgency-700 transition-colors focus:ring-2 focus:ring-flowgency-500 focus:border-flowgency-500">
+              Relaunch {{ selected_integration_name }}
+            </button>
+          </form>
+        </div>
+      </div>
+      {% else %}
       <div class="space-y-5">
         <div class="grid gap-4 md:grid-cols-2">
           <div class="rounded-xl border border-gray-200 bg-gray-50 p-4">
@@ -101,6 +153,7 @@
           </form>
         </div>
       </div>
+      {% endif %}
       {% else %}
       <form method="POST" action="/setup/launch" class="space-y-5">
         <input type="hidden" name="setup_csrf" value="{{ setup_csrf }}">
@@ -287,6 +340,8 @@
       }
 
       if (statusMessage) {
+        const terminalElement = document.getElementById("setup-terminal");
+        const sessionView = !!(terminalElement && terminalElement.dataset.sessionView === "true");
         const defaultMessages = {
           waiting: "We’ll keep checking for a complete configuration.",
           invalid: "Setup wrote an invalid configuration. Fix the setup session, then wait for the next refresh.",
@@ -299,14 +354,14 @@
           try {
             const response = await fetch("/setup/status", { cache: "no-store" });
             const payload = await response.json();
-            if (payload.state === "ready" && payload.redirect) {
+            if (payload.state === "ready" && payload.redirect && !sessionView) {
               shouldScheduleNextPoll = false;
               window.location.assign(payload.redirect);
               return;
             }
             statusMessage.textContent = payload.message || defaultMessages[payload.state] || "";
           } catch (error) {
-            statusMessage.textContent = "Status check failed. Finish setup, then refresh this page.";
+            statusMessage.textContent = "Status check failed. Retrying.";
           } finally {
             if (shouldScheduleNextPoll) {
               pollTimer = window.setTimeout(pollStatus, 1500);
@@ -318,5 +373,8 @@
       }
     })();
   </script>
+  {% if connected %}
+  <script src="/static/setup-terminal.js"></script>
+  {% endif %}
 </body>
 </html>

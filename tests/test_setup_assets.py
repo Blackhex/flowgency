@@ -260,6 +260,13 @@ def test_wheel_contains_every_git_evidence_module_and_asset(built_wheel: Path):
             assert archive.read(name) == (REPO_ROOT / name).read_bytes()
 
 
+def test_wheel_contains_connected_terminal_assets(built_wheel: Path):
+    with ZipFile(built_wheel) as archive:
+        for name in ("setup-terminal.js", "setup-terminal.css"):
+            source = REPO_ROOT / "flowgency" / "static" / name
+            assert archive.read(f"flowgency/static/{name}") == source.read_bytes()
+
+
 def test_git_evidence_modules_import_from_the_wheel_not_the_checkout(
     built_wheel: Path, tmp_path: Path
 ):
