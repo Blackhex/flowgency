@@ -45,7 +45,7 @@
 
 ## Preflight
 
-From the feature worktree root, run `python -m pytest tests/ -q` before making implementation changes. Record the pass count and stop to investigate any baseline failure without editing unrelated tests. The approved design is `docs/superpowers/specs/2026-09-23-connected-copilot-setup-terminal-design.md` (revised at commit `94ebe48` to defer Windows connected mode). After each task, review its focused diff and tests before starting a dependent task. Do not stage or rewrite the runtime-local `config.yaml`, locks, team state, or unrelated changes.
+From the feature worktree root, run `python -m pytest tests/ -q` before making implementation changes. Record the pass count and stop to investigate any baseline failure without editing unrelated tests. The approved design is `docs/superpowers/specs/2026-09-23-connected-copilot-setup-terminal-design.md`. After each task, review its focused diff and tests before starting a dependent task. Do not stage or rewrite the runtime-local `config.yaml`, locks, team state, or unrelated changes.
 
 ### Task 1: Share A Typed Copilot Launch Contract
 
