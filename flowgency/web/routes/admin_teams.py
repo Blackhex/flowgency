@@ -393,7 +393,9 @@ async def setup_page(
         credential, csrf = None, ""
     if credential is not None:
         sessions = getattr(request.app.state, "setup_sessions", None)
-        if sessions is not None and sessions.snapshot(credential) is not None:
+        snapshot = sessions.snapshot(credential) if sessions is not None else None
+        # A confirmed Stop should return the user to the form, not strand them on the session view.
+        if snapshot is not None and snapshot.state != "stopped":
             response = RedirectResponse("/setup/session", status_code=303)
             request.app.state.setup_access.set_cookie(response, credential, request)
             return response

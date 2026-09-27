@@ -226,14 +226,19 @@ test('connected setup terminal stop ends the session', async ({ page, request })
 
   await page.getByRole('button', { name: 'Stop', exact: true }).click();
 
-  // Stopping a session that is still recorded (for exit-code inspection)
-  // keeps the browser on /setup/session; there is no separate destination
-  // documented for this transition, so assert the state transition itself.
+  // A confirmed Stop returns the browser to the plain, editable setup form
+  // so the user can choose a different data root or integration.
+  await expect(page).toHaveURL(/\/setup$/);
+  await expect(page.getByLabel('Flowgency data root', { exact: true })).toBeVisible();
+
   await expect
     .poll(async () =>
       page.evaluate(() => fetch('/setup/session/state', { cache: 'no-store' }).then((r) => r.json().then((p) => p.state))),
     )
     .toBe('stopped');
+
+  // The stopped session's final output remains reachable for inspection.
+  await page.goto('/setup/session');
   await expect(page.locator('#terminal-connection')).toContainText('The setup session was stopped.');
 
   await assertNoConsoleErrors(page);

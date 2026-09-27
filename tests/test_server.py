@@ -856,6 +856,13 @@ def test_connected_session_stop_confirms_process_and_redirects(tmp_path, monkeyp
         assert stop.headers["location"] == "/setup"
         assert process.running is False
 
+        form_page = client.get("/setup", follow_redirects=False)
+        assert form_page.status_code == 200
+        assert 'id="browse-data-root"' in form_page.text
+
+        session_page = client.get("/setup/session")
+        assert session_page.status_code == 200
+
 
 def test_setup_session_view_and_status_stay_ready_while_session_runs(
     tmp_path, monkeypatch, raw_config
