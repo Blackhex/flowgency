@@ -68,9 +68,11 @@ Only Copilot setup consumes it in this feature. Other integrations and hosts
 without working PTY support keep their existing external-terminal behavior.
 The connected implementation may reuse lifecycle primitives from supervised
 jobs, but must extend them for PTY I/O instead of pretending a terminal is a
-captured subprocess pipe. A POSIX PTY smoke check is required before claiming
-connected support there. Windows fallback must be tested independently; a
-future Windows connected mode requires a separately reviewed safe backend.
+captured subprocess pipe. This release uses native Windows validation only;
+its result does not qualify POSIX connected setup. POSIX deployments need
+separate native validation before relying on connected mode there. Windows
+fallback must be tested; a future Windows connected mode requires a
+separately reviewed safe backend.
 
 ## Setup Session
 
@@ -174,9 +176,10 @@ sequences, and bound incoming controls and outbound queues.
   redirect with Copilot still running, dashboard return and Stop, disconnected
   polling, relaunch after failure, and startup without PTY support.
 - Test the rendered setup and dashboard flow with Playwright; validate local
-  terminal assets in an installed wheel and smoke-test a real interactive
-  Copilot CLI on POSIX before enabling connected mode. On Windows, verify the
-  unchanged external launch and absence of any connected PTY process.
+  terminal assets in an installed wheel. For this release run platform tests
+  and smoke only on native Windows: verify the unchanged external launch and
+  absence of any connected PTY process. Do not run POSIX or WSL gates as part
+  of this release or claim their behavior is certified by Windows results.
 
 ## Alternatives Considered
 
