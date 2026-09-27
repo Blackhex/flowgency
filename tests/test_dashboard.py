@@ -1,5 +1,6 @@
 """Tests for mission control dashboard helpers."""
 from copy import deepcopy
+from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
 import re
@@ -9,6 +10,7 @@ from unittest.mock import patch
 import pytest
 import yaml
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
 from flowgency import app as app_mod
 from flowgency.app import (
@@ -18,6 +20,7 @@ from flowgency.app import (
 from flowgency.jobs.authority import JobStore
 from flowgency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from flowgency.jobs.store import transition_job, write_job
+from flowgency.web.setup_sessions import SetupSessionSnapshot
 from tests._ticket_helpers import SEED_TIME
 from tests._team_helpers import apply_team_paths, create_team_environment
 
@@ -395,6 +398,40 @@ def _seed_dashboard_app(monkeypatch, tmp_path, raw_config):
     app_mod.refresh_services()
     app_mod.app.state.services = app_mod.build_services(config_path)
     return TestClient(app_mod.app), config_path, team_root
+
+
+def test_dashboard_shows_setup_session_only_for_its_local_owner(monkeypatch, tmp_path, raw_config):
+    _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+    with TestClient(app_mod.app, base_url="http://127.0.0.1:8500", client=("127.0.0.1", 50001)) as client:
+        scope = {
+            "type": "http", "scheme": "http", "path": "/setup",
+            "client": ("127.0.0.1", 50001), "server": ("127.0.0.1", 8500),
+            "headers": [(b"host", b"127.0.0.1:8500")],
+        }
+        owner, csrf, _ = app_mod.app.state.setup_access.ensure_browser(Request(scope))
+        current = SetupSessionSnapshot("running", "copilot", tmp_path, b"", False, "fallback", None, "")
+
+        class OwnedSession:
+            def snapshot(self, claimant):
+                return current if claimant == owner else None
+
+            async def shutdown(self):
+                return None
+
+        monkeypatch.setattr(app_mod.app.state, "setup_sessions", OwnedSession())
+        client.cookies.set("flowgency_setup", owner)
+        response = client.get("/newsletter/")
+        assert response.status_code == 200
+        assert 'href="/setup/session"' in response.text
+        assert 'action="/setup/session/stop"' in response.text
+        assert owner not in response.text
+
+        other = TestClient(app_mod.app, base_url="http://127.0.0.1:8500", client=("127.0.0.1", 50002))
+        remote = TestClient(app_mod.app, base_url="http://127.0.0.1:8500", client=("192.0.2.9", 50003))
+        assert 'href="/setup/session"' not in other.get("/newsletter/").text
+        assert 'href="/setup/session"' not in remote.get("/newsletter/").text
+        current = replace(current, state="failed", message="Could not confirm process exit")
+        assert "Setup session needs attention" in client.get("/newsletter/").text
 
 
 def _job_spec(

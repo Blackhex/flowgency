@@ -297,3 +297,47 @@ test('connected setup terminal offers Relaunch after Copilot exits, hidden while
 
   await assertNoConsoleErrors(page);
 });
+
+test('dashboard surfaces the running setup session only for its owning browser', async ({ page, request, browser }, testInfo) => {
+  await launchConnectedTerminal(page, request);
+
+  const ready = await request.post('/__ui/setup/ready');
+  expect(ready.status()).toBe(204);
+
+  // The config is ready, but this browser's connected PTY is still owned by
+  // the server; returning to the plain /setup URL redirects through the
+  // dashboard's default team rather than back to the (now finished) form.
+  await page.goto('/setup');
+  await expect(page).toHaveURL(/\/newsletter\/$/);
+
+  const sessionLink = page.getByRole('link', { name: 'View terminal' });
+  await expect(sessionLink).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Stop setup session' })).toBeVisible();
+  await captureEvidence(page, `dashboard-setup-session-${testInfo.project.name}.png`);
+
+  await sessionLink.click();
+  await expect(page).toHaveURL(/\/setup\/session$/);
+  await expect(page.locator('#setup-terminal .xterm-screen')).toBeVisible();
+
+  // A later ready poll on the session view must not carry the browser away
+  // from its terminal (Task 6's session_view no-redirect behavior).
+  await page.waitForTimeout(2000);
+  await expect(page).toHaveURL(/\/setup\/session$/);
+
+  await page.goto('/newsletter/');
+  await expect(sessionLink).toBeVisible();
+
+  const otherContext = await browser.newContext();
+  const otherPage = await otherContext.newPage();
+  await otherPage.goto('/newsletter/');
+  await expect(otherPage.getByRole('link', { name: 'View terminal' })).toHaveCount(0);
+  const deniedResponse = await otherPage.goto('/setup/session');
+  expect(deniedResponse?.status()).toBe(403);
+  await otherContext.close();
+
+  await page.getByRole('button', { name: 'Stop setup session' }).click();
+  await expect(page).toHaveURL(/\/newsletter\/$/);
+  await expect(page.locator('[data-setup-session]')).toHaveCount(0);
+
+  await assertNoConsoleErrors(page);
+});

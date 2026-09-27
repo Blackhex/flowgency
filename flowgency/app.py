@@ -70,7 +70,7 @@ from flowgency.web.logs import collect_agent_logs
 from flowgency.web.logs import collect_logs as _collect_logs
 from flowgency.web.logs import describe_log_file, log_belongs_to_agent, with_log_links
 from flowgency.web.log_preview import read_log_preview
-from flowgency.web.setup_security import SetupBrowserAccess
+from flowgency.web.setup_security import SetupAccessDenied, SetupBrowserAccess
 from flowgency.web.setup_sessions import SetupSessionManager
 from flowgency.web.state import flowgency_settings, runtime_team
 from flowgency.web.team_navigation import build_team_context
@@ -1767,6 +1767,27 @@ async def home(request: Request, team: str):
     # Zone 4: Activity feed
     activity = workflow_dashboard["activity"]
 
+    # Owner-only inline indicator for a background connected-setup session; it is
+    # never counted as a configured agent, ticket, or job.
+    setup_session = None
+    access = request.app.state.setup_access
+    try:
+        owner = access.require_http(request)
+    except SetupAccessDenied:
+        owner = None
+    if owner is not None:
+        manager = getattr(request.app.state, "setup_sessions", None)
+        session = manager.snapshot(owner) if manager is not None else None
+        if session is not None and session.state in {"running", "failed"}:
+            credential, csrf, _issued = access.ensure_browser(request)
+            if credential == owner:
+                setup_session = {
+                    "href": "/setup/session",
+                    "csrf": csrf,
+                    "state": session.state,
+                    "message": session.message,
+                }
+
     return templates.TemplateResponse(request, "home.html", {
         "request": request,
         **team_context(g),
@@ -1784,6 +1805,7 @@ async def home(request: Request, team: str):
         "needs_action_count": needs_action_count,
         # Zone 4: Activity
         "activity_feed": activity,
+        "setup_session": setup_session,
     })
 
 
