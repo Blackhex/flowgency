@@ -15,6 +15,18 @@ Open `http://127.0.0.1:8500`. Set `FLOWGENCY_CONFIG` to select the one authorita
 
 Start Flowgency, choose the Flowgency data root and supported AI integration, complete the flowgency-setup conversation, and return to the dashboard automatically. The launcher safely creates a missing root, attaches the bundled skill, and the guided conversation asks for the project workspace as its first question. The Flowgency Setup Skill owns team naming, storage paths, blueprint source, instances, routines, runtime policy, workspaces, memory, validation, and the one atomic config write.
 
+Open setup from a browser on the same computer as Flowgency. On supported
+POSIX hosts, GitHub Copilot setup runs in the page's terminal; refresh or
+reopen the page to reconnect. When the configuration is ready, Flowgency opens
+the dashboard while Copilot may continue running. Use the dashboard's Setup
+session link to return or Stop.
+The setup CLI has the server user's access to files and tools; configured
+agent sandbox permissions do not apply before the first team exists. Windows
+continues to launch Copilot in a separate console, with a copyable fallback
+command; it does not offer connected setup. On POSIX, use the external terminal
+if the PTY cannot start. Closing the browser tab does not stop a connected
+session, but a server restart ends its in-memory connection and transcript.
+
 On first run, open `/setup` and choose the data root and supported integration to launch `flowgency-setup`. After setup, create reusable blueprints, Agent Skills, and shared prompts in Agent Library. Open the team's Agents page to add explicit instances that select a blueprint and integration. Configure identity, private prompts, runtime overrides, routines, and semantic memory from Agent Detail.
 
 ## Core concepts

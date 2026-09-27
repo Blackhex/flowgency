@@ -53,6 +53,10 @@ storage-path questions. If you approve restricted Copilot ticket workflows,
 setup must ask separately before writing `integration_config.allow_local_network:
 true`; declining leaves the value absent or `false`, and such runs fail
 preflight with `ticket-local-network-required` rather than widening policy.
+On supported POSIX hosts, open setup from a browser on the same computer as
+Flowgency to run GitHub Copilot setup in the page's terminal; Windows keeps
+launching Copilot in a separate console with a copyable fallback command, and
+a server restart ends an in-memory connected session and its transcript.
 
 ## Configuration
 
