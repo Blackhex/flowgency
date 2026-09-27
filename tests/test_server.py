@@ -817,10 +817,10 @@ def test_setup_launch_rejects_mismatched_origin(tmp_path, monkeypatch):
     assert integration.requests == []
 
 
-def _start_connected_session(tmp_path, monkeypatch, *, process_factory=None):
+def _start_connected_session(tmp_path, monkeypatch, *, process_factory=None, integration=None):
     config_path = _configure_missing_config(tmp_path, monkeypatch)
     root = tmp_path / "Flowgency"
-    integration = _ConnectedLaunchIntegration()
+    integration = integration or _ConnectedLaunchIntegration()
     monkeypatch.setattr(
         "flowgency.web.routes.admin_teams.launchable_integrations",
         lambda integrations, data_root: (integration,),
@@ -1174,6 +1174,85 @@ def test_connected_launch_conflict_never_replaces_running_session(tmp_path, monk
         assert conflict.status_code == 409
         assert conflict.json()["session"] == "/setup/session"
         assert client.get("/setup/session/state").json()["state"] == "running"
+
+
+def test_connected_launch_fallback_builder_integration_error_returns_error_form(
+    tmp_path, monkeypatch
+):
+    integration = _ConnectedLaunchIntegration(
+        fallback_error=IntegrationError(
+            "Flowgency data root contains a conflicting flowgency-setup skill."
+        )
+    )
+    config_path, root, integration, process, manager = _start_connected_session(
+        tmp_path, monkeypatch, integration=integration
+    )
+    with _local_client() as client:
+        csrf = _setup_csrf(client)
+
+        response = client.post(
+            "/setup/launch",
+            data={"data_root": str(root), "integration": "copilot", "setup_csrf": csrf},
+            headers={"Origin": _LOCAL_BASE_URL},
+        )
+
+        assert response.status_code == 200
+        assert "conflicting flowgency-setup skill" in response.text
+        assert integration.connected_requests == []
+        assert client.get("/setup/session/state").status_code == 404
+
+        retry_match = re.search(r'name="setup_csrf" value="([^"]+)"', response.text)
+        assert retry_match is not None, response.text
+        retry = client.post(
+            "/setup/launch",
+            data={
+                "data_root": str(root),
+                "integration": "copilot",
+                "setup_csrf": retry_match.group(1),
+            },
+            headers={"Origin": _LOCAL_BASE_URL},
+            follow_redirects=False,
+        )
+        assert retry.status_code != 403
+
+
+def test_connected_launch_builder_integration_error_returns_error_form(
+    tmp_path, monkeypatch
+):
+    integration = _ConnectedLaunchIntegration(
+        connected_error=IntegrationError(
+            "Bundled flowgency-setup skill is missing or unreadable; reinstall flowgency."
+        )
+    )
+    config_path, root, integration, process, manager = _start_connected_session(
+        tmp_path, monkeypatch, integration=integration
+    )
+    with _local_client() as client:
+        csrf = _setup_csrf(client)
+
+        response = client.post(
+            "/setup/launch",
+            data={"data_root": str(root), "integration": "copilot", "setup_csrf": csrf},
+            headers={"Origin": _LOCAL_BASE_URL},
+        )
+
+        assert response.status_code == 200
+        assert "Bundled flowgency-setup skill is missing or unreadable" in response.text
+        assert client.get("/setup/session/state").status_code == 404
+
+        retry_match = re.search(r'name="setup_csrf" value="([^"]+)"', response.text)
+        assert retry_match is not None, response.text
+        retry = client.post(
+            "/setup/launch",
+            data={
+                "data_root": str(root),
+                "integration": "copilot",
+                "setup_csrf": retry_match.group(1),
+            },
+            headers={"Origin": _LOCAL_BASE_URL},
+            follow_redirects=False,
+        )
+        assert retry.status_code != 403
 
 
 def test_send_output_reports_unavailable_when_session_vanishes_without_snapshot():

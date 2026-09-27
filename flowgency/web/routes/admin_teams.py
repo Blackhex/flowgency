@@ -22,7 +22,7 @@ from flowgency.configuration import (
     prepare_writable_directory,
     resolve_team_paths,
 )
-from flowgency.integrations import BaseIntegration, REGISTRY
+from flowgency.integrations import BaseIntegration, IntegrationError, REGISTRY
 from flowgency.integrations.models import InteractiveSetupRequest
 from flowgency.jobs.connected_process import ConnectedLaunchError, connected_process_available
 from flowgency.jobs.store import revision_bound_team_operation
@@ -548,8 +548,21 @@ async def setup_launch(
         and connected_process_available()
     )
     if connected:
-        fallback_command = integration.interactive_setup_fallback_command(setup_request)
-        launch = integration.connected_setup_launch(setup_request)
+        try:
+            fallback_command = integration.interactive_setup_fallback_command(setup_request)
+            launch = integration.connected_setup_launch(setup_request)
+        except IntegrationError as exc:
+            return _setup_response(
+                request,
+                services,
+                status=status,
+                data_root_value=data_root_value,
+                integrations=integrations,
+                selected_integration=selected_integration,
+                selected_integration_name=selected_integration_name,
+                error=str(exc),
+                setup_csrf=csrf_token,
+            )
         try:
             await request.app.state.setup_sessions.start(
                 owner, integration.name, launch, fallback_command
