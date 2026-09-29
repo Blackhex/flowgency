@@ -229,20 +229,32 @@ import re
 import threading
 import time
 
+win32api.CloseHandle(child_stdin)
+win32api.CloseHandle(child_stdout)
 parent_output = os.fdopen(
     msvcrt.open_osfhandle(parent_stdout.Detach(), os.O_RDONLY | os.O_BINARY),
     "rb", buffering=0,
 )
+frames = queue.Queue()
+reader_done = threading.Event()
+
+def drain_frames():
+    try:
+        while True:
+            frame = read_frame(parent_output)
+            frames.put(frame)
+            if frame is None:
+                break
+    except BaseException as error:
+        frames.put(error)
+    finally:
+        reader_done.set()
+
+reader = threading.Thread(target=drain_frames, daemon=True)
+reader.start()
 
 def next_frame(timeout: float):
-    result = queue.Queue(maxsize=1)
-    def read_once():
-        try:
-            result.put(read_frame(parent_output))
-        except BaseException as error:
-            result.put(error)
-    threading.Thread(target=read_once, daemon=True).start()
-    frame = result.get(timeout=timeout)
+    frame = frames.get(timeout=timeout)
     if isinstance(frame, BaseException):
         raise frame
     return frame
@@ -266,8 +278,11 @@ try:
         raise AssertionError("ConPTY grandchild did not report its PID")
 finally:
     assert owner.stop(time.monotonic() + 5) == (True, "stopped")
-    owner.close_confirmed()
+    assert reader_done.wait(timeout=5), "PTY pipe reader did not drain after Job exit"
+    reader.join(timeout=0)
+    assert not reader.is_alive()
     parent_output.close()
+    owner.close_confirmed()
 ```
 
 - [ ] **Step 2: Run RED.** Run `tests/test_windows_pty_helper.py -q`; expect import of the missing helper to fail.
@@ -354,13 +369,16 @@ test('native Windows setup embeds the terminal', async ({ page, request }) => {
 ### Task 6: Document, Smoke-Test, Review, Integrate
 
 **Files:**
-- Modify: `README.md`, `kb/getting-started.md` (docs-only commit)
+- Modify: `docs/superpowers/specs/2026-09-23-connected-copilot-setup-terminal-design.md` (separate docs-only spec amendment)
+- Modify: `docs/superpowers/plans/2026-09-23-connected-copilot-setup-terminal.md` (separate docs-only plan amendment)
+- Modify: `README.md`, `kb/getting-started.md` (separate operator-docs commit)
 - Test/review: `tests/test_windows_job.py`, `tests/test_windows_pty_helper.py`, `tests/test_windows_connected_process.py`, `tests/test_connected_process.py`, `tests/test_setup_sessions.py`, `tests/test_server.py`, `tests/ui/setup.spec.ts`.
 
 **Interfaces:**
 - Consumes Windows Job-backed `ConnectedProcess` and common browser/manager from Tasks 1-5; creates no new application API.
 
-- [ ] **Step 1: Update first-run docs.** Replace Windows separate-console-as-normal copy with native Windows in-page setup and state that the separate console is the safe fallback if ConPTY/Job/WebSocket support is unavailable or safe cleanup cannot be confirmed. Keep the server-user privilege warning, read-only browser limitation, data-root/skill/atomic-write guidance, and POSIX qualification caveat. Example:
+- [ ] **Step 1: Align earlier design and plan separately.** In the earlier connected-setup spec, replace its Windows external-only execution/verification text with the proven suspended-helper + Job containment Windows behavior, while retaining POSIX as optional and unqualified by Windows tests; stage only that spec and commit `docs(setup): qualify owned windows conpty`. In its implementation plan, mark the old Windows fail-closed instructions as historical and point to this Windows follow-up plan; stage only that plan and commit `docs(setup): supersede windows fallback plan`. Preserve both documents' POSIX safety explanation; do not claim `pywinpty.PTY.spawn()` is safe without pre-owned helper containment.
+- [ ] **Step 2: Update first-run operator docs.** Replace Windows separate-console-as-normal copy with native Windows in-page setup and state that the separate console is the safe fallback if ConPTY/Job/WebSocket support is unavailable or safe cleanup cannot be confirmed. Keep the server-user privilege warning, read-only browser limitation, data-root/skill/atomic-write guidance, and POSIX qualification caveat. Example:
 
 ```markdown
 On native Windows, Copilot setup runs in this browser's terminal when the
@@ -369,7 +387,7 @@ Stop blocks another launch; a separate console is offered only after safe
 cleanup. Closing the tab does not Stop the server-owned session.
 ```
 
-- [ ] **Step 2: Validate docs and commit separately.** Run `tests/test_repository_boundaries.py tests/test_setup_assets.py tests/test_server.py -q` and `git diff --check`; stage only README and guide, commit `docs(setup): explain windows in-page setup`.
-- [ ] **Step 3: Run final automated gates.** Run `./.venv/Scripts/python.exe -m pytest tests/ -q`, `npm ci`, `npm run build:terminal`, `npm run build:css`, `npm run test:ui -- tests/ui/setup.spec.ts`, and the repository-wide `npm run test:ui`. Verify generated assets match committed bytes and `git status --short` shows only intentional changes.
-- [ ] **Step 4: Native Windows smoke.** Use an isolated absent `FLOWGENCY_CONFIG`, throwaway data root and loopback port distinct from any existing dashboard. Start server from this feature worktree and verify module path; in a browser, launch native Windows Copilot in-page, type one harmless reply (the human enters any auth/device code directly), refresh/reconnect, Stop and prove Job accounting empty and no child/grandchild remains, config absent. Repeat with forced contained-launch failure to prove external fallback only after cleanup confirmation. Test graceful server restart with an active session. Never touch the real config or user Copilot session.
-- [ ] **Step 5: Whole-branch review and integration.** Review against the design's ownership, browser security, headless compatibility and fallback gates. Fix findings in the owning task with focused tests and final full suite. Then follow `AGENTS.md`: recheck master ancestry and dirty state, rebase only if master advanced, fast-forward only, re-run full Python suite on integrated master, push master and feature branch, remove/prune the isolated worktree after preserving runtime-local files, and start the final trial server from master on a free loopback port. Do not claim Windows in-page support or integrate while real Job containment or authenticated interactive smoke remains unproven.
+- [ ] **Step 3: Validate operator docs and commit separately.** Run `tests/test_repository_boundaries.py tests/test_setup_assets.py tests/test_server.py -q` and `git diff --check`; stage only README and guide, commit `docs(setup): explain windows in-page setup`.
+- [ ] **Step 4: Run final automated gates.** Run `./.venv/Scripts/python.exe -m pytest tests/ -q`, `npm ci`, `npm run build:terminal`, `npm run build:css`, `npm run test:ui -- tests/ui/setup.spec.ts`, and the repository-wide `npm run test:ui`. Verify generated assets match committed bytes and `git status --short` shows only intentional changes.
+- [ ] **Step 5: Native Windows smoke.** Use an isolated absent `FLOWGENCY_CONFIG`, throwaway data root and loopback port distinct from any existing dashboard. Start server from this feature worktree and verify module path; in a browser, launch native Windows Copilot in-page, type one harmless reply (the human enters any auth/device code directly), refresh/reconnect, Stop and prove Job accounting empty and no child/grandchild remains, config absent. Repeat with forced contained-launch failure to prove external fallback only after cleanup confirmation. Test graceful server restart with an active session. Never touch the real config or user Copilot session.
+- [ ] **Step 6: Whole-branch review and integration.** Review against the design's ownership, browser security, headless compatibility and fallback gates. Fix findings in the owning task with focused tests and final full suite. Then follow `AGENTS.md`: recheck master ancestry and dirty state, rebase only if master advanced, fast-forward only, re-run full Python suite on integrated master, push master and feature branch, remove/prune the isolated worktree after preserving runtime-local files, and start the final trial server from master on a free loopback port. Do not claim Windows in-page support or integrate while real Job containment or authenticated interactive smoke remains unproven.
