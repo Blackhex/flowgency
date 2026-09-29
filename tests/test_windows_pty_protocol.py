@@ -54,16 +54,31 @@ def test_rejects_oversized_start_payload(tmp_path: Path):
     [
         (b"not-json", "JSON"),
         (b"[]", "object"),
-        (b'{"argv": "copilot", "cwd": "C:/tmp", "env": {}, "mode": "connected", "rows": 24, "cols": 80}', "argv"),
         (b'{"argv": ["copilot"], "cwd": "relative", "env": {}, "mode": "connected", "rows": 24, "cols": 80}', "cwd"),
-        (b'{"argv": ["copilot"], "cwd": "C:/tmp", "env": {"SAFE": 1}, "mode": "connected", "rows": 24, "cols": 80}', "environment"),
-        (b'{"argv": ["copilot"], "cwd": "C:/tmp", "env": {}, "mode": "connected", "rows": 1, "cols": 80}', "rows"),
-        (b'{"argv": ["copilot"], "cwd": "C:/tmp", "env": {}, "mode": "connected", "rows": 24, "cols": 19}', "cols"),
     ],
 )
-def test_decode_start_rejects_invalid_json_and_shape(payload: bytes, match: str):
-    with pytest.raises(ValueError, match=match):
-        decode_start(payload)
+def test_decode_start_rejects_invalid_json_and_shape(payload: bytes, match: str, tmp_path: Path):
+    cwd = str(tmp_path)
+    cases = [
+        (b'{"argv": "copilot", "cwd": "' + cwd.encode() + b'", "env": {}, "mode": "connected", "rows": 24, "cols": 80}', "argv"),
+        (b'{"argv": ["copilot"], "cwd": "relative", "env": {}, "mode": "connected", "rows": 24, "cols": 80}', "cwd"),
+        (b'{"argv": ["copilot"], "cwd": "' + cwd.encode() + b'", "env": {"SAFE": 1}, "mode": "connected", "rows": 24, "cols": 80}', "environment"),
+        (b'{"argv": ["copilot"], "cwd": "' + cwd.encode() + b'", "env": {}, "mode": "connected", "rows": 1, "cols": 80}', "rows"),
+        (b'{"argv": ["copilot"], "cwd": "' + cwd.encode() + b'", "env": {}, "mode": "connected", "rows": 24, "cols": 19}', "cols"),
+    ]
+
+    if match in {"JSON", "object"}:
+        with pytest.raises(ValueError, match=match):
+            decode_start(payload)
+        return
+
+    for case_payload, case_match in cases:
+        if case_match == match:
+            with pytest.raises(ValueError, match=match):
+                decode_start(case_payload)
+            return
+
+    pytest.fail(f"missing case for {match}")
 
 
 @pytest.mark.parametrize(
@@ -78,6 +93,9 @@ def test_decode_start_rejects_invalid_json_and_shape(payload: bytes, match: str)
         (RuntimeLaunch(("copilot",), Path("C:/tmp"), {"SAFE": "ok"}, "connected"), 24, 19, "cols"),
     ],
 )
-def test_encode_start_rejects_invalid_launch_and_dimensions(launch, rows, cols, match):
+def test_encode_start_rejects_invalid_launch_and_dimensions(launch, rows, cols, match, tmp_path: Path):
+    if launch.cwd == Path("C:/tmp"):
+        launch = RuntimeLaunch(launch.argv, tmp_path, launch.env, launch.mode)
+
     with pytest.raises(ValueError, match=match):
         encode_start(launch, rows, cols)
