@@ -42,6 +42,46 @@ class _BlockingInput(io.RawIOBase):
         return b""
 
 
+class _QueueInput(io.RawIOBase):
+    def __init__(self, payload: bytes = b"") -> None:
+        self._buffer = bytearray(payload)
+        self._condition = threading.Condition()
+        self._closed = False
+
+    def readable(self) -> bool:
+        return True
+
+    def feed(self, payload: bytes) -> None:
+        with self._condition:
+            self._buffer.extend(payload)
+            self._condition.notify_all()
+
+    def close_input(self) -> None:
+        with self._condition:
+            self._closed = True
+            self._condition.notify_all()
+
+    def bytes_available(self) -> int:
+        with self._condition:
+            return len(self._buffer)
+
+    def input_closed(self) -> bool:
+        with self._condition:
+            return self._closed and not self._buffer
+
+    def read(self, size: int = -1) -> bytes:
+        with self._condition:
+            while not self._buffer and not self._closed:
+                self._condition.wait(timeout=5)
+            if not self._buffer:
+                return b""
+            if size < 0 or size > len(self._buffer):
+                size = len(self._buffer)
+            chunk = bytes(self._buffer[:size])
+            del self._buffer[:size]
+            return chunk
+
+
 def _frame_bytes(frames: list[tuple[FrameType, bytes]]) -> bytes:
     data = io.BytesIO()
     for kind, payload in frames:
@@ -63,6 +103,10 @@ class _FakePTY:
     output_chunks: list[str] = []
     spawn_result = True
     spawn_error: Exception | None = None
+    read_error: Exception | None = None
+    cancel_error: Exception | None = None
+    block_reads = False
+    read_error_ends_process = False
     exit_status = 23
     instances: list["_FakePTY"] = []
 
@@ -76,6 +120,7 @@ class _FakePTY:
         self.pid = 43210
         self._alive = True
         self._cancelled = False
+        self._cancel_event = threading.Event()
         self._chunks = list(type(self).output_chunks)
         type(self).instances.append(self)
 
@@ -95,8 +140,20 @@ class _FakePTY:
         self.sizes.append((cols, rows))
 
     def read(self, blocking: bool = False) -> str:
+        if type(self).read_error is not None:
+            error = type(self).read_error
+            type(self).read_error = None
+            if type(self).read_error_ends_process:
+                self._alive = False
+            raise error
+        if type(self).block_reads and not self._cancelled and not self._chunks:
+            self._cancel_event.wait(timeout=5)
         if self._cancelled:
             self._alive = False
+            if type(self).cancel_error is not None:
+                error = type(self).cancel_error
+                type(self).cancel_error = None
+                raise error
             return ""
         if self._chunks:
             chunk = self._chunks.pop(0)
@@ -122,6 +179,7 @@ class _FakePTY:
 
     def cancel_io(self) -> bool:
         self._cancelled = True
+        self._cancel_event.set()
         return True
 
 
@@ -130,6 +188,10 @@ def _install_fake_winpty(monkeypatch: pytest.MonkeyPatch) -> None:
     _FakePTY.output_chunks = []
     _FakePTY.spawn_result = True
     _FakePTY.spawn_error = None
+    _FakePTY.read_error = None
+    _FakePTY.cancel_error = None
+    _FakePTY.block_reads = False
+    _FakePTY.read_error_ends_process = False
     fake_winpty = types.SimpleNamespace(
         PTY=_FakePTY,
         Backend=types.SimpleNamespace(ConPTY=777),
@@ -221,3 +283,114 @@ def test_main_reports_spawn_failure_without_ready(
     assert len(frames) == 1
     assert frames[0][0] is FrameType.ERROR
     assert "startup failed" in json.loads(frames[0][1])["message"]
+
+
+def test_main_rejects_unsupported_control_frame_after_start(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _install_fake_winpty(monkeypatch)
+    _FakePTY.block_reads = True
+    launch = RuntimeLaunch(("C:/Program Files/App/app.exe",), tmp_path, {}, "connected")
+    stdout = io.BytesIO()
+
+    assert main(
+        _QueueInput(
+            _frame_bytes(
+                [
+                    (FrameType.START, encode_start(launch, 24, 80)),
+                    (FrameType.READY, b"{}"),
+                ]
+            )
+        ),
+        stdout,
+    ) == 0
+
+    frames = _read_all_frames(stdout.getvalue())
+    assert frames[0] == (FrameType.READY, b'{"pid":43210}')
+    assert frames[1][0] is FrameType.ERROR
+    assert json.loads(frames[1][1])["message"] == "Unsupported PTY control frame: READY"
+    assert frames[2] == (FrameType.EXIT, b'{"exit_code":23}')
+
+
+def test_main_returns_after_output_exit_while_control_pipe_stays_open(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _install_fake_winpty(monkeypatch)
+    _FakePTY.output_chunks = [""]
+    launch = RuntimeLaunch(("C:/Program Files/App/app.exe",), tmp_path, {}, "connected")
+    stdin = _QueueInput(_frame_bytes([(FrameType.START, encode_start(launch, 24, 80))]))
+    stdout = io.BytesIO()
+    result: list[int] = []
+    thread = threading.Thread(target=lambda: result.append(main(stdin, stdout)), daemon=False)
+
+    thread.start()
+    thread.join(timeout=0.5)
+    stdin.close_input()
+    thread.join(timeout=5)
+
+    assert not thread.is_alive()
+    assert result == [0]
+    frames = _read_all_frames(stdout.getvalue())
+    assert frames == [
+        (FrameType.READY, b'{"pid":43210}'),
+        (FrameType.EXIT, b'{"exit_code":23}'),
+    ]
+
+
+def test_main_suppresses_cancelled_output_read_errors(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _install_fake_winpty(monkeypatch)
+    _FakePTY.block_reads = True
+    _FakePTY.cancel_error = RuntimeError("cancelled by teardown")
+    launch = RuntimeLaunch(("C:/Program Files/App/app.exe",), tmp_path, {}, "connected")
+    stdin = _QueueInput(_frame_bytes([(FrameType.START, encode_start(launch, 24, 80))]))
+    stdout = io.BytesIO()
+    result: list[int] = []
+    thread = threading.Thread(target=lambda: result.append(main(stdin, stdout)), daemon=False)
+
+    thread.start()
+    stdin.close_input()
+    thread.join(timeout=5)
+
+    assert not thread.is_alive()
+    assert result == [0]
+    frames = _read_all_frames(stdout.getvalue())
+    assert frames == [
+        (FrameType.READY, b'{"pid":43210}'),
+        (FrameType.EXIT, b'{"exit_code":23}'),
+    ]
+
+
+def test_main_suppresses_eof_output_read_errors_on_child_exit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _install_fake_winpty(monkeypatch)
+    _FakePTY.read_error = EOFError("end of file")
+    _FakePTY.read_error_ends_process = True
+    launch = RuntimeLaunch(("C:/Program Files/App/app.exe",), tmp_path, {}, "connected")
+    stdout = io.BytesIO()
+
+    assert main(io.BytesIO(_frame_bytes([(FrameType.START, encode_start(launch, 24, 80))])), stdout) == 0
+
+    frames = _read_all_frames(stdout.getvalue())
+    assert frames == [
+        (FrameType.READY, b'{"pid":43210}'),
+        (FrameType.EXIT, b'{"exit_code":23}'),
+    ]
+
+
+def test_main_reports_real_output_read_errors(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _install_fake_winpty(monkeypatch)
+    _FakePTY.read_error = RuntimeError("read exploded")
+    launch = RuntimeLaunch(("C:/Program Files/App/app.exe",), tmp_path, {}, "connected")
+    stdout = io.BytesIO()
+
+    assert main(io.BytesIO(_frame_bytes([(FrameType.START, encode_start(launch, 24, 80))])), stdout) == 0
+
+    frames = _read_all_frames(stdout.getvalue())
+    assert frames[0] == (FrameType.READY, b'{"pid":43210}')
+    assert frames[1][0] is FrameType.ERROR
+    assert json.loads(frames[1][1])["message"] == "PTY output failed"

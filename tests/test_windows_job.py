@@ -386,6 +386,16 @@ def _write_connected_child(path: Path, native_python: str) -> Path:
     return path
 
 
+def _write_connected_child_that_exits(path: Path) -> Path:
+    path.write_text(
+        "import sys\n"
+        "sys.stdout.write('child-finished\\n')\n"
+        "sys.stdout.flush()\n",
+        encoding="utf-8",
+    )
+    return path
+
+
 def test_windows_pty_helper_runs_conpty_inside_owned_job(tmp_path):
     native_python, native_env = _native_python_launch()
     child_script = _write_connected_child(tmp_path / "connected_child.py", native_python)
@@ -493,6 +503,105 @@ def test_windows_pty_helper_runs_conpty_inside_owned_job(tmp_path):
             parent_input.close()
         if parent_output is not None:
             assert reader_done.wait(timeout=5), "PTY pipe reader did not drain after Job exit"
+            if reader is not None:
+                reader.join(timeout=0)
+                assert not reader.is_alive()
+            parent_output.close()
+        if owner is not None:
+            owner.close_confirmed()
+
+
+def test_windows_pty_helper_exits_when_child_finishes_with_control_pipe_open(tmp_path):
+    native_python, native_env = _native_python_launch()
+    child_script = _write_connected_child_that_exits(tmp_path / "connected_child_exit.py")
+
+    child_stdin, parent_stdin, parent_stdout, child_stdout = _make_std_pipes()
+    owner = None
+    parent_input = None
+    parent_output = None
+    reader = None
+    reader_done = threading.Event()
+    frames: queue.Queue[tuple[FrameType, bytes] | None | BaseException] = queue.Queue()
+
+    def drain_frames() -> None:
+        try:
+            while True:
+                frame = read_frame(parent_output)
+                frames.put(frame)
+                if frame is None:
+                    break
+        except BaseException as error:
+            frames.put(error)
+        finally:
+            reader_done.set()
+
+    def next_frame(timeout: float):
+        frame = frames.get(timeout=timeout)
+        if isinstance(frame, BaseException):
+            raise frame
+        return frame
+
+    try:
+        owner = WindowsJobOwner.launch(
+            (native_python, "-u", "-m", "flowgency.jobs.windows_pty_helper"),
+            tmp_path,
+            native_env,
+            int(child_stdin),
+            int(child_stdout),
+        )
+        win32api.CloseHandle(child_stdin)
+        win32api.CloseHandle(child_stdout)
+        parent_input = os.fdopen(
+            msvcrt.open_osfhandle(parent_stdin.Detach(), os.O_WRONLY | os.O_BINARY),
+            "wb",
+            buffering=0,
+        )
+        parent_output = os.fdopen(
+            msvcrt.open_osfhandle(parent_stdout.Detach(), os.O_RDONLY | os.O_BINARY),
+            "rb",
+            buffering=0,
+        )
+        reader = threading.Thread(target=drain_frames, daemon=True)
+        reader.start()
+
+        write_frame(
+            parent_input,
+            FrameType.START,
+            encode_start(
+                RuntimeLaunch((native_python, str(child_script)), tmp_path, native_env, "connected"),
+                24,
+                80,
+            ),
+        )
+
+        kind, payload = next_frame(10)
+        assert kind is FrameType.READY
+        assert owner.contains(json.loads(payload)["pid"])
+
+        saw_output = False
+        saw_exit = False
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            frame = next_frame(max(0.01, deadline - time.monotonic()))
+            assert frame is not None
+            if frame[0] is FrameType.OUTPUT:
+                saw_output = saw_output or b"child-finished" in frame[1]
+                continue
+            if frame[0] is FrameType.EXIT:
+                saw_exit = True
+                assert json.loads(frame[1]) == {"exit_code": 0}
+                break
+            if frame[0] is FrameType.ERROR:
+                raise AssertionError(frame[1].decode("utf-8", errors="strict"))
+        assert saw_output
+        assert saw_exit
+    finally:
+        if owner is not None:
+            assert owner.stop(time.monotonic() + 5) == (True, "stopped")
+        if parent_input is not None:
+            parent_input.close()
+        if parent_output is not None:
+            assert reader_done.wait(timeout=5), "PTY pipe reader did not drain after child exit"
             if reader is not None:
                 reader.join(timeout=0)
                 assert not reader.is_alive()
