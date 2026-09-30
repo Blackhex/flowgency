@@ -311,26 +311,34 @@ def test_exit_code_probe_failure_after_signaled_wait_keeps_uncertain_handle(monk
             int(second_pipes[0]), int(second_pipes[3]),
         )
     finally:
-        while _uncertain:
-            entry = _uncertain[0]
+        cleanup_error = None
+        retained_entry = _uncertain[0] if _uncertain else None
+        if retained_entry is not None:
             with contextlib.suppress(Exception):
-                win32process.TerminateProcess(entry.process_handle, 1)
+                win32process.TerminateProcess(retained_entry.process_handle, 1)
             with contextlib.suppress(Exception):
-                real_wait(entry.process_handle, 5000)
+                real_wait(retained_entry.process_handle, 5000)
             from flowgency.jobs.windows_job import _retry_uncertain
 
-            with contextlib.suppress(Exception):
+            try:
                 _retry_uncertain(time.monotonic() + 5)
+            except Exception as error:
+                cleanup_error = error
         if replacement is not None:
             confirmed, _reason = replacement.stop(time.monotonic() + 5)
             assert confirmed
             replacement.close_confirmed()
         _close_all(*first_pipes, *second_pipes)
+        if cleanup_error is not None:
+            raise cleanup_error
+        if _uncertain:
+            pytest.fail("bounded cleanup did not confirm the retained uncertain handle")
 
 
 def test_retry_uncertain_exit_code_probe_failure_raises_structured_error(monkeypatch, tmp_path):
     assert _uncertain == [], "a previous test leaked an uncertain job registration"
     pipes = _make_std_pipes()
+    real_wait = win32event.WaitForSingleObject
 
     def fail_assign(job, process):
         del job, process
@@ -367,17 +375,24 @@ def test_retry_uncertain_exit_code_probe_failure_raises_structured_error(monkeyp
         assert raised.value.cleanup_confirmed is False
         assert len(_uncertain) == 1
     finally:
-        while _uncertain:
-            entry = _uncertain[0]
+        cleanup_error = None
+        retained_entry = _uncertain[0] if _uncertain else None
+        if retained_entry is not None:
             with contextlib.suppress(Exception):
-                win32process.TerminateProcess(entry.process_handle, 1)
+                win32process.TerminateProcess(retained_entry.process_handle, 1)
             with contextlib.suppress(Exception):
-                real_wait(entry.process_handle, 5000)
+                real_wait(retained_entry.process_handle, 5000)
             from flowgency.jobs.windows_job import _retry_uncertain
 
-            with contextlib.suppress(Exception):
+            try:
                 _retry_uncertain(time.monotonic() + 5)
+            except Exception as error:
+                cleanup_error = error
         _close_all(*pipes)
+        if cleanup_error is not None:
+            raise cleanup_error
+        if _uncertain:
+            pytest.fail("bounded cleanup did not confirm the retained uncertain handle")
 
 
 def test_resume_thread_failure_cleans_up_assigned_suspended_helper(monkeypatch, tmp_path):
