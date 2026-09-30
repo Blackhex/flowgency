@@ -21,11 +21,14 @@ reopen the page to reconnect. When the configuration is ready, Flowgency opens
 the dashboard while Copilot may continue running. Use the dashboard's Setup
 session link to return or Stop.
 The setup CLI has the server user's access to files and tools; configured
-agent sandbox permissions do not apply before the first team exists. Windows
-continues to launch Copilot in a separate console, with a copyable fallback
-command; it does not offer connected setup. On POSIX, use the external terminal
-if the PTY cannot start. Closing the browser tab does not stop a connected
-session, but a server restart ends its in-memory connection and transcript.
+agent sandbox permissions do not apply before the first team exists. On
+native Windows, Copilot setup runs in this browser's terminal when the
+contained ConPTY backend is available. If it cannot prove process cleanup,
+Stop blocks another launch; a separate console with a copyable fallback
+command is offered only after safe cleanup. On POSIX, use the external
+terminal if the PTY cannot start. Closing the tab does not Stop the
+server-owned session, but a server restart ends its in-memory connection and
+transcript.
 This release's native Windows checks do not qualify POSIX connected mode;
 validate it on a native POSIX host before relying on it in production.
 

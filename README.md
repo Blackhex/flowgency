@@ -54,9 +54,13 @@ setup must ask separately before writing `integration_config.allow_local_network
 true`; declining leaves the value absent or `false`, and such runs fail
 preflight with `ticket-local-network-required` rather than widening policy.
 On supported POSIX hosts, open setup from a browser on the same computer as
-Flowgency to run GitHub Copilot setup in the page's terminal; Windows keeps
-launching Copilot in a separate console with a copyable fallback command, and
-a server restart ends an in-memory connected session and its transcript.
+Flowgency to run GitHub Copilot setup in the page's terminal. On native
+Windows, Copilot setup runs in this browser's terminal when the contained
+ConPTY backend is available; if it cannot prove process cleanup, Stop blocks
+another launch, and a separate console with a copyable fallback command is
+offered only after safe cleanup. Closing the tab does not Stop the
+server-owned session, but a server restart ends an in-memory connected
+session and its transcript.
 Native Windows checks do not qualify POSIX connected mode; validate it on a
 native POSIX host before relying on it in production.
 
