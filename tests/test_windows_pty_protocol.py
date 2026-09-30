@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,11 @@ from flowgency.jobs.windows_pty_protocol import (
     read_frame,
     write_frame,
 )
+
+# Sentinels stand in for a real absolute cwd; each test substitutes tmp_path
+# before serialization/validation so cases stay portable across platforms.
+_CWD_SENTINEL = "<sentinel-cwd>"
+_CWD_PLACEHOLDER = Path("sentinel-cwd")
 
 
 def test_output_frame_round_trips_terminal_bytes():
@@ -50,51 +56,70 @@ def test_rejects_oversized_start_payload(tmp_path: Path):
 
 
 @pytest.mark.parametrize(
-    ("payload", "match"),
+    ("template", "match"),
     [
-        (b"not-json", "JSON"),
-        (b"[]", "object"),
-        (b'{"argv": ["copilot"], "cwd": "relative", "env": {}, "mode": "connected", "rows": 24, "cols": 80}', "cwd"),
+        pytest.param(
+            {"argv": "copilot", "cwd": _CWD_SENTINEL, "env": {}, "mode": "connected", "rows": 24, "cols": 80},
+            "argv",
+            id="argv-not-a-list",
+        ),
+        pytest.param(
+            {"argv": ["copilot"], "cwd": "relative", "env": {}, "mode": "connected", "rows": 24, "cols": 80},
+            "cwd",
+            id="cwd-relative",
+        ),
+        pytest.param(
+            {"argv": ["copilot"], "cwd": _CWD_SENTINEL, "env": {"SAFE": 1}, "mode": "connected", "rows": 24, "cols": 80},
+            "environment",
+            id="env-value-not-a-string",
+        ),
+        pytest.param(
+            {"argv": ["copilot"], "cwd": _CWD_SENTINEL, "env": {}, "mode": "connected", "rows": 1, "cols": 80},
+            "rows",
+            id="rows-too-low",
+        ),
+        pytest.param(
+            {"argv": ["copilot"], "cwd": _CWD_SENTINEL, "env": {}, "mode": "connected", "rows": 24, "cols": 19},
+            "cols",
+            id="cols-too-low",
+        ),
     ],
 )
-def test_decode_start_rejects_invalid_json_and_shape(payload: bytes, match: str, tmp_path: Path):
-    cwd = str(tmp_path)
-    cases = [
-        (b'{"argv": "copilot", "cwd": "' + cwd.encode() + b'", "env": {}, "mode": "connected", "rows": 24, "cols": 80}', "argv"),
-        (b'{"argv": ["copilot"], "cwd": "relative", "env": {}, "mode": "connected", "rows": 24, "cols": 80}', "cwd"),
-        (b'{"argv": ["copilot"], "cwd": "' + cwd.encode() + b'", "env": {"SAFE": 1}, "mode": "connected", "rows": 24, "cols": 80}', "environment"),
-        (b'{"argv": ["copilot"], "cwd": "' + cwd.encode() + b'", "env": {}, "mode": "connected", "rows": 1, "cols": 80}', "rows"),
-        (b'{"argv": ["copilot"], "cwd": "' + cwd.encode() + b'", "env": {}, "mode": "connected", "rows": 24, "cols": 19}', "cols"),
-    ]
+def test_decode_start_rejects_invalid_field_values(template: dict, match: str, tmp_path: Path):
+    body = dict(template)
+    if body["cwd"] == _CWD_SENTINEL:
+        body["cwd"] = str(tmp_path)
+    payload = json.dumps(body).encode("utf-8")
+    with pytest.raises(ValueError, match=match):
+        decode_start(payload)
 
-    if match in {"JSON", "object"}:
-        with pytest.raises(ValueError, match=match):
-            decode_start(payload)
-        return
 
-    for case_payload, case_match in cases:
-        if case_match == match:
-            with pytest.raises(ValueError, match=match):
-                decode_start(case_payload)
-            return
-
-    pytest.fail(f"missing case for {match}")
+@pytest.mark.parametrize(
+    ("payload", "match"),
+    [
+        pytest.param(b"not-json", "JSON", id="invalid-json"),
+        pytest.param(b"[]", "object", id="top-level-not-object"),
+    ],
+)
+def test_decode_start_rejects_malformed_json_and_shape(payload: bytes, match: str):
+    with pytest.raises(ValueError, match=match):
+        decode_start(payload)
 
 
 @pytest.mark.parametrize(
     "launch, rows, cols, match",
     [
-        (RuntimeLaunch(("",), Path("C:/tmp"), {}, "connected"), 24, 80, "argv"),
+        (RuntimeLaunch(("",), _CWD_PLACEHOLDER, {}, "connected"), 24, 80, "argv"),
         (RuntimeLaunch(("copilot",), Path("relative"), {}, "connected"), 24, 80, "cwd"),
-        (RuntimeLaunch(("copilot",), Path("C:/tmp"), {"SAFE": 1}, "connected"), 24, 80, "environment"),
-        (RuntimeLaunch(("copilot",), Path("C:/tmp"), {"SAFE": "ok", "NUL": "bad\x00value"}, "connected"), 24, 80, "NUL"),
-        (RuntimeLaunch(("copilot",), Path("C:/tmp"), {"SAFE": "ok"}, "headless"), 24, 80, "connected"),
-        (RuntimeLaunch(("copilot",), Path("C:/tmp"), {"SAFE": "ok"}, "connected"), 1, 80, "rows"),
-        (RuntimeLaunch(("copilot",), Path("C:/tmp"), {"SAFE": "ok"}, "connected"), 24, 19, "cols"),
+        (RuntimeLaunch(("copilot",), _CWD_PLACEHOLDER, {"SAFE": 1}, "connected"), 24, 80, "environment"),
+        (RuntimeLaunch(("copilot",), _CWD_PLACEHOLDER, {"SAFE": "ok", "NUL": "bad\x00value"}, "connected"), 24, 80, "NUL"),
+        (RuntimeLaunch(("copilot",), _CWD_PLACEHOLDER, {"SAFE": "ok"}, "headless"), 24, 80, "connected"),
+        (RuntimeLaunch(("copilot",), _CWD_PLACEHOLDER, {"SAFE": "ok"}, "connected"), 1, 80, "rows"),
+        (RuntimeLaunch(("copilot",), _CWD_PLACEHOLDER, {"SAFE": "ok"}, "connected"), 24, 19, "cols"),
     ],
 )
 def test_encode_start_rejects_invalid_launch_and_dimensions(launch, rows, cols, match, tmp_path: Path):
-    if launch.cwd == Path("C:/tmp"):
+    if launch.cwd == _CWD_PLACEHOLDER:
         launch = RuntimeLaunch(launch.argv, tmp_path, launch.env, launch.mode)
 
     with pytest.raises(ValueError, match=match):
