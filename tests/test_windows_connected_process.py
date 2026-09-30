@@ -46,6 +46,17 @@ def _write_script(path: Path, body: str) -> Path:
     return path
 
 
+def _wait_for_text(path: Path, *, timeout: float = 20.0) -> str:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if path.exists():
+            text = path.read_text(encoding="utf-8").strip()
+            if text:
+                return text
+        time.sleep(0.02)
+    raise AssertionError(f"Timed out waiting for {path}")
+
+
 def _read_visible_until(process, expected: bytes, *, timeout: float = 20.0) -> bytes:
     ansi = re.compile(rb"\x1b\[[0-9;?]*[A-Za-z]")
     buffer = bytearray()
@@ -137,6 +148,69 @@ def test_windows_connected_process_partial_ready_cleans_up(tmp_path: Path, monke
     with pytest.raises(ConnectedLaunchError) as raised:
         start_connected_process(launch)
     assert raised.value.cleanup_confirmed is True
+
+
+def test_windows_connected_process_helper_exit_after_ready_keeps_job_alive_until_stop(
+    tmp_path: Path, monkeypatch
+):
+    native_python, native_env = _native_python_launch()
+    child_pid_path = tmp_path / "contained-child.pid"
+    child_script = _write_script(
+        tmp_path / "contained_child.py",
+        (
+            "import os, pathlib, sys, time\n"
+            "pathlib.Path(sys.argv[1]).write_text(str(os.getpid()), encoding='utf-8')\n"
+            "time.sleep(120)\n"
+        ),
+    )
+    helper_script = _write_script(
+        tmp_path / "ready_then_exit_helper.py",
+        (
+            "import json, subprocess, sys\n"
+            "from flowgency.jobs.windows_pty_protocol import FrameType, decode_start, read_frame, write_frame\n"
+            "frame = read_frame(sys.stdin.buffer)\n"
+            "if frame is None or frame[0] is not FrameType.START:\n"
+            "    raise SystemExit(2)\n"
+            "launch, _rows, _cols = decode_start(frame[1])\n"
+            "child = subprocess.Popen(\n"
+            "    list(launch.argv),\n"
+            "    cwd=str(launch.cwd),\n"
+            "    env=dict(launch.env),\n"
+            "    stdin=subprocess.DEVNULL,\n"
+            "    stdout=subprocess.DEVNULL,\n"
+            "    stderr=subprocess.DEVNULL,\n"
+            "    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),\n"
+            ")\n"
+            "payload = json.dumps({'pid': child.pid}, separators=(',', ':')).encode('utf-8')\n"
+            "write_frame(sys.stdout.buffer, FrameType.READY, payload)\n"
+            "sys.stdout.flush()\n"
+        ),
+    )
+    monkeypatch.setattr(
+        "flowgency.jobs.windows_connected_process._helper_launch",
+        lambda: ((native_python, "-u", str(helper_script)), native_env),
+    )
+    launch = RuntimeLaunch(
+        (native_python, "-u", str(child_script), str(child_pid_path)),
+        tmp_path,
+        native_env,
+        "connected",
+    )
+    process = start_connected_process(launch)
+    try:
+        child_pid = int(_wait_for_text(child_pid_path))
+        assert process.read() == b""
+        assert process.alive() is True
+        assert process.exit_code() is None
+        assert getattr(process, "_owner").contains(child_pid) is True
+        reader = getattr(process, "_reader_thread")
+        assert reader is not None
+        reader.join(timeout=2.0)
+        assert reader.is_alive() is False
+    finally:
+        evidence = _stop(process, "windows-ready-eof")
+        assert evidence.confirmed
+        assert process.alive() is False
 
 
 class _BlockingOwner:

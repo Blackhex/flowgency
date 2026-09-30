@@ -3,18 +3,47 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import queue
 import threading
+import time
 from pathlib import Path
 
 import pytest
 
 from flowgency.integrations.models import RuntimeLaunch
 from flowgency.jobs.connected_process import ConnectedLaunchError
-from flowgency.jobs.processes import ProcessStopEvidence
+from flowgency.jobs.processes import ProcessStopEvidence, process_identity_state, read_process_identity
 from flowgency.web.setup_sessions import SetupSessionConflict, SetupSessionManager
 
 from tests._connected_setup_helpers import FakeProcess
+
+
+if os.name == "nt":
+    import win32api
+    import win32process
+
+
+def _wait_for_text(path: Path, *, timeout: float = 20.0) -> str:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if path.exists():
+            text = path.read_text(encoding="utf-8").strip()
+            if text:
+                return text
+        time.sleep(0.02)
+    raise AssertionError(f"Timed out waiting for {path}")
+
+
+def _native_python_launch() -> tuple[str, dict[str, str]]:
+    env = os.environ.copy()
+    env["__PYVENV_LAUNCHER__"] = __import__("sys").executable
+    return win32process.GetModuleFileNameEx(win32api.GetCurrentProcess(), 0), env
+
+
+def _write_script(path: Path, body: str) -> Path:
+    path.write_text(body, encoding="utf-8")
+    return path
 
 
 class _UnconfirmedThenConfirmedProcess(FakeProcess):
@@ -741,6 +770,184 @@ def test_setup_session_confirmed_cancel_releases_starting_subscriber(tmp_path: P
         assert await asyncio.wait_for(pending.get(), timeout=1) is None
         assert manager.snapshot("owner") is None  # confirmed clean cancel frees the slot
         assert fakes[0].running is False
+        await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows connected startup cancellation is Windows-specific")
+def test_windows_setup_session_cancelled_start_before_ready_confirms_cleanup(tmp_path: Path, monkeypatch):
+    from flowgency.jobs.connected_process import start_connected_process
+
+    native_python, native_env = _native_python_launch()
+    child_pid_path = tmp_path / "cancel-child.pid"
+    helper_started = tmp_path / "helper-started.txt"
+    helper_exit = tmp_path / "helper-exit.txt"
+    helper_ready = tmp_path / "helper-ready.txt"
+    child_script = _write_script(
+        tmp_path / "cancel_child.py",
+        (
+            "import os, pathlib, sys, time\n"
+            "pathlib.Path(sys.argv[1]).write_text(str(os.getpid()), encoding='utf-8')\n"
+            "time.sleep(120)\n"
+        ),
+    )
+    helper_script = _write_script(
+        tmp_path / "cancel_helper.py",
+        (
+            "import json, pathlib, subprocess, sys, time\n"
+            "from flowgency.jobs.windows_pty_protocol import FrameType, decode_start, read_frame, write_frame\n"
+            f"started = pathlib.Path({str(helper_started)!r})\n"
+            f"ready = pathlib.Path({str(helper_ready)!r})\n"
+            f"stop_now = pathlib.Path({str(helper_exit)!r})\n"
+            "frame = read_frame(sys.stdin.buffer)\n"
+            "if frame is None or frame[0] is not FrameType.START:\n"
+            "    raise SystemExit(2)\n"
+            "launch, _rows, _cols = decode_start(frame[1])\n"
+            "child = subprocess.Popen(\n"
+            "    list(launch.argv),\n"
+            "    cwd=str(launch.cwd),\n"
+            "    env=dict(launch.env),\n"
+            "    stdin=subprocess.DEVNULL,\n"
+            "    stdout=subprocess.DEVNULL,\n"
+            "    stderr=subprocess.DEVNULL,\n"
+            "    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),\n"
+            ")\n"
+            "started.write_text('started', encoding='utf-8')\n"
+            "while not ready.exists() and not stop_now.exists():\n"
+            "    time.sleep(0.02)\n"
+            "if stop_now.exists():\n"
+            "    raise SystemExit(0)\n"
+            "payload = json.dumps({'pid': child.pid}, separators=(',', ':')).encode('utf-8')\n"
+            "write_frame(sys.stdout.buffer, FrameType.READY, payload)\n"
+            "sys.stdout.flush()\n"
+            "time.sleep(120)\n"
+        ),
+    )
+    monkeypatch.setattr(
+        "flowgency.jobs.windows_connected_process._helper_launch",
+        lambda: ((native_python, "-u", str(helper_script)), native_env),
+    )
+
+    async def exercise():
+        manager = SetupSessionManager(process_factory=start_connected_process)
+        launch = RuntimeLaunch(
+            (native_python, "-u", str(child_script), str(child_pid_path)),
+            tmp_path,
+            native_env,
+            "connected",
+        )
+        start1 = asyncio.create_task(manager.start("owner", "copilot", launch, "fallback"))
+        await asyncio.to_thread(_wait_for_text, helper_started)
+        child_identity = read_process_identity(int(await asyncio.to_thread(_wait_for_text, child_pid_path)))
+        assert child_identity is not None
+        start1.cancel()
+        await asyncio.sleep(0.05)
+        helper_exit.write_text("exit", encoding="utf-8")
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(start1, timeout=15)
+        assert manager.snapshot("owner") is None
+        deadline = time.monotonic() + 5
+        while process_identity_state(child_identity) == "alive" and time.monotonic() < deadline:
+            await asyncio.sleep(0.05)
+        assert process_identity_state(child_identity) != "alive"
+
+        helper_exit.unlink()
+        helper_ready.write_text("ready", encoding="utf-8")
+        running = await asyncio.wait_for(manager.start("owner", "copilot", launch, "fallback"), timeout=15)
+        assert running.state == "running"
+        evidence = await asyncio.wait_for(manager.stop("owner"), timeout=15)
+        assert evidence.confirmed is True
+        await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows connected startup cancellation is Windows-specific")
+def test_windows_setup_session_cancelled_start_before_ready_blocks_on_unknown_accounting(
+    tmp_path: Path, monkeypatch
+):
+    from flowgency.jobs.connected_process import start_connected_process
+    import flowgency.jobs.windows_job as windows_job
+
+    native_python, native_env = _native_python_launch()
+    child_pid_path = tmp_path / "unknown-child.pid"
+    helper_started = tmp_path / "unknown-helper-started.txt"
+    helper_exit = tmp_path / "unknown-helper-exit.txt"
+    child_script = _write_script(
+        tmp_path / "unknown_child.py",
+        (
+            "import os, pathlib, sys, time\n"
+            "pathlib.Path(sys.argv[1]).write_text(str(os.getpid()), encoding='utf-8')\n"
+            "time.sleep(120)\n"
+        ),
+    )
+    helper_script = _write_script(
+        tmp_path / "unknown_cancel_helper.py",
+        (
+            "import pathlib, subprocess, sys, time\n"
+            "from flowgency.jobs.windows_pty_protocol import FrameType, decode_start, read_frame\n"
+            f"started = pathlib.Path({str(helper_started)!r})\n"
+            f"stop_now = pathlib.Path({str(helper_exit)!r})\n"
+            "frame = read_frame(sys.stdin.buffer)\n"
+            "if frame is None or frame[0] is not FrameType.START:\n"
+            "    raise SystemExit(2)\n"
+            "launch, _rows, _cols = decode_start(frame[1])\n"
+            "subprocess.Popen(\n"
+            "    list(launch.argv),\n"
+            "    cwd=str(launch.cwd),\n"
+            "    env=dict(launch.env),\n"
+            "    stdin=subprocess.DEVNULL,\n"
+            "    stdout=subprocess.DEVNULL,\n"
+            "    stderr=subprocess.DEVNULL,\n"
+            "    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),\n"
+            ")\n"
+            "started.write_text('started', encoding='utf-8')\n"
+            "while not stop_now.exists():\n"
+            "    time.sleep(0.02)\n"
+        ),
+    )
+    monkeypatch.setattr(
+        "flowgency.jobs.windows_connected_process._helper_launch",
+        lambda: ((native_python, "-u", str(helper_script)), native_env),
+    )
+    real_job_exit_status = windows_job._job_exit_status
+    calls = {"count": 0}
+
+    def unknown_once(job_handle, deadline: float):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return "unknown"
+        return real_job_exit_status(job_handle, deadline)
+
+    monkeypatch.setattr(windows_job, "_job_exit_status", unknown_once)
+
+    async def exercise():
+        manager = SetupSessionManager(process_factory=start_connected_process)
+        launch = RuntimeLaunch(
+            (native_python, "-u", str(child_script), str(child_pid_path)),
+            tmp_path,
+            native_env,
+            "connected",
+        )
+        start1 = asyncio.create_task(manager.start("owner", "copilot", launch, "fallback"))
+        await asyncio.to_thread(_wait_for_text, helper_started)
+        child_identity = read_process_identity(int(await asyncio.to_thread(_wait_for_text, child_pid_path)))
+        assert child_identity is not None
+        start1.cancel()
+        await asyncio.sleep(0.05)
+        helper_exit.write_text("exit", encoding="utf-8")
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(start1, timeout=15)
+        snapshot = manager.snapshot("owner")
+        assert snapshot is not None
+        assert snapshot.state == "failed"
+        with pytest.raises(SetupSessionConflict):
+            await manager.start("owner", "copilot", launch, "fallback")
+        deadline = time.monotonic() + 5
+        while process_identity_state(child_identity) == "alive" and time.monotonic() < deadline:
+            await asyncio.sleep(0.05)
+        assert process_identity_state(child_identity) != "alive"
         await manager.shutdown()
 
     asyncio.run(exercise())
