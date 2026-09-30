@@ -1,15 +1,24 @@
 from __future__ import annotations
 
+import json
 import os
+import re
 import sys
+import threading
 import time
 from pathlib import Path
 
 import pytest
 
 from flowgency.integrations.models import RuntimeLaunch
-from flowgency.jobs.connected_process import ConnectedLaunchError, start_connected_process
+from flowgency.jobs.connected_process import (
+    ConnectedLaunchError,
+    ConnectedLaunchError as _ConnectedLaunchError,
+    start_connected_process,
+)
 from flowgency.jobs.processes import RuntimeProcessLifecycle
+from flowgency.jobs.windows_connected_process import WindowsConnectedProcess
+from flowgency.jobs.windows_pty_protocol import FrameType
 
 from tests.test_connected_process import _read_until
 
@@ -35,6 +44,21 @@ def _stop(process, name: str):
 def _write_script(path: Path, body: str) -> Path:
     path.write_text(body, encoding="utf-8")
     return path
+
+
+def _read_visible_until(process, expected: bytes, *, timeout: float = 20.0) -> bytes:
+    ansi = re.compile(rb"\x1b\[[0-9;?]*[A-Za-z]")
+    buffer = bytearray()
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        chunk = process.read()
+        if not chunk:
+            break
+        buffer.extend(chunk)
+        visible = ansi.sub(b"", bytes(buffer))
+        if expected in visible:
+            return visible
+    raise AssertionError(f"Timed out waiting for visible output {expected!r}; output was {bytes(buffer)!r}")
 
 
 def test_windows_connected_process_streams_output_and_confirms_nested_job_membership(tmp_path: Path):
@@ -63,8 +87,10 @@ def test_windows_connected_process_streams_output_and_confirms_nested_job_member
         _read_until(process, rb"helper-child-ready")
         grandchild_pid = int(_read_until(process, rb"grandchild-pid:(\d+)\r?\n").group(1))
         assert getattr(process, "_owner").contains(grandchild_pid)
-        process.write("zażółć\n".encode("utf-8"))
-        assert b"za\xc5\xbc\xc3\xb3\xc5\x82\xc4\x87" in _read_until(process, "zażółć".encode("utf-8")).group(0)
+        payload = "zażółć\n".encode("utf-8")
+        process.write(payload[:3])
+        process.write(payload[3:])
+        assert payload.rstrip() in _read_visible_until(process, payload.rstrip())
     finally:
         evidence = _stop(process, "windows-stream")
         assert evidence.confirmed
@@ -111,3 +137,144 @@ def test_windows_connected_process_partial_ready_cleans_up(tmp_path: Path, monke
     with pytest.raises(ConnectedLaunchError) as raised:
         start_connected_process(launch)
     assert raised.value.cleanup_confirmed is True
+
+
+class _BlockingOwner:
+    def __init__(self):
+        self.pid = 4321
+        self.stop_calls = 0
+        self.closed = False
+        self.results = [(True, "stopped")]
+
+    def contains(self, pid: int) -> bool:
+        return pid == self.pid
+
+    def stop(self, deadline: float) -> tuple[bool, str]:
+        del deadline
+        self.stop_calls += 1
+        index = min(self.stop_calls - 1, len(self.results) - 1)
+        return self.results[index]
+
+    def alive(self) -> bool:
+        return self.stop_calls == 0
+
+    def close_confirmed(self) -> None:
+        self.closed = True
+
+
+class _BlockingFrameReader:
+    def __init__(self):
+        self.entered = threading.Event()
+        self.released = threading.Event()
+
+    def read(self, *, deadline: float | None = None):
+        del deadline
+        self.entered.set()
+        self.released.wait(30.0)
+        return None
+
+
+def test_windows_connected_process_resize_writes_resize_frame(tmp_path: Path, monkeypatch):
+    owner = _BlockingOwner()
+    input_path = tmp_path / "input.bin"
+    output_path = tmp_path / "output.bin"
+    input_path.write_bytes(b"")
+    output_path.write_bytes(b"")
+    recorded: list[tuple[FrameType, bytes]] = []
+
+    def capture_frame(stream, kind, payload):
+        del stream
+        recorded.append((kind, bytes(payload)))
+
+    monkeypatch.setattr("flowgency.jobs.windows_connected_process.write_frame", capture_frame)
+
+    with input_path.open("wb", buffering=0) as input_stream, output_path.open("rb", buffering=0) as output_stream:
+        process = WindowsConnectedProcess(owner, input_stream, output_stream)
+        process.resize(33, 91)
+
+    assert recorded == [(FrameType.RESIZE, b'{"rows":33,"cols":91}')]
+
+
+def test_windows_stop_retry_confirms_after_job_accounting_recovers(tmp_path: Path):
+    native_python, native_env = _native_python_launch()
+    launch = RuntimeLaunch(
+        (native_python, "-u", "-c", "print('replacement', flush=True)"),
+        tmp_path,
+        native_env,
+        "connected",
+    )
+    owner = _BlockingOwner()
+    owner.results = [
+        (False, "job-accounting-unavailable"),
+        (False, "job-accounting-unavailable"),
+        (True, "stopped"),
+    ]
+    input_path = tmp_path / "input.bin"
+    output_path = tmp_path / "output.bin"
+    input_path.write_bytes(b"")
+    output_path.write_bytes(b"")
+
+    with input_path.open("wb", buffering=0) as input_stream, output_path.open("rb", buffering=0) as output_stream:
+        process = WindowsConnectedProcess(owner, input_stream, output_stream)
+        evidence = process.stop(RuntimeProcessLifecycle("setup", "job-accounting"))
+        assert evidence.confirmed is False
+        assert evidence.reason == "job-accounting-unavailable"
+        assert owner.closed is False
+
+        with pytest.raises(_ConnectedLaunchError) as raised:
+            start_connected_process(launch)
+        assert raised.value.cleanup_confirmed is False
+
+        retry = process.stop(RuntimeProcessLifecycle("setup", "job-accounting-retry"))
+        assert retry.confirmed is True
+        assert retry.reason == "stopped"
+        assert owner.closed is True
+
+    replacement = start_connected_process(launch)
+    try:
+        assert b"replacement" in _read_until(replacement, rb"replacement").group(0)
+    finally:
+        assert _stop(replacement, "job-accounting-replacement").confirmed
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows connected PTY adapter is Windows-specific")
+def test_windows_stop_requires_reader_drain_before_confirmation(tmp_path: Path):
+    native_python, native_env = _native_python_launch()
+    launch = RuntimeLaunch(
+        (native_python, "-u", "-c", "print('replacement', flush=True)"),
+        tmp_path,
+        native_env,
+        "connected",
+    )
+    owner = _BlockingOwner()
+    input_path = tmp_path / "input.bin"
+    output_path = tmp_path / "output.bin"
+    input_path.write_bytes(b"")
+    output_path.write_bytes(b"")
+    with input_path.open("wb", buffering=0) as input_stream, output_path.open("rb", buffering=0) as output_stream:
+        process = WindowsConnectedProcess(owner, input_stream, output_stream)
+        blocking_reader = _BlockingFrameReader()
+        process._frame_reader = blocking_reader
+        process._reader_thread = threading.Thread(target=process._read_frames, name="blocked-frame-reader", daemon=False)
+        process._reader_thread.start()
+        assert blocking_reader.entered.wait(1.0)
+
+        evidence = process.stop(RuntimeProcessLifecycle("setup", "blocked-reader"))
+        assert evidence.confirmed is False
+        assert evidence.reason == "reader-undrained"
+        assert owner.closed is False
+        assert process._reader_thread is not None and process._reader_thread.is_alive()
+
+        with pytest.raises(_ConnectedLaunchError) as raised:
+            start_connected_process(launch)
+        assert raised.value.cleanup_confirmed is False
+
+        blocking_reader.released.set()
+        deadline = time.monotonic() + 2.0
+        while process._reader_thread is not None and process._reader_thread.is_alive() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert process._reader_thread is not None and not process._reader_thread.is_alive()
+
+        retry = process.stop(RuntimeProcessLifecycle("setup", "blocked-reader-retry"))
+        assert retry.confirmed is True
+        assert owner.closed is True

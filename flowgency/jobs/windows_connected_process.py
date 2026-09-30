@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import importlib
 import json
 import os
 import struct
@@ -25,6 +26,18 @@ _READ_POLL_SECONDS = 0.01
 _READER_JOIN_TIMEOUT_SECONDS = 1.0
 
 
+def _has_attr(module: object, name: str) -> bool:
+    return getattr(module, name, None) is not None
+
+
+def _websocket_protocol_available() -> bool:
+    try:
+        module = importlib.import_module("uvicorn.protocols.websockets.auto")
+    except ImportError:
+        return False
+    return _has_attr(module, "AutoWebSocketsProtocol")
+
+
 def windows_connected_process_available() -> bool:
     if os.name != "nt":
         return False
@@ -40,7 +53,21 @@ def windows_connected_process_available() -> bool:
         import winpty
     except ImportError:
         return False
-    return getattr(getattr(winpty, "Backend", None), "ConPTY", None) is not None
+    if getattr(getattr(winpty, "Backend", None), "ConPTY", None) is None:
+        return False
+    if not _websocket_protocol_available():
+        return False
+    required = (
+        (win32job, "AssignProcessToJobObject"),
+        (win32job, "IsProcessInJob"),
+        (win32job, "QueryInformationJobObject"),
+        (win32job, "TerminateJobObject"),
+        (win32pipe, "CreatePipe"),
+        (win32pipe, "PeekNamedPipe"),
+        (win32process, "CreateProcess"),
+        (win32process, "ResumeThread"),
+    )
+    return all(_has_attr(module, name) for module, name in required)
 
 
 def _helper_launch() -> tuple[tuple[str, ...], dict[str, str]]:
@@ -160,6 +187,7 @@ class WindowsConnectedProcess(_OwnedTerminal):
         self._child_pid: int | None = None
         self._child_exit_code: int | None = None
         self._reader_thread: threading.Thread | None = None
+        self._reader_active = False
         self._stream_ended = False
         self._reader_error: str | None = None
 
@@ -318,24 +346,46 @@ class WindowsConnectedProcess(_OwnedTerminal):
         with self._output_lock:
             self._stream_ended = True
 
-    def _release(self, drained: bool) -> None:
+    def _stop_outcome(
+        self,
+        confirmed: bool,
+        reason: str,
+        drained: bool,
+        released: bool,
+    ) -> tuple[bool, str]:
+        if not confirmed:
+            return False, reason
         if not drained:
-            return
+            return False, "reader-undrained"
+        if not released:
+            return False, "reader-unreleased"
+        return True, reason
+
+    def _release(self, drained: bool) -> bool:
+        if not drained:
+            return False
         reader = self._reader_thread
         if reader is not None:
             reader.join(timeout=_READER_JOIN_TIMEOUT_SECONDS)
             if reader.is_alive():
-                return
+                return False
         with contextlib.suppress(Exception):
             self._input_stream.close()
         with contextlib.suppress(Exception):
             self._output_stream.close()
         self._owner.close_confirmed()
+        return True
 
     def _read_frames(self) -> None:
         try:
             while True:
-                frame = self._frame_reader.read()
+                with self._io_lock:
+                    self._reader_active = True
+                try:
+                    frame = self._frame_reader.read()
+                finally:
+                    with self._io_lock:
+                        self._reader_active = False
                 if frame is None:
                     return
                 kind, payload = frame
@@ -355,6 +405,16 @@ class WindowsConnectedProcess(_OwnedTerminal):
         finally:
             with self._output_lock:
                 self._stream_ended = True
+
+    def _release_reader(self, deadline: float) -> bool:
+        while True:
+            self._cancel_reads()
+            with self._io_lock:
+                if self._ops_in_flight == 0 and not self._reader_active:
+                    return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.01)
 
     def _append_output(self, payload: bytes) -> None:
         if not payload:

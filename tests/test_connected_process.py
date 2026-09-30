@@ -6,6 +6,7 @@ import re
 import sys
 import threading
 import time
+import types
 from pathlib import Path
 
 import pytest
@@ -127,6 +128,23 @@ def test_windows_connected_process_unavailable_without_required_modules(tmp_path
 @pytest.mark.skipif(os.name != "nt", reason="Windows connected-setup gate")
 def test_windows_connected_process_available_with_real_dependencies():
     assert connected_process_available() is True
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows connected-setup gate")
+def test_windows_connected_process_unavailable_without_websocket_protocol(monkeypatch):
+    module = types.SimpleNamespace(AutoWebSocketsProtocol=None)
+    monkeypatch.setitem(sys.modules, "uvicorn.protocols.websockets.auto", module)
+
+    assert connected_process_available() is False
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows connected-setup gate")
+def test_windows_connected_process_unavailable_without_job_primitives(monkeypatch):
+    import win32job
+
+    monkeypatch.delattr(win32job, "AssignProcessToJobObject", raising=False)
+
+    assert connected_process_available() is False
 
 
 @pytest.mark.skipif(os.name == "nt" or not Path("/proc/self/stat").is_file(), reason="POSIX /proc PTY check")

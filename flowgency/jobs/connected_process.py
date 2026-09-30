@@ -232,8 +232,9 @@ class _OwnedTerminal:
                 with self._io_lock:
                     self._io_closed = True
                 drained = self._release_reader(deadline if confirmed or self._reads_cancellable else time.monotonic())
+                released = self._release(drained) if confirmed else False
+                confirmed, reason = self._stop_outcome(confirmed, reason, drained, released)
                 if confirmed:
-                    self._release(drained)
                     self._stopped = True
                 # Recorded while still "in flight" so a concurrent launch check that is
                 # waiting on `_enter_stop`/`_exit_stop` never sees a stale, empty pending list.
@@ -267,8 +268,18 @@ class _OwnedTerminal:
     def _cancel_reads(self) -> None:
         return None
 
-    def _release(self, drained: bool) -> None:
+    def _release(self, drained: bool) -> bool:
         raise NotImplementedError
+
+    def _stop_outcome(
+        self,
+        confirmed: bool,
+        reason: str,
+        drained: bool,
+        released: bool,
+    ) -> tuple[bool, str]:
+        del drained, released
+        return confirmed, reason
 
 
 class PosixConnectedProcess(_OwnedTerminal):
@@ -396,8 +407,9 @@ class PosixConnectedProcess(_OwnedTerminal):
                 return False
             time.sleep(0.02)
 
-    def _release(self, drained: bool) -> None:
+    def _release(self, drained: bool) -> bool:
         # Closing an fd an operation is still inside could hand its number to an unrelated file.
         if drained:
             with contextlib.suppress(Exception):
                 self._pty.close(force=True)
+        return True
