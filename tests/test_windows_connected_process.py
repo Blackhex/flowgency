@@ -27,7 +27,9 @@ pytestmark = pytest.mark.skipif(os.name != "nt", reason="Windows connected PTY a
 
 
 if os.name == "nt":
+    import pywintypes
     import win32api
+    import win32con
     import win32process
 
 
@@ -55,6 +57,22 @@ def _wait_for_text(path: Path, *, timeout: float = 20.0) -> str:
                 return text
         time.sleep(0.02)
     raise AssertionError(f"Timed out waiting for {path}")
+
+
+def _wait_for_process_exit(pid: int, *, timeout: float = 5.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            handle = win32api.OpenProcess(win32con.PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        except pywintypes.error:
+            return True
+        try:
+            if win32process.GetExitCodeProcess(handle) != win32con.STILL_ACTIVE:
+                return True
+        finally:
+            win32api.CloseHandle(handle)
+        time.sleep(0.05)
+    return False
 
 
 def _read_visible_until(process, expected: bytes, *, timeout: float = 20.0) -> bytes:
@@ -197,6 +215,7 @@ def test_windows_connected_process_helper_exit_after_ready_keeps_job_alive_until
         "connected",
     )
     process = start_connected_process(launch)
+    child_pid: int | None = None
     try:
         child_pid = int(_wait_for_text(child_pid_path))
         assert process.read() == b""
@@ -211,6 +230,8 @@ def test_windows_connected_process_helper_exit_after_ready_keeps_job_alive_until
         evidence = _stop(process, "windows-ready-eof")
         assert evidence.confirmed
         assert process.alive() is False
+        assert child_pid is not None
+        assert _wait_for_process_exit(child_pid)
 
 
 class _BlockingOwner:

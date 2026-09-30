@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import queue
 import threading
@@ -837,28 +838,45 @@ def test_windows_setup_session_cancelled_start_before_ready_confirms_cleanup(tmp
             native_env,
             "connected",
         )
-        start1 = asyncio.create_task(manager.start("owner", "copilot", launch, "fallback"))
-        await asyncio.to_thread(_wait_for_text, helper_started)
-        child_identity = read_process_identity(int(await asyncio.to_thread(_wait_for_text, child_pid_path)))
-        assert child_identity is not None
-        start1.cancel()
-        await asyncio.sleep(0.05)
-        helper_exit.write_text("exit", encoding="utf-8")
-        with pytest.raises(asyncio.CancelledError):
-            await asyncio.wait_for(start1, timeout=15)
-        assert manager.snapshot("owner") is None
-        deadline = time.monotonic() + 5
-        while process_identity_state(child_identity) == "alive" and time.monotonic() < deadline:
+        start1: asyncio.Task[object] | None = None
+        primary_error: BaseException | None = None
+        try:
+            start1 = asyncio.create_task(manager.start("owner", "copilot", launch, "fallback"))
+            await asyncio.to_thread(_wait_for_text, helper_started)
+            child_identity = read_process_identity(int(await asyncio.to_thread(_wait_for_text, child_pid_path)))
+            assert child_identity is not None
+            start1.cancel()
             await asyncio.sleep(0.05)
-        assert process_identity_state(child_identity) != "alive"
+            helper_exit.write_text("exit", encoding="utf-8")
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(start1, timeout=15)
+            assert manager.snapshot("owner") is None
+            deadline = time.monotonic() + 5
+            while process_identity_state(child_identity) == "alive" and time.monotonic() < deadline:
+                await asyncio.sleep(0.05)
+            assert process_identity_state(child_identity) != "alive"
 
-        helper_exit.unlink()
-        helper_ready.write_text("ready", encoding="utf-8")
-        running = await asyncio.wait_for(manager.start("owner", "copilot", launch, "fallback"), timeout=15)
-        assert running.state == "running"
-        evidence = await asyncio.wait_for(manager.stop("owner"), timeout=15)
-        assert evidence.confirmed is True
-        await manager.shutdown()
+            helper_exit.unlink()
+            helper_ready.write_text("ready", encoding="utf-8")
+            running = await asyncio.wait_for(manager.start("owner", "copilot", launch, "fallback"), timeout=15)
+            assert running.state == "running"
+            evidence = await asyncio.wait_for(manager.stop("owner"), timeout=15)
+            assert evidence.confirmed is True
+        except BaseException as error:
+            primary_error = error
+            raise
+        finally:
+            with contextlib.suppress(Exception):
+                helper_exit.write_text("exit", encoding="utf-8")
+            if start1 is not None and not start1.done():
+                start1.cancel()
+                with contextlib.suppress(asyncio.CancelledError, TimeoutError):
+                    await asyncio.wait_for(start1, timeout=15)
+            try:
+                await asyncio.wait_for(manager.shutdown(), timeout=15)
+            except Exception:
+                if primary_error is None:
+                    raise
 
     asyncio.run(exercise())
 
@@ -930,24 +948,41 @@ def test_windows_setup_session_cancelled_start_before_ready_blocks_on_unknown_ac
             native_env,
             "connected",
         )
-        start1 = asyncio.create_task(manager.start("owner", "copilot", launch, "fallback"))
-        await asyncio.to_thread(_wait_for_text, helper_started)
-        child_identity = read_process_identity(int(await asyncio.to_thread(_wait_for_text, child_pid_path)))
-        assert child_identity is not None
-        start1.cancel()
-        await asyncio.sleep(0.05)
-        helper_exit.write_text("exit", encoding="utf-8")
-        with pytest.raises(asyncio.CancelledError):
-            await asyncio.wait_for(start1, timeout=15)
-        snapshot = manager.snapshot("owner")
-        assert snapshot is not None
-        assert snapshot.state == "failed"
-        with pytest.raises(SetupSessionConflict):
-            await manager.start("owner", "copilot", launch, "fallback")
-        deadline = time.monotonic() + 5
-        while process_identity_state(child_identity) == "alive" and time.monotonic() < deadline:
+        start1: asyncio.Task[object] | None = None
+        primary_error: BaseException | None = None
+        try:
+            start1 = asyncio.create_task(manager.start("owner", "copilot", launch, "fallback"))
+            await asyncio.to_thread(_wait_for_text, helper_started)
+            child_identity = read_process_identity(int(await asyncio.to_thread(_wait_for_text, child_pid_path)))
+            assert child_identity is not None
+            start1.cancel()
             await asyncio.sleep(0.05)
-        assert process_identity_state(child_identity) != "alive"
-        await manager.shutdown()
+            helper_exit.write_text("exit", encoding="utf-8")
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(start1, timeout=15)
+            snapshot = manager.snapshot("owner")
+            assert snapshot is not None
+            assert snapshot.state == "failed"
+            with pytest.raises(SetupSessionConflict):
+                await manager.start("owner", "copilot", launch, "fallback")
+            deadline = time.monotonic() + 5
+            while process_identity_state(child_identity) == "alive" and time.monotonic() < deadline:
+                await asyncio.sleep(0.05)
+            assert process_identity_state(child_identity) != "alive"
+        except BaseException as error:
+            primary_error = error
+            raise
+        finally:
+            with contextlib.suppress(Exception):
+                helper_exit.write_text("exit", encoding="utf-8")
+            if start1 is not None and not start1.done():
+                start1.cancel()
+                with contextlib.suppress(asyncio.CancelledError, TimeoutError):
+                    await asyncio.wait_for(start1, timeout=15)
+            try:
+                await asyncio.wait_for(manager.shutdown(), timeout=15)
+            except Exception:
+                if primary_error is None:
+                    raise
 
     asyncio.run(exercise())
