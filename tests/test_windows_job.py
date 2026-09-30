@@ -182,16 +182,43 @@ def _native_python_launch() -> tuple[str, dict[str, str]]:
     return win32process.GetModuleFileNameEx(win32api.GetCurrentProcess(), 0), env
 
 
-def _grandchild_helper_script(native_python: str) -> str:
+def _child_spawns_grandchild_script(native_python: str) -> str:
+    # Runs as the CHILD (spawned by the helper that WindowsJobOwner.launch starts directly).
+    # Spawns a GRANDCHILD immediately and reports both real pids on its own stdout so the helper
+    # can relay them; neither identity is launched by the test process itself.
     return (
         "import os, subprocess, sys\n"
         f"python = {native_python!r}\n"
-        "gc = subprocess.Popen(\n"
+        "grandchild = subprocess.Popen(\n"
         "    [python, '-c', 'import time; time.sleep(60)'],\n"
         "    creationflags=subprocess.CREATE_NO_WINDOW,\n"
         "    env=os.environ.copy(),\n"
         ")\n"
-        "sys.stdout.write(str(os.getpid()) + '\\n' + str(gc.pid) + '\\n')\n"
+        "sys.stdout.write(str(os.getpid()) + '\\n' + str(grandchild.pid) + '\\n')\n"
+        "sys.stdout.flush()\n"
+        "sys.stdin.readline()\n"
+    )
+
+
+def _helper_spawns_child_script(native_python: str, child_script_path: str) -> str:
+    # Runs as the HELPER (the process WindowsJobOwner.launch starts as argv[0]). Spawns the CHILD
+    # script above, relays its (child_pid, grandchild_pid) report, and adds its own pid so the
+    # test observes helper, child, and grandchild identities on the same real, contained tree.
+    return (
+        "import os, subprocess, sys\n"
+        f"python = {native_python!r}\n"
+        f"child_script = {child_script_path!r}\n"
+        "child = subprocess.Popen(\n"
+        "    [python, child_script],\n"
+        "    stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,\n"
+        "    creationflags=subprocess.CREATE_NO_WINDOW,\n"
+        "    env=os.environ.copy(),\n"
+        ")\n"
+        "child_pid = int(child.stdout.readline().strip())\n"
+        "grandchild_pid = int(child.stdout.readline().strip())\n"
+        "sys.stdout.write(\n"
+        "    str(os.getpid()) + '\\n' + str(child_pid) + '\\n' + str(grandchild_pid) + '\\n'\n"
+        ")\n"
         "sys.stdout.flush()\n"
         "sys.stdin.readline()\n"
     )
@@ -199,8 +226,12 @@ def _grandchild_helper_script(native_python: str) -> str:
 
 def test_launch_contains_helper_child_and_grandchild_until_stop(tmp_path):
     native_python, native_env = _native_python_launch()
+    child_script = _write_script(
+        tmp_path / "child_script.py", _child_spawns_grandchild_script(native_python)
+    )
     helper_script = _write_script(
-        tmp_path / "grandchild_helper.py", _grandchild_helper_script(native_python)
+        tmp_path / "helper_script.py",
+        _helper_spawns_child_script(native_python, str(child_script)),
     )
     child_stdin, parent_stdin, parent_stdout, child_stdout = _make_std_pipes()
     owner = None
@@ -213,9 +244,11 @@ def test_launch_contains_helper_child_and_grandchild_until_stop(tmp_path):
         fd = msvcrt.open_osfhandle(int(parent_stdout.Detach()), os.O_RDONLY)
         reader = os.fdopen(fd, "rb", closefd=True)
         helper_pid = int(reader.readline().strip())
+        child_pid = int(reader.readline().strip())
         grandchild_pid = int(reader.readline().strip())
 
         assert owner.contains(helper_pid)
+        assert owner.contains(child_pid)
         assert owner.contains(grandchild_pid)
         assert owner.alive()
 
@@ -226,6 +259,7 @@ def test_launch_contains_helper_child_and_grandchild_until_stop(tmp_path):
         # its Job association) alive until close_confirmed(); prove real death via a fresh,
         # independent OpenProcess instead of contains(), which would still see the zombie.
         assert not _process_exists(helper_pid)
+        assert not _process_exists(child_pid)
         assert not _process_exists(grandchild_pid)
         owner.close_confirmed()
     finally:
@@ -254,8 +288,12 @@ def _owner_process_script(native_python: str, helper_script_path: str) -> str:
         "fd = msvcrt.open_osfhandle(int(parent_stdout.Detach()), os.O_RDONLY)\n"
         "reader = os.fdopen(fd, 'rb', closefd=True)\n"
         "helper_pid = int(reader.readline().strip())\n"
+        "child_pid = int(reader.readline().strip())\n"
         "grandchild_pid = int(reader.readline().strip())\n"
-        "sys.stdout.write(str(owner.pid) + ' ' + str(helper_pid) + ' ' + str(grandchild_pid) + chr(10))\n"
+        "sys.stdout.write(\n"
+        "    str(owner.pid) + ' ' + str(helper_pid) + ' ' + str(child_pid) + ' '\n"
+        "    + str(grandchild_pid) + chr(10)\n"
+        ")\n"
         "sys.stdout.flush()\n"
         "time.sleep(300)\n"
     )
@@ -263,8 +301,12 @@ def _owner_process_script(native_python: str, helper_script_path: str) -> str:
 
 def test_job_close_reaps_tree_after_owner_crash(tmp_path):
     native_python, native_env = _native_python_launch()
+    child_script = _write_script(
+        tmp_path / "owner_child_script.py", _child_spawns_grandchild_script(native_python)
+    )
     helper_script = _write_script(
-        tmp_path / "owner_helper.py", _grandchild_helper_script(native_python)
+        tmp_path / "owner_helper_script.py",
+        _helper_spawns_child_script(native_python, str(child_script)),
     )
     owner_script = _write_script(
         tmp_path / "owner_process.py",
@@ -281,10 +323,13 @@ def test_job_close_reaps_tree_after_owner_crash(tmp_path):
     try:
         line = owner_process.stdout.readline()
         assert line, "owner process reported nothing before exiting"
-        _owner_pid_str, helper_pid_str, grandchild_pid_str = line.split()
-        helper_pid, grandchild_pid = int(helper_pid_str), int(grandchild_pid_str)
+        _owner_pid_str, helper_pid_str, child_pid_str, grandchild_pid_str = line.split()
+        helper_pid = int(helper_pid_str)
+        child_pid = int(child_pid_str)
+        grandchild_pid = int(grandchild_pid_str)
 
         assert _process_exists(helper_pid)
+        assert _process_exists(child_pid)
         assert _process_exists(grandchild_pid)
 
         # Simulate an owner crash: no Stop, no close_confirmed. Its non-inherited Job handle
@@ -294,10 +339,15 @@ def test_job_close_reaps_tree_after_owner_crash(tmp_path):
         owner_process.wait(timeout=5)
 
         deadline = time.monotonic() + 5
-        while time.monotonic() < deadline and (_process_exists(helper_pid) or _process_exists(grandchild_pid)):
+        while time.monotonic() < deadline and (
+            _process_exists(helper_pid)
+            or _process_exists(child_pid)
+            or _process_exists(grandchild_pid)
+        ):
             time.sleep(0.05)
 
         assert not _process_exists(helper_pid), "helper survived its Job owner's crash"
+        assert not _process_exists(child_pid), "child survived its Job owner's crash"
         assert not _process_exists(grandchild_pid), "grandchild survived its Job owner's crash"
     finally:
         if owner_process.poll() is None:
