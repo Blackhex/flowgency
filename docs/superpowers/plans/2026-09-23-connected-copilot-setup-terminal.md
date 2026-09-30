@@ -8,6 +8,20 @@
 
 **Tech Stack:** Python 3.11+, FastAPI/Starlette, ptyprocess (POSIX), xterm.js with its fit addon and esbuild, Jinja2, pytest, and Playwright. Node.js is a build-time tool, not a production runtime.
 
+> **Windows historical note (2026-09-28):** Task 2's Windows fail-closed
+> instructions (`connected_process_available()` always false, reject
+> connected launches before importing pywinpty) and Task 4/5's
+> native-Windows-smoke-only steps describe that original release's behavior
+> and remain historically accurate for it. They are superseded by
+> `docs/superpowers/plans/2026-09-28-windows-connected-copilot-setup.md`,
+> which adds a suspended-helper, Windows Job Object-contained ConPTY backend
+> so Windows can run connected setup safely. Do not treat this plan's Windows
+> fail-closed text as current release behavior, and do not read any
+> `pywinpty.PTY.spawn()` call in this document as safe without that plan's
+> pre-owned helper containment. The POSIX behavior and safety explanation
+> described throughout this plan are unaffected and remain optional,
+> unqualified by Windows tests.
+
 ## Global Constraints
 
 - Work only in `.worktrees/connected-setup-terminal` on `feature/connected-setup-terminal`; establish a clean `python -m pytest tests/ -q` baseline there before implementation, review each task before dependent work, and rerun the full suite before review and completion.
