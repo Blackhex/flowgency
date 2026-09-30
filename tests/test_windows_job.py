@@ -257,6 +257,129 @@ def test_unknown_job_accounting_retains_handle(monkeypatch, tmp_path):
         _close_all(*first_pipes, *second_pipes)
 
 
+def test_exit_code_probe_failure_after_signaled_wait_keeps_uncertain_handle(monkeypatch, tmp_path):
+    assert _uncertain == [], "a previous test leaked an uncertain job registration"
+    first_pipes = _make_std_pipes()
+    second_pipes = _make_std_pipes()
+
+    real_wait = win32event.WaitForSingleObject
+
+    def fail_assign(job, process):
+        del job, process
+        raise pywintypes.error(5, "AssignProcessToJobObject", "Access is denied.")
+
+    def signaled_wait(process, timeout_ms):
+        del process, timeout_ms
+        return win32event.WAIT_OBJECT_0
+
+    def fail_exit_code(process):
+        del process
+        raise pywintypes.error(6, "GetExitCodeProcess", "The handle is invalid.")
+
+    replacement = None
+    try:
+        with monkeypatch.context() as m:
+            m.setattr(win32job, "AssignProcessToJobObject", fail_assign)
+            m.setattr(win32event, "WaitForSingleObject", signaled_wait)
+            m.setattr(win32process, "GetExitCodeProcess", fail_exit_code)
+
+            with pytest.raises(WindowsJobLaunchError) as raised:
+                WindowsJobOwner.launch(
+                    (sys.executable, "-c", "pass"), tmp_path, os.environ.copy(),
+                    int(first_pipes[0]), int(first_pipes[3]),
+                )
+            assert raised.value.cleanup_confirmed is False
+            assert raised.value.process_terminated is False
+            assert raised.value.job_empty_confirmed is True
+            assert len(_uncertain) == 1
+
+            with pytest.raises(WindowsJobLaunchError) as blocked:
+                WindowsJobOwner.launch(
+                    (sys.executable, "-c", "pass"), tmp_path, os.environ.copy(),
+                    int(second_pipes[0]), int(second_pipes[3]),
+                )
+            assert blocked.value.cleanup_confirmed is False
+            assert len(_uncertain) == 1
+
+        from flowgency.jobs.windows_job import _retry_uncertain
+
+        _retry_uncertain(time.monotonic() + 5)
+        assert _uncertain == []
+
+        replacement = WindowsJobOwner.launch(
+            (sys.executable, "-c", "pass"), tmp_path, os.environ.copy(),
+            int(second_pipes[0]), int(second_pipes[3]),
+        )
+    finally:
+        while _uncertain:
+            entry = _uncertain[0]
+            with contextlib.suppress(Exception):
+                win32process.TerminateProcess(entry.process_handle, 1)
+            with contextlib.suppress(Exception):
+                real_wait(entry.process_handle, 5000)
+            from flowgency.jobs.windows_job import _retry_uncertain
+
+            with contextlib.suppress(Exception):
+                _retry_uncertain(time.monotonic() + 5)
+        if replacement is not None:
+            confirmed, _reason = replacement.stop(time.monotonic() + 5)
+            assert confirmed
+            replacement.close_confirmed()
+        _close_all(*first_pipes, *second_pipes)
+
+
+def test_retry_uncertain_exit_code_probe_failure_raises_structured_error(monkeypatch, tmp_path):
+    assert _uncertain == [], "a previous test leaked an uncertain job registration"
+    pipes = _make_std_pipes()
+
+    def fail_assign(job, process):
+        del job, process
+        raise pywintypes.error(5, "AssignProcessToJobObject", "Access is denied.")
+
+    def signaled_wait(process, timeout_ms):
+        del process, timeout_ms
+        return win32event.WAIT_OBJECT_0
+
+    def fail_exit_code(process):
+        del process
+        raise pywintypes.error(6, "GetExitCodeProcess", "The handle is invalid.")
+
+    try:
+        with monkeypatch.context() as m:
+            m.setattr(win32job, "AssignProcessToJobObject", fail_assign)
+            m.setattr(win32event, "WaitForSingleObject", signaled_wait)
+            m.setattr(win32process, "GetExitCodeProcess", fail_exit_code)
+
+            with pytest.raises(WindowsJobLaunchError):
+                WindowsJobOwner.launch(
+                    (sys.executable, "-c", "pass"), tmp_path, os.environ.copy(),
+                    int(pipes[0]), int(pipes[3]),
+                )
+
+        from flowgency.jobs.windows_job import _retry_uncertain
+
+        with monkeypatch.context() as m:
+            m.setattr(win32event, "WaitForSingleObject", signaled_wait)
+            m.setattr(win32process, "GetExitCodeProcess", fail_exit_code)
+
+            with pytest.raises(WindowsJobLaunchError) as raised:
+                _retry_uncertain(time.monotonic() + 5)
+        assert raised.value.cleanup_confirmed is False
+        assert len(_uncertain) == 1
+    finally:
+        while _uncertain:
+            entry = _uncertain[0]
+            with contextlib.suppress(Exception):
+                win32process.TerminateProcess(entry.process_handle, 1)
+            with contextlib.suppress(Exception):
+                real_wait(entry.process_handle, 5000)
+            from flowgency.jobs.windows_job import _retry_uncertain
+
+            with contextlib.suppress(Exception):
+                _retry_uncertain(time.monotonic() + 5)
+        _close_all(*pipes)
+
+
 def test_resume_thread_failure_cleans_up_assigned_suspended_helper(monkeypatch, tmp_path):
     child_stdin, parent_stdin, parent_stdout, child_stdout = _make_std_pipes()
     helper_pid = None

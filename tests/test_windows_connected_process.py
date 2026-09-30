@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -75,6 +76,21 @@ def _wait_for_process_exit(pid: int, *, timeout: float = 5.0) -> bool:
             win32api.CloseHandle(handle)
         time.sleep(0.05)
     return False
+
+
+def _wait_for_handle_exit(process_handle, *, timeout: float = 5.0) -> int | None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        remaining_ms = max(0, int((deadline - time.monotonic()) * 1000))
+        wait_status = win32event.WaitForSingleObject(process_handle, remaining_ms)
+        if wait_status == win32event.WAIT_OBJECT_0:
+            exit_code = win32process.GetExitCodeProcess(process_handle)
+            if exit_code != win32con.STILL_ACTIVE:
+                return int(exit_code)
+        if wait_status != win32event.WAIT_TIMEOUT:
+            break
+        time.sleep(0.05)
+    return None
 
 
 def _read_visible_until(process, expected: bytes, *, timeout: float = 20.0) -> bytes:
@@ -249,6 +265,82 @@ def test_windows_connected_process_assign_failure_with_unproven_cleanup_blocks_r
                 _retry_uncertain(time.monotonic() + 5)
         if replacement is not None:
             assert _stop(replacement, "windows-unproven-launch").confirmed
+
+
+def test_windows_connected_process_retry_probe_failure_stays_unconfirmed(
+    tmp_path: Path, monkeypatch
+):
+    from flowgency.jobs.windows_job import _retry_uncertain, _uncertain
+
+    assert _uncertain == []
+    native_python, native_env = _native_python_launch()
+    launch = RuntimeLaunch(
+        (native_python, "-u", "-c", "print('connected', flush=True)"),
+        tmp_path,
+        native_env,
+        "connected",
+    )
+
+    def fail_assign(job, process):
+        del job, process
+        raise pywintypes.error(5, "AssignProcessToJobObject", "Access is denied.")
+
+    def signaled_wait(process, timeout_ms):
+        del process, timeout_ms
+        return win32event.WAIT_OBJECT_0
+
+    def fail_exit_code(process):
+        del process
+        raise pywintypes.error(6, "GetExitCodeProcess", "The handle is invalid.")
+
+    replacement = None
+    cleanup_error = None
+    completed_assertions = False
+    try:
+        with monkeypatch.context() as m:
+            m.setattr(win32job, "AssignProcessToJobObject", fail_assign)
+            m.setattr(win32event, "WaitForSingleObject", signaled_wait)
+            m.setattr(win32process, "GetExitCodeProcess", fail_exit_code)
+
+            with pytest.raises(ConnectedLaunchError) as raised:
+                start_connected_process(launch)
+            assert raised.value.cleanup_confirmed is False
+
+        assert len(_uncertain) == 1
+
+        with monkeypatch.context() as m:
+            m.setattr(win32event, "WaitForSingleObject", signaled_wait)
+            m.setattr(win32process, "GetExitCodeProcess", fail_exit_code)
+
+            with pytest.raises(ConnectedLaunchError) as blocked:
+                start_connected_process(launch)
+            assert blocked.value.cleanup_confirmed is False
+
+        entry = _uncertain[0]
+        exit_code = _wait_for_handle_exit(entry.process_handle, timeout=5)
+        assert exit_code is not None
+        assert exit_code != win32con.STILL_ACTIVE
+
+        _retry_uncertain(time.monotonic() + 5)
+        assert _uncertain == []
+
+        replacement = start_connected_process(launch)
+        assert replacement.alive() is True
+        completed_assertions = True
+    finally:
+        if replacement is not None:
+            assert _stop(replacement, "windows-retry-probe-failure").confirmed
+        if _uncertain:
+            entry = _uncertain[0]
+            try:
+                if win32event.WaitForSingleObject(entry.process_handle, 0) == win32event.WAIT_TIMEOUT:
+                    win32process.TerminateProcess(entry.process_handle, 1)
+                win32event.WaitForSingleObject(entry.process_handle, 5000)
+                _retry_uncertain(time.monotonic() + 5)
+            except Exception as error:
+                cleanup_error = error
+    if cleanup_error is not None and completed_assertions:
+        raise cleanup_error
 
 
 def test_windows_connected_process_helper_exit_after_ready_keeps_job_alive_until_stop(

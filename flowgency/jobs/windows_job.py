@@ -73,7 +73,10 @@ def _process_terminated(process_handle, deadline: float) -> bool:
     except pywintypes.error:
         return False
     if wait_status == getattr(win32event, "WAIT_OBJECT_0", 0):
-        return win32process.GetExitCodeProcess(process_handle) != win32con.STILL_ACTIVE
+        try:
+            return win32process.GetExitCodeProcess(process_handle) != win32con.STILL_ACTIVE
+        except pywintypes.error:
+            return False
     if wait_status == getattr(win32event, "WAIT_TIMEOUT", 258):
         return False
     return False
