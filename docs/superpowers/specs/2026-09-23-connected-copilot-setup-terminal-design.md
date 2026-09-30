@@ -38,8 +38,8 @@ unchanged would remove the interactive questions and approvals that setup needs.
 - Exposing terminal access to other devices or making localhost a security
   boundary against other processes and users on the same computer.
 - Adding Node.js or a compiled Rust bridge as a production requirement.
-- Enabling connected setup on Windows before process-tree ownership can be
-  established without a pre-assignment execution window.
+- Enabling Windows connected setup without provable process-tree ownership
+  established before Copilot spawns (no pre-assignment execution window).
 
 ## Execution Modes And Ownership
 
@@ -56,10 +56,13 @@ Copilot builds its existing setup command from the selected data root, bundled
 mode attaches that command to a Flowgency-owned POSIX pseudo-terminal on hosts
 with readable `/proc` process-group evidence, using `ptyprocess`. The same
 launch layer retains a pipe-based, noninteractive path for agent jobs. Windows
-uses the existing external-terminal setup and copyable command: pywinpty starts
-its ConPTY child before Flowgency can assign a Job Object, and a descendant can
-escape the proof of cleanup before assignment. Do not attempt that unsafe
-connected launch or require pywinpty in production.
+attaches that command inside a contained helper: Flowgency creates a suspended
+helper process, assigns it to a per-session Windows Job Object with
+kill-on-close before resuming its primary thread, and only that already-
+contained helper calls pywinpty's ConPTY-backed `PTY.spawn()` for Copilot. The
+existing external-terminal setup and copyable command remain the fallback,
+offered only after the Job is confirmed empty; `pywinpty.PTY.spawn()` is never
+called uncontained.
 Interactive setup must not inherit headless-only flags such as
 `--no-ask-user`, `--autopilot`, `--output-format json`, or closed stdin.
 
@@ -68,11 +71,11 @@ Only Copilot setup consumes it in this feature. Other integrations and hosts
 without working PTY support keep their existing external-terminal behavior.
 The connected implementation may reuse lifecycle primitives from supervised
 jobs, but must extend them for PTY I/O instead of pretending a terminal is a
-captured subprocess pipe. This release uses native Windows validation only;
-its result does not qualify POSIX connected setup. POSIX deployments need
-separate native validation before relying on connected mode there. Windows
-fallback must be tested; a future Windows connected mode requires a
-separately reviewed safe backend.
+captured subprocess pipe. Native Windows connected setup is proven only by
+native Windows tests against the suspended-helper, Job-contained backend;
+that result does not qualify POSIX connected setup, which remains optional
+here and unproven by Windows results. POSIX deployments still need their own
+native validation before relying on connected mode there.
 
 ## Setup Session
 
@@ -176,10 +179,12 @@ sequences, and bound incoming controls and outbound queues.
   redirect with Copilot still running, dashboard return and Stop, disconnected
   polling, relaunch after failure, and startup without PTY support.
 - Test the rendered setup and dashboard flow with Playwright; validate local
-  terminal assets in an installed wheel. For this release run platform tests
-  and smoke only on native Windows: verify the unchanged external launch and
-  absence of any connected PTY process. Do not run POSIX or WSL gates as part
-  of this release or claim their behavior is certified by Windows results.
+  terminal assets in an installed wheel. Run platform tests and smoke on
+  native Windows: verify the contained suspended-helper, Job-owned ConPTY
+  launch and in-page terminal, and that the external-terminal launch is
+  offered only after confirmed Job cleanup. Do not run POSIX or WSL gates as
+  part of this release or claim their behavior is certified by Windows
+  results.
 
 ## Alternatives Considered
 
