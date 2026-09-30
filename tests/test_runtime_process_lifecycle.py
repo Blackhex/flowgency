@@ -21,6 +21,7 @@ from flowgency.jobs.processes import (
     _posix_process_identity_state,
     _read_posix_process_snapshot,
     _terminate_owned_posix_group,
+    create_kill_on_close_windows_job,
     process_identity_matches,
     process_identity_state,
     RuntimeProcessIdentity,
@@ -286,6 +287,21 @@ def test_run_supervised_timeout_kills_native_descendants_after_root_exit(tmp_pat
             handle.Close()
         if capture_thread.is_alive():
             capture_thread.join(timeout=0.1)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Job Objects are Windows-specific")
+def test_create_kill_on_close_windows_job_sets_kill_on_close_limit():
+    import win32job
+
+    job_handle = create_kill_on_close_windows_job()
+    try:
+        limits = win32job.QueryInformationJobObject(job_handle, win32job.JobObjectExtendedLimitInformation)
+        flags = limits["BasicLimitInformation"]["LimitFlags"]
+        assert flags & win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    finally:
+        import win32api
+
+        win32api.CloseHandle(job_handle)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows containment setup is Windows-specific")

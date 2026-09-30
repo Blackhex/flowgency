@@ -985,6 +985,24 @@ def _open_pipe_reader(read_handle):
     return os.fdopen(fd, "rb", closefd=True)
 
 
+def create_kill_on_close_windows_job():
+    """Create a Job Object whose members die when its last handle closes."""
+    import win32job
+
+    job_handle = win32job.CreateJobObject(None, "")
+    limits = win32job.QueryInformationJobObject(
+        job_handle,
+        win32job.JobObjectExtendedLimitInformation,
+    )
+    limits["BasicLimitInformation"]["LimitFlags"] |= win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    win32job.SetInformationJobObject(
+        job_handle,
+        win32job.JobObjectExtendedLimitInformation,
+        limits,
+    )
+    return job_handle
+
+
 def _run_supervised_windows(
     argv: list[str] | tuple[str, ...],
     *,
@@ -1031,17 +1049,7 @@ def _run_supervised_windows(
         stdout_reader = _open_pipe_reader(stdout_read)
         stderr_reader = _open_pipe_reader(stderr_read)
 
-        job_handle = win32job.CreateJobObject(None, "")
-        limits = win32job.QueryInformationJobObject(
-            job_handle,
-            win32job.JobObjectExtendedLimitInformation,
-        )
-        limits["BasicLimitInformation"]["LimitFlags"] |= win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-        win32job.SetInformationJobObject(
-            job_handle,
-            win32job.JobObjectExtendedLimitInformation,
-            limits,
-        )
+        job_handle = create_kill_on_close_windows_job()
 
         startup = win32process.STARTUPINFO()
         startup.dwFlags |= win32process.STARTF_USESTDHANDLES
