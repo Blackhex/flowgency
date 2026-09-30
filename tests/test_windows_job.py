@@ -4,13 +4,21 @@ and that Job membership genuinely contains an immediate grandchild until Stop is
 from __future__ import annotations
 
 import contextlib
+import json
 import msvcrt
 import os
+import queue
+import re
 import subprocess
 import sys
+import threading
 import time
+from pathlib import Path
 
 import pytest
+
+from flowgency.integrations.models import RuntimeLaunch
+from flowgency.jobs.windows_pty_protocol import FrameType, encode_start, read_frame, write_frame
 
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="Windows Job Objects are Windows-specific")
 
@@ -357,3 +365,137 @@ def test_job_close_reaps_tree_after_owner_crash(tmp_path):
                 owner_process.wait(timeout=5)
         with contextlib.suppress(Exception):
             owner_process.stdout.close()
+
+
+def _write_connected_child(path: Path, native_python: str) -> Path:
+    path.write_text(
+        "import os, subprocess, sys\n"
+        f"python = {native_python!r}\n"
+        "grandchild = subprocess.Popen(\n"
+        "    [python, '-c', 'import time; time.sleep(60)'],\n"
+        "    creationflags=subprocess.CREATE_NO_WINDOW,\n"
+        "    env=os.environ.copy(),\n"
+        ")\n"
+        "sys.stdout.write('argv-ok:' + sys.argv[1] + '\\n')\n"
+        "sys.stdout.write('env-ok:' + os.environ['FLOWGENCY_TEST_VALUE'] + '\\n')\n"
+        "sys.stdout.write('grandchild-pid:' + str(grandchild.pid) + '\\n')\n"
+        "sys.stdout.flush()\n"
+        "sys.stdin.readline()\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_windows_pty_helper_runs_conpty_inside_owned_job(tmp_path):
+    native_python, native_env = _native_python_launch()
+    child_script = _write_connected_child(tmp_path / "connected_child.py", native_python)
+    launch_env = dict(native_env)
+    launch_env["FLOWGENCY_TEST_VALUE"] = "žluťoučký"
+
+    child_stdin, parent_stdin, parent_stdout, child_stdout = _make_std_pipes()
+    owner = None
+    parent_input = None
+    parent_output = None
+    reader = None
+    reader_done = threading.Event()
+    frames: queue.Queue[tuple[FrameType, bytes] | None | BaseException] = queue.Queue()
+
+    def drain_frames() -> None:
+        try:
+            while True:
+                frame = read_frame(parent_output)
+                frames.put(frame)
+                if frame is None:
+                    break
+        except BaseException as error:
+            frames.put(error)
+        finally:
+            reader_done.set()
+
+    def next_frame(timeout: float):
+        frame = frames.get(timeout=timeout)
+        if isinstance(frame, BaseException):
+            raise frame
+        return frame
+
+    try:
+        owner = WindowsJobOwner.launch(
+            (native_python, "-u", "-m", "flowgency.jobs.windows_pty_helper"),
+            tmp_path,
+            native_env,
+            int(child_stdin),
+            int(child_stdout),
+        )
+        win32api.CloseHandle(child_stdin)
+        win32api.CloseHandle(child_stdout)
+        parent_input = os.fdopen(
+            msvcrt.open_osfhandle(parent_stdin.Detach(), os.O_WRONLY | os.O_BINARY),
+            "wb",
+            buffering=0,
+        )
+        parent_output = os.fdopen(
+            msvcrt.open_osfhandle(parent_stdout.Detach(), os.O_RDONLY | os.O_BINARY),
+            "rb",
+            buffering=0,
+        )
+        reader = threading.Thread(target=drain_frames, daemon=True)
+        reader.start()
+
+        write_frame(
+            parent_input,
+            FrameType.START,
+            encode_start(
+                RuntimeLaunch(
+                    (native_python, str(child_script), "Příprava"),
+                    tmp_path,
+                    launch_env,
+                    "connected",
+                ),
+                24,
+                80,
+            ),
+        )
+
+        kind, payload = next_frame(10)
+        assert kind is FrameType.READY
+        assert owner.contains(json.loads(payload)["pid"])
+
+        output = bytearray()
+        saw_argv = False
+        saw_env = False
+        saw_grandchild = False
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            try:
+                frame = next_frame(min(0.5, max(0.01, deadline - time.monotonic())))
+            except queue.Empty:
+                continue
+            assert frame is not None
+            if frame[0] is not FrameType.OUTPUT:
+                continue
+            output.extend(frame[1])
+            if b"argv-ok:P\xc5\x99\xc3\xadprava" in output:
+                saw_argv = True
+            if b"env-ok:\xc5\xbelu\xc5\xa5ou\xc4\x8dk\xc3\xbd" in output:
+                saw_env = True
+            match = re.search(rb"grandchild-pid:(\d+)", output)
+            if match:
+                saw_grandchild = True
+                assert owner.contains(int(match.group(1)))
+            if saw_argv and saw_env and saw_grandchild:
+                break
+        else:
+            raise AssertionError(f"ConPTY child output incomplete: {output!r}")
+    finally:
+        if owner is not None:
+            assert owner.stop(time.monotonic() + 5) == (True, "stopped")
+        if parent_input is not None:
+            parent_input.close()
+        if parent_output is not None:
+            assert reader_done.wait(timeout=5), "PTY pipe reader did not drain after Job exit"
+            if reader is not None:
+                reader.join(timeout=0)
+                assert not reader.is_alive()
+            parent_output.close()
+        if owner is not None:
+            owner.close_confirmed()

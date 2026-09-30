@@ -74,6 +74,11 @@ def test_rejects_oversized_start_payload(tmp_path: Path):
             id="env-value-not-a-string",
         ),
         pytest.param(
+            {"argv": ["copilot"], "cwd": _CWD_SENTINEL, "env": {"BAD=KEY": "ok"}, "mode": "connected", "rows": 24, "cols": 80},
+            "=",
+            id="env-key-contains-equals",
+        ),
+        pytest.param(
             {"argv": ["copilot"], "cwd": _CWD_SENTINEL, "env": {}, "mode": "connected", "rows": 1, "cols": 80},
             "rows",
             id="rows-too-low",
@@ -112,6 +117,7 @@ def test_decode_start_rejects_malformed_json_and_shape(payload: bytes, match: st
         (RuntimeLaunch(("",), _CWD_PLACEHOLDER, {}, "connected"), 24, 80, "argv"),
         (RuntimeLaunch(("copilot",), Path("relative"), {}, "connected"), 24, 80, "cwd"),
         (RuntimeLaunch(("copilot",), _CWD_PLACEHOLDER, {"SAFE": 1}, "connected"), 24, 80, "environment"),
+        (RuntimeLaunch(("copilot",), _CWD_PLACEHOLDER, {"BAD=KEY": "ok"}, "connected"), 24, 80, "="),
         (RuntimeLaunch(("copilot",), _CWD_PLACEHOLDER, {"SAFE": "ok", "NUL": "bad\x00value"}, "connected"), 24, 80, "NUL"),
         (RuntimeLaunch(("copilot",), _CWD_PLACEHOLDER, {"SAFE": "ok"}, "headless"), 24, 80, "connected"),
         (RuntimeLaunch(("copilot",), _CWD_PLACEHOLDER, {"SAFE": "ok"}, "connected"), 1, 80, "rows"),

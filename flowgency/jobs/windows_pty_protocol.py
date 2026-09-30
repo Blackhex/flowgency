@@ -158,8 +158,10 @@ def _validate_env(env: object) -> dict[str, str]:
         raise ValueError("START environment must be a string-to-string mapping")
     validated: dict[str, str] = {}
     for key, value in env.items():
-        if type(key) is not str or not key or "\0" in key:
-            raise ValueError("START environment keys must be non-empty strings without NUL bytes")
+        if type(key) is not str or not key or "\0" in key or "=" in key:
+            raise ValueError(
+                "START environment keys must be non-empty strings without NUL bytes or '='"
+            )
         if type(value) is not str or "\0" in value:
             raise ValueError("START environment values must be strings without NUL bytes")
         validated[key] = value
