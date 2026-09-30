@@ -89,16 +89,15 @@ def test_connected_process_available_on_supported_host():
 
 def test_connected_process_unavailable_without_pty_library(monkeypatch):
     if os.name == "nt":
-        pytest.skip("Windows has no PTY library to remove; see test_windows_connected_process_gate_never_imports_a_pty_backend")
+        pytest.skip("Windows dependency gating is covered by Windows-specific tests")
     monkeypatch.setitem(sys.modules, "ptyprocess", None)
     assert connected_process_available() is False
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows connected-setup gate")
-def test_windows_connected_process_gate_never_imports_a_pty_backend(tmp_path, monkeypatch):
-    """Windows must reject connected launches before importing any PTY backend, so the gate
-    holds even when pywinpty is not installed (Windows has no supported connected PTY)."""
+def test_windows_connected_process_unavailable_without_required_modules(tmp_path, monkeypatch):
     import builtins
+    import flowgency.jobs.connected_process as connected_process
 
     blocked = {"winpty", "win32job", "win32api", "win32process", "win32con", "win32event", "pywintypes"}
     attempted: list[str] = []
@@ -106,21 +105,28 @@ def test_windows_connected_process_gate_never_imports_a_pty_backend(tmp_path, mo
 
     def guarded_import(name, *args, **kwargs):
         if name in blocked:
-            # Record rather than raise: a broad `except Exception` in buggy code could
-            # otherwise swallow the proof that an import was attempted.
             attempted.append(name)
             raise ImportError(f"blocked for this test: {name}")
         return real_import(name, *args, **kwargs)
 
+    def must_not_spawn(*args, **kwargs):
+        raise AssertionError("Windows connected spawn should not run when dependencies are missing")
+
     monkeypatch.setattr(builtins, "__import__", guarded_import)
+    fake_windows_process = type("_FakeWindowsConnectedProcess", (), {"spawn": staticmethod(must_not_spawn)})
+    monkeypatch.setattr(connected_process, "WindowsConnectedProcess", fake_windows_process, raising=False)
 
     assert connected_process_available() is False
     launch = RuntimeLaunch((sys.executable, "-c", "print('must not run')"), tmp_path, os.environ.copy(), "connected")
     with pytest.raises(ConnectedLaunchError) as raised:
         start_connected_process(launch)
     assert raised.value.cleanup_confirmed is True
-    assert "Windows" in str(raised.value)
-    assert attempted == []
+    assert attempted
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows connected-setup gate")
+def test_windows_connected_process_available_with_real_dependencies():
+    assert connected_process_available() is True
 
 
 @pytest.mark.skipif(os.name == "nt" or not Path("/proc/self/stat").is_file(), reason="POSIX /proc PTY check")

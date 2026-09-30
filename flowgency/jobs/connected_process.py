@@ -60,9 +60,10 @@ _stops_in_flight = 0
 
 
 def connected_process_available() -> bool:
-    # Windows has no supported connected-PTY backend; it must never attempt to import one.
     if os.name == "nt":
-        return False
+        from flowgency.jobs.windows_connected_process import windows_connected_process_available
+
+        return windows_connected_process_available()
     try:
         import ptyprocess  # noqa: F401
     except ImportError:
@@ -73,13 +74,18 @@ def connected_process_available() -> bool:
 def start_connected_process(launch: RuntimeLaunch, *, rows: int = 24, cols: int = 80) -> ConnectedProcess:
     if launch.mode != "connected":
         raise ValueError("A connected PTY requires connected launch mode")
-    if os.name == "nt":
-        raise ConnectedLaunchError(
-            "Connected setup is unavailable on Windows; use the external terminal",
-            cleanup_confirmed=True,
-        )
     _validate_size(rows, cols)
     _validate_launch(launch)
+    if os.name == "nt":
+        from flowgency.jobs.windows_connected_process import WindowsConnectedProcess, windows_connected_process_available
+
+        if not windows_connected_process_available():
+            raise ConnectedLaunchError(
+                "Connected setup is unavailable on Windows; use the external terminal",
+                cleanup_confirmed=True,
+            )
+        _retry_unconfirmed()
+        return WindowsConnectedProcess.spawn(launch, rows=rows, cols=cols)
     _retry_unconfirmed()
     return PosixConnectedProcess.spawn(launch, rows=rows, cols=cols)
 
