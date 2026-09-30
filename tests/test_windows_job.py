@@ -26,6 +26,7 @@ if os.name == "nt":
     import pywintypes
     import win32api
     import win32con
+    import win32event
     import win32job
     import win32pipe
     import win32process
@@ -105,8 +106,11 @@ def test_helper_is_assigned_before_resume(monkeypatch, tmp_path):
 def test_assign_failure_never_resumes_and_terminates_suspended_helper(monkeypatch, tmp_path):
     child_stdin, parent_stdin, parent_stdout, child_stdout = _make_std_pipes()
     resume_calls = []
+    helper_pid = None
 
     def fail_assign(job, process):
+        nonlocal helper_pid
+        helper_pid = win32process.GetProcessId(process)
         raise pywintypes.error(5, "AssignProcessToJobObject", "Access is denied.")
 
     def recording_resume(thread):
@@ -117,15 +121,93 @@ def test_assign_failure_never_resumes_and_terminates_suspended_helper(monkeypatc
     monkeypatch.setattr(win32process, "ResumeThread", recording_resume)
 
     try:
-        with pytest.raises(WindowsJobLaunchError):
+        with pytest.raises(WindowsJobLaunchError) as raised:
             WindowsJobOwner.launch(
                 (sys.executable, "-c", "pass"), tmp_path, os.environ.copy(),
                 int(child_stdin), int(child_stdout),
             )
+        assert raised.value.cleanup_confirmed is True
+        assert raised.value.process_terminated is True
+        assert raised.value.job_empty_confirmed is True
         assert resume_calls == []
         assert _uncertain == []
+        assert helper_pid is not None
+        assert not _process_exists(helper_pid)
     finally:
         _close_all(child_stdin, parent_stdin, parent_stdout, child_stdout)
+
+
+@pytest.mark.parametrize("mode", ["terminate-fails", "wait-times-out"])
+def test_unknown_cleanup_keeps_handles_until_helper_death_is_proved(monkeypatch, tmp_path, mode):
+    assert _uncertain == [], "a previous test leaked an uncertain job registration"
+    first_pipes = _make_std_pipes()
+    second_pipes = _make_std_pipes()
+    helper_pid = None
+
+    real_terminate = win32process.TerminateProcess
+    real_wait = win32event.WaitForSingleObject
+
+    def fail_assign(job, process):
+        nonlocal helper_pid
+        helper_pid = win32process.GetProcessId(process)
+        raise pywintypes.error(5, "AssignProcessToJobObject", "Access is denied.")
+
+    def maybe_fail_terminate(process, exit_code):
+        if mode == "terminate-fails":
+            raise pywintypes.error(5, "TerminateProcess", "Access is denied.")
+        return real_terminate(process, exit_code)
+
+    def maybe_timeout_wait(process, timeout_ms):
+        if mode == "terminate-fails" or mode == "wait-times-out":
+            return win32event.WAIT_TIMEOUT
+        return real_wait(process, timeout_ms)
+
+    try:
+        with monkeypatch.context() as m:
+            m.setattr(win32job, "AssignProcessToJobObject", fail_assign)
+            m.setattr(win32process, "TerminateProcess", maybe_fail_terminate)
+            m.setattr(win32event, "WaitForSingleObject", maybe_timeout_wait)
+
+            with pytest.raises(WindowsJobLaunchError) as raised:
+                WindowsJobOwner.launch(
+                    (sys.executable, "-c", "pass"), tmp_path, os.environ.copy(),
+                    int(first_pipes[0]), int(first_pipes[3]),
+                )
+            assert raised.value.cleanup_confirmed is False
+            assert raised.value.process_terminated is False
+            assert raised.value.job_empty_confirmed is True
+            assert len(_uncertain) == 1
+
+            with pytest.raises(WindowsJobLaunchError) as blocked:
+                WindowsJobOwner.launch(
+                    (sys.executable, "-c", "pass"), tmp_path, os.environ.copy(),
+                    int(second_pipes[0]), int(second_pipes[3]),
+                )
+            assert blocked.value.cleanup_confirmed is False
+            assert len(_uncertain) == 1
+
+        assert helper_pid is not None
+        if mode == "terminate-fails":
+            assert _process_exists(helper_pid)
+            real_terminate(_uncertain[0].process_handle, 1)
+
+        from flowgency.jobs.windows_job import _retry_uncertain
+
+        _retry_uncertain(time.monotonic() + 5)
+        assert _uncertain == []
+        assert not _process_exists(helper_pid)
+    finally:
+        while _uncertain:
+            entry = _uncertain[0]
+            with contextlib.suppress(Exception):
+                real_terminate(entry.process_handle, 1)
+            with contextlib.suppress(Exception):
+                real_wait(entry.process_handle, 5000)
+            from flowgency.jobs.windows_job import _retry_uncertain
+
+            with contextlib.suppress(Exception):
+                _retry_uncertain(time.monotonic() + 5)
+        _close_all(*first_pipes, *second_pipes)
 
 
 def test_unknown_job_accounting_retains_handle(monkeypatch, tmp_path):
@@ -173,6 +255,40 @@ def test_unknown_job_accounting_retains_handle(monkeypatch, tmp_path):
         assert _uncertain == []
     finally:
         _close_all(*first_pipes, *second_pipes)
+
+
+def test_resume_thread_failure_cleans_up_assigned_suspended_helper(monkeypatch, tmp_path):
+    child_stdin, parent_stdin, parent_stdout, child_stdout = _make_std_pipes()
+    helper_pid = None
+    real_create_process = win32process.CreateProcess
+
+    def recording_create_process(*args, **kwargs):
+        nonlocal helper_pid
+        process_handle, thread_handle, pid, thread_id = real_create_process(*args, **kwargs)
+        helper_pid = pid
+        return process_handle, thread_handle, pid, thread_id
+
+    def fail_resume(thread):
+        del thread
+        raise pywintypes.error(6, "ResumeThread", "The handle is invalid.")
+
+    monkeypatch.setattr(win32process, "CreateProcess", recording_create_process)
+    monkeypatch.setattr(win32process, "ResumeThread", fail_resume)
+
+    try:
+        with pytest.raises(WindowsJobLaunchError) as raised:
+            WindowsJobOwner.launch(
+                (sys.executable, "-c", "pass"), tmp_path, os.environ.copy(),
+                int(child_stdin), int(child_stdout),
+            )
+        assert raised.value.cleanup_confirmed is True
+        assert raised.value.process_terminated is True
+        assert raised.value.job_empty_confirmed is True
+        assert _uncertain == []
+        assert helper_pid is not None
+        assert not _process_exists(helper_pid)
+    finally:
+        _close_all(child_stdin, parent_stdin, parent_stdout, child_stdout)
 
 
 def _write_script(path, body: str):

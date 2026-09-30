@@ -21,6 +21,19 @@ from flowgency.jobs.processes import _job_exit_status, create_kill_on_close_wind
 class WindowsJobLaunchError(RuntimeError):
     """Raised when a job-contained helper process could not be launched or confirmed stopped."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        cleanup_confirmed: bool,
+        process_terminated: bool | None = None,
+        job_empty_confirmed: bool | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.cleanup_confirmed = cleanup_confirmed
+        self.process_terminated = process_terminated
+        self.job_empty_confirmed = job_empty_confirmed
+
 
 @dataclass
 class _UncertainWindowsJob:
@@ -48,41 +61,68 @@ def _close_uncertain(entry: _UncertainWindowsJob) -> None:
             _uncertain.remove(entry)
 
 
+def _process_terminated(process_handle, deadline: float) -> bool:
+    import pywintypes
+    import win32con
+    import win32event
+    import win32process
+
+    timeout_ms = max(0, int((deadline - time.monotonic()) * 1000))
+    try:
+        wait_status = win32event.WaitForSingleObject(process_handle, timeout_ms)
+    except pywintypes.error:
+        return False
+    if wait_status == getattr(win32event, "WAIT_OBJECT_0", 0):
+        return win32process.GetExitCodeProcess(process_handle) != win32con.STILL_ACTIVE
+    if wait_status == getattr(win32event, "WAIT_TIMEOUT", 258):
+        return False
+    return False
+
+
 def _retry_uncertain(deadline: float) -> None:
     with _uncertain_lock:
         pending = list(_uncertain)
     for entry in pending:
-        if _job_exit_status(entry.job_handle, deadline) == "empty":
+        process_terminated = _process_terminated(entry.process_handle, deadline)
+        if process_terminated and _job_exit_status(entry.job_handle, deadline) == "empty":
             _close_uncertain(entry)
     with _uncertain_lock:
         remaining = len(_uncertain)
     if remaining:
         raise WindowsJobLaunchError(
-            f"{remaining} earlier windows job(s) could not be confirmed stopped"
+            f"{remaining} earlier windows job(s) could not be confirmed stopped",
+            cleanup_confirmed=False,
         )
 
 
 def _fail_before_resume(job_handle, process_handle, pid: int, cause: Exception) -> None:
     import win32api
-    import win32event
     import win32process
 
+    deadline = time.monotonic() + 5
     with contextlib.suppress(Exception):
         win32process.TerminateProcess(process_handle, 1)
-    with contextlib.suppress(Exception):
-        win32event.WaitForSingleObject(process_handle, 5000)
-    status = _job_exit_status(job_handle, time.monotonic() + 5)
-    if status == "empty":
+    process_terminated = _process_terminated(process_handle, deadline)
+    status = _job_exit_status(job_handle, deadline)
+    if process_terminated and status == "empty":
         with contextlib.suppress(Exception):
             win32api.CloseHandle(process_handle)
         with contextlib.suppress(Exception):
             win32api.CloseHandle(job_handle)
-        raise WindowsJobLaunchError(f"Assigning helper process {pid} to its job failed: {cause}") from cause
+        raise WindowsJobLaunchError(
+            f"Assigning helper process {pid} to its job failed: {cause}",
+            cleanup_confirmed=True,
+            process_terminated=True,
+            job_empty_confirmed=True,
+        ) from cause
     with _uncertain_lock:
         _uncertain.append(_UncertainWindowsJob(job_handle, process_handle, pid))
     raise WindowsJobLaunchError(
         f"Assigning helper process {pid} to its job failed and its job could not be "
-        f"confirmed empty: {cause}"
+        f"confirmed stopped: {cause}",
+        cleanup_confirmed=False,
+        process_terminated=process_terminated,
+        job_empty_confirmed=(status == "empty"),
     ) from cause
 
 
@@ -136,7 +176,10 @@ class WindowsJobOwner:
             except pywintypes.error as error:
                 with contextlib.suppress(Exception):
                     win32api.CloseHandle(job_handle)
-                raise WindowsJobLaunchError(f"Could not start {argv[0]}: {error}") from error
+                raise WindowsJobLaunchError(
+                    f"Could not start {argv[0]}: {error}",
+                    cleanup_confirmed=True,
+                ) from error
 
             try:
                 import win32job
@@ -145,7 +188,10 @@ class WindowsJobOwner:
             except pywintypes.error as error:
                 _fail_before_resume(job_handle, process_handle, pid, error)
 
-            win32process.ResumeThread(thread_handle)
+            try:
+                win32process.ResumeThread(thread_handle)
+            except Exception as error:
+                _fail_before_resume(job_handle, process_handle, pid, error)
         finally:
             if thread_handle is not None:
                 with contextlib.suppress(Exception):
@@ -194,7 +240,10 @@ class WindowsJobOwner:
 
     def close_confirmed(self) -> None:
         if not self._confirmed_empty:
-            raise WindowsJobLaunchError("close_confirmed called before Stop proved the job empty")
+            raise WindowsJobLaunchError(
+                "close_confirmed called before Stop proved the job empty",
+                cleanup_confirmed=False,
+            )
         if self._closed:
             return
         import win32api

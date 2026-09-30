@@ -234,7 +234,7 @@ class WindowsConnectedProcess(_OwnedTerminal):
         except ConnectedLaunchError:
             raise
         except WindowsJobLaunchError as error:
-            raise ConnectedLaunchError(str(error), cleanup_confirmed=False) from error
+            raise ConnectedLaunchError(str(error), cleanup_confirmed=error.cleanup_confirmed) from error
         except Exception as error:
             if process is not None:
                 process._startup_failure(f"Could not start {launch.argv[0]} in a PTY: {error}", cause=error)

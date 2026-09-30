@@ -30,6 +30,8 @@ if os.name == "nt":
     import pywintypes
     import win32api
     import win32con
+    import win32event
+    import win32job
     import win32process
 
 
@@ -166,6 +168,87 @@ def test_windows_connected_process_partial_ready_cleans_up(tmp_path: Path, monke
     with pytest.raises(ConnectedLaunchError) as raised:
         start_connected_process(launch)
     assert raised.value.cleanup_confirmed is True
+
+
+def test_windows_connected_process_assign_failure_propagates_confirmed_cleanup(
+    tmp_path: Path, monkeypatch
+):
+    native_python, native_env = _native_python_launch()
+    launch = RuntimeLaunch(
+        (native_python, "-u", "-c", "print('connected', flush=True)"),
+        tmp_path,
+        native_env,
+        "connected",
+    )
+
+    def fail_assign(job, process):
+        del job, process
+        raise pywintypes.error(5, "AssignProcessToJobObject", "Access is denied.")
+
+    monkeypatch.setattr(win32job, "AssignProcessToJobObject", fail_assign)
+
+    with pytest.raises(ConnectedLaunchError) as raised:
+        start_connected_process(launch)
+
+    assert raised.value.cleanup_confirmed is True
+    assert isinstance(raised.value.__cause__, Exception)
+    assert isinstance(raised.value.__cause__, RuntimeError)
+    assert getattr(raised.value.__cause__, "cleanup_confirmed", None) is True
+
+
+def test_windows_connected_process_assign_failure_with_unproven_cleanup_blocks_replacement(
+    tmp_path: Path, monkeypatch
+):
+    from flowgency.jobs.windows_job import _retry_uncertain, _uncertain
+
+    assert _uncertain == []
+    native_python, native_env = _native_python_launch()
+    launch = RuntimeLaunch(
+        (native_python, "-u", "-c", "print('connected', flush=True)"),
+        tmp_path,
+        native_env,
+        "connected",
+    )
+
+    def fail_assign(job, process):
+        del job, process
+        raise pywintypes.error(5, "AssignProcessToJobObject", "Access is denied.")
+
+    def timeout_wait(process, timeout_ms):
+        del process, timeout_ms
+        return win32event.WAIT_TIMEOUT
+
+    replacement = None
+    try:
+        with monkeypatch.context() as m:
+            m.setattr(win32job, "AssignProcessToJobObject", fail_assign)
+            m.setattr(win32event, "WaitForSingleObject", timeout_wait)
+
+            with pytest.raises(ConnectedLaunchError) as raised:
+                start_connected_process(launch)
+            assert raised.value.cleanup_confirmed is False
+
+            with pytest.raises(ConnectedLaunchError) as blocked:
+                start_connected_process(launch)
+            assert blocked.value.cleanup_confirmed is False
+
+        assert len(_uncertain) == 1
+        _retry_uncertain(time.monotonic() + 5)
+        assert _uncertain == []
+
+        replacement = start_connected_process(launch)
+        assert replacement.alive() is True
+    finally:
+        while _uncertain:
+            entry = _uncertain[0]
+            with contextlib.suppress(Exception):
+                win32process.TerminateProcess(entry.process_handle, 1)
+            with contextlib.suppress(Exception):
+                win32event.WaitForSingleObject(entry.process_handle, 5000)
+            with contextlib.suppress(Exception):
+                _retry_uncertain(time.monotonic() + 5)
+        if replacement is not None:
+            assert _stop(replacement, "windows-unproven-launch").confirmed
 
 
 def test_windows_connected_process_helper_exit_after_ready_keeps_job_alive_until_stop(
