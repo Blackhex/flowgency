@@ -224,7 +224,10 @@ async def _reset_connected_setup_runtime(fixture: str) -> None:
     session manager, then — only for the ``connected-setup`` fixture —
     replace them with test doubles that never touch a real Copilot CLI or
     Windows PTY. Running the restore unconditionally on every reset keeps
-    fixtures order-independent."""
+    fixtures order-independent. On Windows the real capability check is kept
+    (never overridden to ``True``): Task 4 makes it genuinely available when
+    its ConPTY/Job/WS dependencies are installed, and lying about it here
+    would hide a real environment regression instead of exercising it."""
     global _CURRENT_FAKE_PROCESS
     import flowgency.web.routes.admin_teams as admin_teams_module
     import flowgency.web.setup_flow as setup_flow_module
@@ -245,8 +248,14 @@ async def _reset_connected_setup_runtime(fixture: str) -> None:
     if fixture != CONNECTED_SETUP_FIXTURE:
         return
 
-    setup_flow_module.connected_process_available = lambda: True
-    admin_teams_module.connected_process_available = lambda: True
+    if os.name == "nt":
+        assert _REAL_CONNECTED_PROCESS_AVAILABLE(), (
+            "Native Windows connected-setup capability is unavailable; install "
+            "Task 4's pywinpty/pywin32 dependencies before running this fixture."
+        )
+    else:
+        setup_flow_module.connected_process_available = lambda: True
+        admin_teams_module.connected_process_available = lambda: True
     REGISTRY["copilot"] = FakeConnectedCopilotIntegration()
     await app.state.setup_sessions.shutdown()
     app.state.setup_sessions = SetupSessionManager(

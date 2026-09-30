@@ -244,6 +244,31 @@ test('connected setup terminal stop ends the session', async ({ page, request })
   await assertNoConsoleErrors(page);
 });
 
+test('native Windows setup embeds the terminal', async ({ page, request }, testInfo) => {
+  test.skip(process.platform !== 'win32', 'exercises the native Windows connected-setup backend only');
+
+  await launchConnectedTerminal(page, request);
+  await expect(page.locator('#setup-terminal .xterm-screen')).toBeVisible();
+
+  await page.locator('#setup-terminal').click();
+  await page.keyboard.type('windows input');
+  await expect
+    .poll(async () => {
+      const writes = await (await request.get('/__ui/setup/session/writes')).json();
+      return writes.writes.join('');
+    })
+    .toContain('windows input');
+
+  await page.reload();
+  await expect(page.locator('#setup-terminal .xterm-screen')).toBeVisible();
+  await captureEvidence(page, `native-windows-terminal-${testInfo.project.name}.png`);
+
+  await page.getByRole('button', { name: 'Stop', exact: true }).click();
+  await expect(page).toHaveURL(/\/setup$/);
+
+  await assertNoConsoleErrors(page);
+});
+
 test('connected setup terminal offers Relaunch after Copilot exits, hidden while running', async ({ page, request }) => {
   await launchConnectedTerminal(page, request);
 
