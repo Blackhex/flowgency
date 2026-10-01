@@ -16,6 +16,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from flowgency.jobs.processes import _job_exit_status, create_kill_on_close_windows_job
+from flowgency.jobs.windows_conpty import (
+    WindowsConPTYCreateProcessError,
+    create_suspended_conpty_process,
+)
 
 
 class WindowsJobLaunchError(RuntimeError):
@@ -189,6 +193,62 @@ class WindowsJobOwner:
 
                 win32job.AssignProcessToJobObject(job_handle, process_handle)
             except pywintypes.error as error:
+                _fail_before_resume(job_handle, process_handle, pid, error)
+
+            try:
+                win32process.ResumeThread(thread_handle)
+            except Exception as error:
+                _fail_before_resume(job_handle, process_handle, pid, error)
+        finally:
+            if thread_handle is not None:
+                with contextlib.suppress(Exception):
+                    win32api.CloseHandle(thread_handle)
+        return cls(job_handle, process_handle, pid)
+
+    @classmethod
+    def launch_conpty(
+        cls,
+        argv: tuple[str, ...],
+        cwd: Path,
+        env: dict[str, str],
+        pseudoconsole: int,
+    ) -> "WindowsJobOwner":
+        import win32api
+        import win32process
+
+        _retry_uncertain(time.monotonic())
+
+        job_handle = create_kill_on_close_windows_job()
+        process_handle = None
+        thread_handle = None
+        try:
+            try:
+                process_raw, thread_raw, pid, _thread_id = create_suspended_conpty_process(
+                    argv,
+                    cwd,
+                    env,
+                    pseudoconsole,
+                    job_handle,
+                )
+                process_handle = process_raw
+                thread_handle = thread_raw
+            except WindowsConPTYCreateProcessError as error:
+                process_handle = error.process_handle
+                thread_handle = error.thread_handle
+                _fail_before_resume(job_handle, process_handle, error.pid, error)
+            except Exception as error:
+                with contextlib.suppress(Exception):
+                    win32api.CloseHandle(job_handle)
+                raise WindowsJobLaunchError(
+                    f"Could not start {argv[0]}: {error}",
+                    cleanup_confirmed=True,
+                ) from error
+
+            owner = cls(job_handle, process_handle, pid)
+            try:
+                if not owner.contains(pid):
+                    raise RuntimeError("created process was not in its assigned job before resume")
+            except Exception as error:
                 _fail_before_resume(job_handle, process_handle, pid, error)
 
             try:

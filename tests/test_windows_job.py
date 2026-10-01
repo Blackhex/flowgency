@@ -429,6 +429,278 @@ def test_resume_thread_failure_cleans_up_assigned_suspended_helper(monkeypatch, 
         _close_all(child_stdin, parent_stdin, parent_stdout, child_stdout)
 
 
+def test_launch_conpty_method_exists() -> None:
+    assert hasattr(WindowsJobOwner, "launch_conpty")
+
+
+def _read_conpty_until(terminal, needle: bytes, *, timeout: float) -> bytes:
+    deadline = time.monotonic() + timeout
+    collected = bytearray()
+    while time.monotonic() < deadline:
+        chunk = terminal.read()
+        if chunk is None:
+            time.sleep(0.02)
+            continue
+        if chunk == b"":
+            break
+        collected.extend(chunk)
+        if needle in collected:
+            return bytes(collected)
+    raise AssertionError(f"Timed out waiting for {needle!r} in {bytes(collected)!r}")
+
+
+def _wait_for_path(path: Path, *, timeout: float) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if path.exists():
+            return
+        time.sleep(0.02)
+    raise AssertionError(f"Timed out waiting for {path}")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Atomic ConPTY launch is Windows-specific")
+def test_launch_conpty_assigns_before_resume_and_contains_descendants(monkeypatch, tmp_path):
+    from flowgency.jobs.windows_conpty import WindowsConPTY
+
+    native_python, native_env = _native_python_launch()
+    started = tmp_path / "started.txt"
+    child_pid_path = tmp_path / "child.pid"
+    grandchild_pid_path = tmp_path / "grandchild.pid"
+    child_script = _write_script(
+        tmp_path / "conpty_child.py",
+        "import os, pathlib, subprocess, sys, time\n"
+        "marker = pathlib.Path(sys.argv[1])\n"
+        "child_pid_path = pathlib.Path(sys.argv[2])\n"
+        "grandchild_pid_path = pathlib.Path(sys.argv[3])\n"
+        f"python = {native_python!r}\n"
+        "grandchild = subprocess.Popen([python, '-c', 'import time; time.sleep(60)'], creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), env=os.environ.copy())\n"
+        "marker.write_text('started', encoding='utf-8')\n"
+        "child_pid_path.write_text(str(os.getpid()), encoding='utf-8')\n"
+        "grandchild_pid_path.write_text(str(grandchild.pid), encoding='utf-8')\n"
+        "while True:\n"
+        "    time.sleep(0.05)\n",
+    )
+    terminal = WindowsConPTY(24, 80)
+    captured: dict[str, object] = {}
+    original_create = __import__("flowgency.jobs.windows_job", fromlist=["create_suspended_conpty_process"]).create_suspended_conpty_process
+    original_job_factory = __import__("flowgency.jobs.windows_job", fromlist=["create_kill_on_close_windows_job"]).create_kill_on_close_windows_job
+    original_resume = win32process.ResumeThread
+    owner = None
+
+    def record_job():
+        handle = original_job_factory()
+        captured["job_handle"] = handle
+        return handle
+
+    def record_create(argv, cwd, env, pseudoconsole, job_handle):
+        result = original_create(argv, cwd, env, pseudoconsole, job_handle)
+        captured["process_handle"] = result[0]
+        captured["pid"] = result[2]
+        return result
+
+    def record_resume(thread_handle):
+        assert not started.exists()
+        assert win32job.IsProcessInJob(captured["process_handle"], captured["job_handle"])
+        return original_resume(thread_handle)
+
+    monkeypatch.setattr("flowgency.jobs.windows_job.create_kill_on_close_windows_job", record_job)
+    monkeypatch.setattr("flowgency.jobs.windows_job.create_suspended_conpty_process", record_create)
+    monkeypatch.setattr(win32process, "ResumeThread", record_resume)
+    stopped = False
+
+    try:
+        terminal.open()
+        owner = WindowsJobOwner.launch_conpty(
+            (
+                native_python,
+                "-u",
+                str(child_script),
+                str(started),
+                str(child_pid_path),
+                str(grandchild_pid_path),
+            ),
+            tmp_path,
+            native_env,
+            terminal.pseudoconsole,
+        )
+        terminal.close_child_ends()
+        _wait_for_path(started, timeout=10)
+        _wait_for_path(child_pid_path, timeout=5)
+        _wait_for_path(grandchild_pid_path, timeout=5)
+        child_pid = int(child_pid_path.read_text(encoding="utf-8"))
+        grandchild_pid = int(grandchild_pid_path.read_text(encoding="utf-8"))
+        assert win32process.GetExitCodeProcess(captured["process_handle"]) == win32con.STILL_ACTIVE
+        assert owner.contains(child_pid)
+        assert owner.contains(grandchild_pid)
+        confirmed, reason = owner.stop(time.monotonic() + 5)
+        assert confirmed, reason
+        stopped = True
+        assert win32process.GetExitCodeProcess(captured["process_handle"]) != win32con.STILL_ACTIVE
+        assert not _process_exists(child_pid)
+        assert not _process_exists(grandchild_pid)
+        terminal.begin_close()
+    finally:
+        if owner is not None:
+            if not stopped:
+                confirmed, _reason = owner.stop(time.monotonic() + 5)
+                stopped = confirmed
+            if stopped:
+                owner.close_confirmed()
+        terminal.begin_close()
+        assert terminal.wait_closed(time.monotonic() + 5)
+        terminal.close_streams()
+
+
+def test_launch_conpty_post_create_failure_keeps_uncertain_handles_and_never_resumes(monkeypatch, tmp_path):
+    from flowgency.jobs.windows_conpty import WindowsConPTYCreateProcessError
+    from flowgency.jobs.processes import create_kill_on_close_windows_job
+
+    assert _uncertain == [], "a previous test leaked an uncertain job registration"
+    resume_calls = []
+    child_stdin, parent_stdin, parent_stdout, child_stdout = _make_std_pipes()
+
+    startup = win32process.STARTUPINFO()
+    startup.dwFlags |= win32process.STARTF_USESTDHANDLES
+    startup.hStdInput = int(child_stdin)
+    startup.hStdOutput = int(child_stdout)
+    startup.hStdError = int(child_stdout)
+    process_handle, thread_handle, pid, thread_id = win32process.CreateProcess(
+        None,
+        subprocess.list2cmdline([sys.executable, "-c", "import time; time.sleep(60)"]),
+        None,
+        None,
+        True,
+        win32process.CREATE_SUSPENDED,
+        os.environ.copy(),
+        str(tmp_path),
+        startup,
+    )
+    job_handle = create_kill_on_close_windows_job()
+    win32job.AssignProcessToJobObject(job_handle, process_handle)
+
+    def fail_after_create(argv, cwd, env, pseudoconsole, passed_job_handle):
+        del argv, cwd, env, pseudoconsole
+        assert int(passed_job_handle) == int(job_handle)
+        raise WindowsConPTYCreateProcessError(
+            "attribute cleanup failed",
+            process_handle=int(process_handle),
+            thread_handle=int(thread_handle),
+            pid=pid,
+            thread_id=thread_id,
+        )
+
+    def record_resume(thread):
+        resume_calls.append(thread)
+        return win32process.ResumeThread(thread)
+
+    def return_existing_job():
+        return job_handle
+
+    monkeypatch.setattr("flowgency.jobs.windows_job.create_kill_on_close_windows_job", return_existing_job)
+    monkeypatch.setattr("flowgency.jobs.windows_job.create_suspended_conpty_process", fail_after_create)
+    monkeypatch.setattr(win32process, "ResumeThread", record_resume)
+
+    try:
+        with pytest.raises(WindowsJobLaunchError) as raised:
+            WindowsJobOwner.launch_conpty(
+                (sys.executable, "-c", "import time; time.sleep(60)"),
+                tmp_path,
+                os.environ.copy(),
+                0x1234,
+            )
+        assert raised.value.cleanup_confirmed is True
+        assert raised.value.process_terminated is True
+        assert raised.value.job_empty_confirmed is True
+        assert resume_calls == []
+        assert _uncertain == []
+        assert not _process_exists(pid)
+    finally:
+        _close_all(child_stdin, parent_stdin, parent_stdout, child_stdout)
+
+
+def _owner_process_launch_conpty_script(native_python: str, child_script_path: str, ready_path: str) -> str:
+    return (
+        "import os, pathlib, sys, time\n"
+        "from flowgency.jobs.windows_conpty import WindowsConPTY\n"
+        "from flowgency.jobs.windows_job import WindowsJobOwner\n"
+        "terminal = WindowsConPTY(24, 80)\n"
+        "terminal.open()\n"
+        "owner = WindowsJobOwner.launch_conpty(\n"
+        f"    ({native_python!r}, '-u', {child_script_path!r}, {ready_path!r}),\n"
+        "    pathlib.Path(os.getcwd()),\n"
+        "    os.environ.copy(),\n"
+        "    terminal.pseudoconsole,\n"
+        ")\n"
+        "terminal.close_child_ends()\n"
+        "sys.stdout.write(str(owner.pid) + chr(10))\n"
+        "sys.stdout.flush()\n"
+        "time.sleep(300)\n"
+    )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Atomic ConPTY launch is Windows-specific")
+def test_launch_conpty_owner_crash_closes_sole_job_handle_and_reaps_tree(tmp_path):
+    native_python, native_env = _native_python_launch()
+    ready = tmp_path / "ready.txt"
+    child_pid_path = tmp_path / "child.pid"
+    grandchild_pid_path = tmp_path / "grandchild.pid"
+    child_script = _write_script(
+        tmp_path / "owner_conpty_child.py",
+        "import os, pathlib, subprocess, sys, time\n"
+        f"python = {native_python!r}\n"
+        "ready = pathlib.Path(sys.argv[1])\n"
+        f"child_pid_path = pathlib.Path({str(child_pid_path)!r})\n"
+        f"grandchild_pid_path = pathlib.Path({str(grandchild_pid_path)!r})\n"
+        "grandchild = subprocess.Popen([python, '-c', 'import time; time.sleep(60)'], creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), env=os.environ.copy())\n"
+        "child_pid_path.write_text(str(os.getpid()), encoding='utf-8')\n"
+        "grandchild_pid_path.write_text(str(grandchild.pid), encoding='utf-8')\n"
+        "ready.write_text('ready', encoding='utf-8')\n"
+        "print('ready', flush=True)\n"
+        "while True:\n"
+        "    time.sleep(0.05)\n",
+    )
+    owner_script = _write_script(
+        tmp_path / "owner_conpty_process.py",
+        _owner_process_launch_conpty_script(native_python, str(child_script), str(ready)),
+    )
+    owner_process = subprocess.Popen(
+        [native_python, str(owner_script)],
+        stdout=subprocess.PIPE,
+        cwd=str(tmp_path),
+        text=True,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+        env=native_env,
+    )
+    try:
+        line = owner_process.stdout.readline()
+        assert line.strip().isdigit()
+        _wait_for_path(ready, timeout=5)
+        child_pid = int(child_pid_path.read_text(encoding="utf-8"))
+        grandchild_pid = int(grandchild_pid_path.read_text(encoding="utf-8"))
+        assert _process_exists(child_pid)
+        assert _process_exists(grandchild_pid)
+
+        owner_process.terminate()
+        owner_process.wait(timeout=5)
+
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and (
+            _process_exists(child_pid) or _process_exists(grandchild_pid)
+        ):
+            time.sleep(0.05)
+
+        assert not _process_exists(child_pid)
+        assert not _process_exists(grandchild_pid)
+    finally:
+        if owner_process.poll() is None:
+            with contextlib.suppress(Exception):
+                owner_process.kill()
+            with contextlib.suppress(Exception):
+                owner_process.wait(timeout=5)
+        with contextlib.suppress(Exception):
+            owner_process.stdout.close()
+
+
 def _write_script(path, body: str):
     path.write_text(body, encoding="utf-8")
     return path
