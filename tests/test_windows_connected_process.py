@@ -611,6 +611,8 @@ def test_windows_natural_close_defers_begin_close_until_inflight_resize_finishes
         assert terminal.begin_close_calls == 1
         assert terminal.sizes == [(33, 91)]
     finally:
+        # release the stubbed reader gate first so cleanup can't stall on an early assertion failure
+        terminal.allow_close_checks.set()
         terminal.resize_released.set()
         resize_thread.join(timeout=2.0)
         with contextlib.suppress(Exception):
