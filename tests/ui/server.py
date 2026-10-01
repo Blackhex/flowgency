@@ -251,7 +251,7 @@ async def _reset_connected_setup_runtime(fixture: str) -> None:
     if os.name == "nt":
         assert _REAL_CONNECTED_PROCESS_AVAILABLE(), (
             "Native Windows connected-setup capability is unavailable; install "
-            "Task 4's pywinpty/pywin32 dependencies before running this fixture."
+            "the Windows native connected-setup dependencies before running this fixture."
         )
     else:
         setup_flow_module.connected_process_available = lambda: True

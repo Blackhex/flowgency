@@ -254,6 +254,76 @@ def test_windows_connected_process_launch_failure_passthrough_stays_unconfirmed(
     assert raised.value.cleanup_confirmed is False
 
 
+@pytest.mark.parametrize(
+    ("launch", "rows", "cols", "error_type", "match"),
+    [
+        (RuntimeLaunch((), Path("C:/"), {}, "connected"), 24, 80, ValueError, "command"),
+        (RuntimeLaunch(("copilot",), Path("C:/"), {}, "headless"), 24, 80, ValueError, "connected"),
+        (RuntimeLaunch(("copilot",), Path("relative"), {}, "connected"), 24, 80, ConnectedLaunchError, "cwd"),
+        (
+            RuntimeLaunch(("copilot",), Path("C:/definitely-missing-flowgency-connected"), {}, "connected"),
+            24,
+            80,
+            ConnectedLaunchError,
+            "cwd",
+        ),
+        (RuntimeLaunch(("co\x00pilot",), Path("C:/"), {}, "connected"), 24, 80, ConnectedLaunchError, "NUL"),
+        (RuntimeLaunch(("copilot", 3), Path("C:/"), {}, "connected"), 24, 80, ConnectedLaunchError, "string"),
+        (RuntimeLaunch(("copilot",), Path("C:/"), {"": "value"}, "connected"), 24, 80, ConnectedLaunchError, "invalid entry"),
+        (RuntimeLaunch(("copilot",), Path("C:/"), {"BAD=KEY": "value"}, "connected"), 24, 80, ConnectedLaunchError, "invalid entry"),
+        (RuntimeLaunch(("copilot",), Path("C:/"), {"BAD\x00KEY": "value"}, "connected"), 24, 80, ConnectedLaunchError, "invalid entry"),
+        (RuntimeLaunch(("copilot",), Path("C:/"), {"SAFE": "value\x00suffix"}, "connected"), 24, 80, ConnectedLaunchError, "invalid entry"),
+        (RuntimeLaunch(("copilot",), Path("C:/"), {"SAFE": 7}, "connected"), 24, 80, ConnectedLaunchError, "string"),
+        (RuntimeLaunch(("copilot",), Path("C:/"), {}, "connected"), 0, 80, ValueError, "size"),
+        (RuntimeLaunch(("copilot",), Path("C:/"), {}, "connected"), 24, 0, ValueError, "size"),
+        (RuntimeLaunch(("copilot",), Path("C:/"), {}, "connected"), True, 80, ValueError, "size"),
+    ],
+    ids=[
+        "empty-argv",
+        "wrong-mode",
+        "relative-cwd",
+        "missing-cwd",
+        "nul-argv",
+        "nonstring-argv",
+        "empty-env-key",
+        "equals-env-key",
+        "nul-env-key",
+        "nul-env-value",
+        "nonstring-env-value",
+        "zero-rows",
+        "zero-cols",
+        "bool-rows",
+    ],
+)
+def test_windows_invalid_launch_is_rejected_before_native_allocation(
+    tmp_path: Path,
+    monkeypatch,
+    launch: RuntimeLaunch,
+    rows: int,
+    cols: int,
+    error_type: type[BaseException],
+    match: str,
+):
+    opened: list[tuple[int, int]] = []
+    launched: list[tuple[tuple[object, ...], Path, dict[str, object], object]] = []
+
+    def record_open(self):
+        opened.append((self._rows, self._cols))
+
+    def record_launch(argv, cwd, env, pseudoconsole):
+        launched.append((argv, cwd, env, pseudoconsole))
+        raise AssertionError("launch_conpty must not run for invalid input")
+
+    monkeypatch.setattr("flowgency.jobs.windows_connected_process.WindowsConPTY.open", record_open)
+    monkeypatch.setattr(WindowsJobOwner, "launch_conpty", staticmethod(record_launch))
+
+    with pytest.raises(error_type, match=match):
+        start_connected_process(launch, rows=rows, cols=cols)
+
+    assert opened == []
+    assert launched == []
+
+
 def test_windows_connected_process_root_exit_keeps_job_alive_until_stop(tmp_path: Path):
     native_python, native_env = _native_python_launch()
     child_pid_path = tmp_path / "contained-child.pid"

@@ -99,9 +99,23 @@ def _validate_size(rows: int, cols: int) -> None:
 def _validate_launch(launch: RuntimeLaunch) -> None:
     if not launch.argv:
         raise ValueError("A connected launch needs a command")
+    if os.name == "nt":
+        if any(not isinstance(item, str) for item in launch.argv):
+            raise ConnectedLaunchError("Connected launch arguments must be strings", cleanup_confirmed=True)
+        if any(not item for item in launch.argv):
+            raise ConnectedLaunchError("Connected launch arguments must not be empty", cleanup_confirmed=True)
     if any("\0" in str(item) for item in launch.argv):
         raise ConnectedLaunchError("Connected launch arguments must not contain NUL", cleanup_confirmed=True)
+    if os.name == "nt":
+        cwd = Path(launch.cwd)
+        if not cwd.is_absolute() or not cwd.is_dir():
+            raise ConnectedLaunchError("Connected launch cwd must be an existing absolute directory", cleanup_confirmed=True)
     for name, value in launch.env.items():
+        if os.name == "nt" and (not isinstance(name, str) or not isinstance(value, str)):
+            raise ConnectedLaunchError(
+                "Connected launch environment entries must use string names and values",
+                cleanup_confirmed=True,
+            )
         if not name or "=" in name or "\0" in name or "\0" in value:
             raise ConnectedLaunchError(
                 f"Connected launch environment has an invalid entry: {name!r}",

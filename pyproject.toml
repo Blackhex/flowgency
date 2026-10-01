@@ -9,7 +9,6 @@ dependencies = [
     "mcp>=2.0,<3",
     "pydantic>=2.8,<3",
     "uvicorn[standard]; sys_platform == 'win32'",
-    "pywinpty>=3.0.5,<4; sys_platform == 'win32'",
     "uvicorn[standard]; sys_platform != 'win32'",
     "watchfiles>=0.20; sys_platform == 'win32'",
     "jinja2",
@@ -29,9 +28,8 @@ test = [
     "pytest>=7",
     "httpx>=0.24",
     "Pillow>=10",
-    # The production Windows uvicorn dependency intentionally omits websocket
-    # support (connected setup is disabled there); the Playwright UI harness
-    # still needs a real WebSocket upgrade to exercise the connected terminal.
+    # The Playwright UI harness needs a real WebSocket upgrade to exercise the
+    # native connected terminal path.
     "websockets>=12,<14",
 ]
 

@@ -67,6 +67,18 @@ def test_connected_process_rejects_headless_launch(tmp_path):
         start_connected_process(launch)
 
 
+def test_posix_validate_launch_allows_empty_argument_token_and_rejects_nul(tmp_path, monkeypatch):
+    import flowgency.jobs.connected_process as connected_process
+
+    monkeypatch.setattr(connected_process, "os", types.SimpleNamespace(name="posix"))
+
+    connected_process._validate_launch(RuntimeLaunch(("command", ""), tmp_path, {}, "connected"))
+
+    with pytest.raises(ConnectedLaunchError, match="NUL") as raised:
+        connected_process._validate_launch(RuntimeLaunch(("command", "bad\0arg"), tmp_path, {}, "connected"))
+    assert raised.value.cleanup_confirmed is True
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX pre-spawn size validation only; Windows rejects before validating")
 def test_connected_process_rejects_invalid_terminal_size(tmp_path):
     launch = RuntimeLaunch((sys.executable,), tmp_path, os.environ.copy(), "connected")
