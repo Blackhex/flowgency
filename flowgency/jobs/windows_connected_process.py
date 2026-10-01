@@ -66,6 +66,9 @@ class WindowsConnectedProcess(_OwnedTerminal):
         self._terminal = terminal
         self._owner = owner
         self._write_lock = threading.Lock()
+        self._terminal_state_lock = threading.Lock()
+        self._close_state_lock = threading.Lock()
+        self._close_requested = False
         self._output_lock = threading.Condition()
         self._output_chunks: deque[bytes] = deque()
         self._buffered_output = 0
@@ -163,23 +166,37 @@ class WindowsConnectedProcess(_OwnedTerminal):
             raise BrokenPipeError(str(error)) from error
 
     def _resize_terminal(self, rows: int, cols: int) -> None:
-        try:
-            with self._write_lock:
+        with self._terminal_state_lock:
+            with self._close_state_lock:
+                if self._close_requested:
+                    raise BrokenPipeError("The connected process has been stopped")
+            try:
                 self._terminal.resize(rows, cols)
-        except OSError as error:
-            raise BrokenPipeError(str(error)) from error
+            except OSError as error:
+                raise BrokenPipeError(str(error)) from error
+
+    def _request_close(self) -> bool:
+        with self._close_state_lock:
+            self._close_requested = True
+        if not self._terminal_state_lock.acquire(blocking=False):
+            return False
+        try:
+            self._terminal.begin_close()
+            return True
+        finally:
+            self._terminal_state_lock.release()
 
     def _terminate_tree(self, deadline: float) -> tuple[bool, str]:
         self._stop_deadline = deadline
         if self._owner is None:
-            self._terminal.begin_close()
+            self._request_close()
             if self._terminal.wait_closed(deadline):
                 return True, "stopped"
             return False, "console-close-pending"
         confirmed, reason = self._owner.stop(deadline)
         if confirmed:
             self._capture_exit_code()
-            self._terminal.begin_close()
+            self._request_close()
         return confirmed, reason
 
     def _cancel_reads(self) -> None:
@@ -237,10 +254,10 @@ class WindowsConnectedProcess(_OwnedTerminal):
                         with self._io_lock:
                             stopping = self._io_closed
                         if stopping:
-                            self._terminal.begin_close()
+                            self._request_close()
                     elif not owner.alive():
                         self._capture_exit_code()
-                        self._terminal.begin_close()
+                        self._request_close()
                     self._reader_wakeup.wait(_READ_POLL_SECONDS)
                     self._reader_wakeup.clear()
                     continue

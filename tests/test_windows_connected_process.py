@@ -231,7 +231,7 @@ def test_windows_connected_process_launch_failure_from_open_cleans_up(
     assert raised.value.cleanup_confirmed is True
 
 
-def test_windows_connected_process_retry_probe_failure_stays_unconfirmed(
+def test_windows_connected_process_launch_failure_passthrough_stays_unconfirmed(
     tmp_path: Path, monkeypatch
 ):
     native_python, native_env = _native_python_launch()
@@ -412,6 +412,63 @@ class _BlockingWriteTerminal(_StubTerminal):
         super().write(data)
 
 
+class _NaturalExitOwner(_BlockingOwner):
+    def __init__(self):
+        super().__init__()
+        self._alive = False
+
+    def alive(self) -> bool:
+        return self._alive
+
+    def exit_code(self) -> int | None:
+        return 0
+
+
+class _BlockingResizeTerminal(_StubTerminal):
+    def __init__(self, *, wait_closed: bool = True):
+        super().__init__(wait_closed=wait_closed)
+        self.allow_close_checks = threading.Event()
+        self.resize_entered = threading.Event()
+        self.resize_released = threading.Event()
+        self.close_started = threading.Event()
+
+    def read(self, size: int = 65536):
+        del size
+        self.allow_close_checks.wait(30.0)
+        if self.close_started.is_set():
+            return b""
+        return None
+
+    def resize(self, rows: int, cols: int) -> None:
+        self.resize_entered.set()
+        self.resize_released.wait(30.0)
+        super().resize(rows, cols)
+
+    def begin_close(self) -> None:
+        if self.close_started.is_set():
+            return
+        super().begin_close()
+        self.close_started.set()
+
+
+class _CloseStartingTerminal(_StubTerminal):
+    def __init__(self, *, wait_closed: bool = True):
+        super().__init__(wait_closed=wait_closed)
+        self.close_started = threading.Event()
+
+    def read(self, size: int = 65536):
+        del size
+        if self.close_started.is_set():
+            return b""
+        return None
+
+    def begin_close(self) -> None:
+        if self.close_started.is_set():
+            return
+        super().begin_close()
+        self.close_started.set()
+
+
 class _LaunchOwner(_BlockingOwner):
     def __init__(self, *, confirmed: bool, reason: str = "stopped"):
         super().__init__()
@@ -514,6 +571,67 @@ def test_windows_stop_preserves_handles_while_public_write_is_still_in_flight(mo
     assert retry.reason == "stopped"
     assert owner.closed is True
     assert terminal.close_streams_calls == 1
+
+
+def test_windows_natural_close_defers_begin_close_until_inflight_resize_finishes(monkeypatch):
+    owner = _NaturalExitOwner()
+    terminal = _BlockingResizeTerminal()
+    process = WindowsConnectedProcess(terminal, owner)
+    process._start_reader()
+    resize_thread = threading.Thread(target=process.resize, args=(33, 91), daemon=False)
+    resize_thread.start()
+
+    try:
+        assert terminal.resize_entered.wait(1.0)
+        terminal.allow_close_checks.set()
+        time.sleep(0.05)
+        assert terminal.begin_close_calls == 0
+
+        monkeypatch.setattr("flowgency.jobs.connected_process._STOP_TIMEOUT_SECONDS", 0.1)
+        first = process.stop(RuntimeProcessLifecycle("setup", "resize-close-race"))
+        assert first.confirmed is False
+        assert first.reason == "reader-undrained"
+        assert owner.closed is False
+        assert terminal.close_streams_calls == 0
+
+        terminal.resize_released.set()
+        resize_thread.join(timeout=2.0)
+        assert not resize_thread.is_alive()
+        assert terminal.close_started.wait(1.0)
+
+        deadline = time.monotonic() + 2.0
+        while not process._reader_done.is_set() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert process._reader_done.is_set()
+
+        retry = process.stop(RuntimeProcessLifecycle("setup", "resize-close-race-retry"))
+        assert retry.confirmed is True
+        assert retry.reason == "stopped"
+        assert owner.closed is True
+        assert terminal.begin_close_calls == 1
+        assert terminal.sizes == [(33, 91)]
+    finally:
+        terminal.resize_released.set()
+        resize_thread.join(timeout=2.0)
+        with contextlib.suppress(Exception):
+            process.stop(RuntimeProcessLifecycle("setup", "resize-close-race-cleanup"))
+
+
+def test_windows_resize_after_close_start_raises_broken_pipe_without_native_resize():
+    owner = _NaturalExitOwner()
+    terminal = _CloseStartingTerminal()
+    process = WindowsConnectedProcess(terminal, owner)
+    process._start_reader()
+
+    try:
+        assert terminal.close_started.wait(1.0)
+        with pytest.raises(BrokenPipeError):
+            process.resize(44, 100)
+        assert terminal.sizes == []
+        assert terminal.begin_close_calls == 1
+    finally:
+        with contextlib.suppress(Exception):
+            process.stop(RuntimeProcessLifecycle("setup", "close-start-resize-cleanup"))
 
 
 def test_windows_connected_process_post_launch_child_end_close_failure_reaps_started_tree(
