@@ -8,6 +8,11 @@
 
 **Tech Stack:** Python 3.11+, pywin32 Job Objects, pywinpty 3.x ConPTY, `uvicorn[standard]` WebSockets on Windows, FastAPI, pytest, Playwright.
 
+> Historical helper-inheritance implementation plan. Live real-Copilot
+> containment disproved its spawn assumption. Continue with
+> [Native Atomic Windows ConPTY](2026-10-01-windows-atomic-conpty.md), not another
+> helper-inheritance implementation. Prior task evidence remains historical.
+
 ## Global Constraints
 
 - Windows in-page first-run setup is the primary goal; Linux/POSIX remains optional and its existing adapter must not be changed or claimed qualified by Windows tests.
