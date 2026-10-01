@@ -100,7 +100,7 @@ def test_windows_connected_process_unavailable_without_required_modules(tmp_path
     import builtins
     import flowgency.jobs.connected_process as connected_process
 
-    blocked = {"winpty", "win32job", "win32api", "win32process", "win32con", "win32event", "pywintypes"}
+    blocked = {"win32job", "win32api", "win32process", "win32con", "win32event", "pywintypes"}
     attempted: list[str] = []
     real_import = builtins.__import__
 
@@ -126,7 +126,42 @@ def test_windows_connected_process_unavailable_without_required_modules(tmp_path
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows connected-setup gate")
+def test_windows_connected_process_unavailable_without_native_conpty(tmp_path, monkeypatch):
+    import flowgency.jobs.connected_process as connected_process
+    import flowgency.jobs.windows_connected_process as windows_connected_process
+
+    def must_not_spawn(*args, **kwargs):
+        raise AssertionError("Windows connected spawn should not run when native ConPTY is unavailable")
+
+    monkeypatch.setattr(windows_connected_process, "native_conpty_available", lambda: False)
+    fake_windows_process = type("_FakeWindowsConnectedProcess", (), {"spawn": staticmethod(must_not_spawn)})
+    monkeypatch.setattr(connected_process, "WindowsConnectedProcess", fake_windows_process, raising=False)
+
+    assert connected_process_available() is False
+    launch = RuntimeLaunch((sys.executable, "-c", "print('must not run')"), tmp_path, os.environ.copy(), "connected")
+    with pytest.raises(ConnectedLaunchError) as raised:
+        start_connected_process(launch)
+    assert raised.value.cleanup_confirmed is True
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows connected-setup gate")
 def test_windows_connected_process_available_with_real_dependencies():
+    assert connected_process_available() is True
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows connected-setup gate")
+def test_windows_connected_process_available_without_winpty(monkeypatch):
+    import builtins
+
+    real_import = builtins.__import__
+
+    def guarded_import(name, *args, **kwargs):
+        if name == "winpty":
+            raise ImportError("blocked for this test: winpty")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+
     assert connected_process_available() is True
 
 

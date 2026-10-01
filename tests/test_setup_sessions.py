@@ -596,6 +596,35 @@ def test_setup_session_default_replay_budget_retains_2mib(tmp_path: Path):
     asyncio.run(exercise())
 
 
+def test_setup_session_records_sanitized_reader_failure_message(tmp_path: Path):
+    async def exercise():
+        class ReadFailureProcess(FakeProcess):
+            def read(self, size: int = 65536) -> bytes:
+                del size
+                raise OSError("PTY output failed")
+
+            def stop(self, lifecycle):
+                self.running = False
+                return ProcessStopEvidence(lifecycle.job_id, lifecycle.generation, True, "stopped")
+
+        fake = ReadFailureProcess()
+        manager = SetupSessionManager(process_factory=lambda launch: fake)
+        launch = RuntimeLaunch(("copilot",), tmp_path, {}, "connected")
+        await manager.start("owner", "copilot", launch, "fallback")
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 2
+        try:
+            while manager.snapshot("owner").state != "exited":
+                assert loop.time() < deadline
+                await asyncio.sleep(0.01)
+            snapshot = manager.snapshot("owner")
+            assert snapshot.message == "PTY output failed"
+        finally:
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
 def test_setup_session_cancelled_start_with_unconfirmed_error_blocks_slot(tmp_path: Path):
     async def exercise():
         # A cancelled Start whose shielded spawn then raises an *unconfirmed*
@@ -779,12 +808,12 @@ def test_setup_session_confirmed_cancel_releases_starting_subscriber(tmp_path: P
 @pytest.mark.skipif(os.name != "nt", reason="Windows connected startup cancellation is Windows-specific")
 def test_windows_setup_session_cancelled_start_before_ready_confirms_cleanup(tmp_path: Path, monkeypatch):
     from flowgency.jobs.connected_process import start_connected_process
+    from flowgency.jobs.windows_job import WindowsJobOwner
 
     native_python, native_env = _native_python_launch()
     child_pid_path = tmp_path / "cancel-child.pid"
-    helper_started = tmp_path / "helper-started.txt"
-    helper_exit = tmp_path / "helper-exit.txt"
-    helper_ready = tmp_path / "helper-ready.txt"
+    launch_started = tmp_path / "launch-started.txt"
+    release_launch = tmp_path / "release-launch.txt"
     child_script = _write_script(
         tmp_path / "cancel_child.py",
         (
@@ -793,42 +822,17 @@ def test_windows_setup_session_cancelled_start_before_ready_confirms_cleanup(tmp
             "time.sleep(120)\n"
         ),
     )
-    helper_script = _write_script(
-        tmp_path / "cancel_helper.py",
-        (
-            "import json, pathlib, subprocess, sys, time\n"
-            "from flowgency.jobs.windows_pty_protocol import FrameType, decode_start, read_frame, write_frame\n"
-            f"started = pathlib.Path({str(helper_started)!r})\n"
-            f"ready = pathlib.Path({str(helper_ready)!r})\n"
-            f"stop_now = pathlib.Path({str(helper_exit)!r})\n"
-            "frame = read_frame(sys.stdin.buffer)\n"
-            "if frame is None or frame[0] is not FrameType.START:\n"
-            "    raise SystemExit(2)\n"
-            "launch, _rows, _cols = decode_start(frame[1])\n"
-            "child = subprocess.Popen(\n"
-            "    list(launch.argv),\n"
-            "    cwd=str(launch.cwd),\n"
-            "    env=dict(launch.env),\n"
-            "    stdin=subprocess.DEVNULL,\n"
-            "    stdout=subprocess.DEVNULL,\n"
-            "    stderr=subprocess.DEVNULL,\n"
-            "    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),\n"
-            ")\n"
-            "started.write_text('started', encoding='utf-8')\n"
-            "while not ready.exists() and not stop_now.exists():\n"
-            "    time.sleep(0.02)\n"
-            "if stop_now.exists():\n"
-            "    raise SystemExit(0)\n"
-            "payload = json.dumps({'pid': child.pid}, separators=(',', ':')).encode('utf-8')\n"
-            "write_frame(sys.stdout.buffer, FrameType.READY, payload)\n"
-            "sys.stdout.flush()\n"
-            "time.sleep(120)\n"
-        ),
-    )
-    monkeypatch.setattr(
-        "flowgency.jobs.windows_connected_process._helper_launch",
-        lambda: ((native_python, "-u", str(helper_script)), native_env),
-    )
+
+    real_launch_conpty = WindowsJobOwner.launch_conpty
+
+    def delayed_launch(argv, cwd, env, pseudoconsole):
+        owner = real_launch_conpty(argv, cwd, env, pseudoconsole)
+        launch_started.write_text("started", encoding="utf-8")
+        while not release_launch.exists():
+            time.sleep(0.02)
+        return owner
+
+    monkeypatch.setattr(WindowsJobOwner, "launch_conpty", staticmethod(delayed_launch))
 
     async def exercise():
         manager = SetupSessionManager(process_factory=start_connected_process)
@@ -842,12 +846,12 @@ def test_windows_setup_session_cancelled_start_before_ready_confirms_cleanup(tmp
         primary_error: BaseException | None = None
         try:
             start1 = asyncio.create_task(manager.start("owner", "copilot", launch, "fallback"))
-            await asyncio.to_thread(_wait_for_text, helper_started)
+            await asyncio.to_thread(_wait_for_text, launch_started)
             child_identity = read_process_identity(int(await asyncio.to_thread(_wait_for_text, child_pid_path)))
             assert child_identity is not None
             start1.cancel()
             await asyncio.sleep(0.05)
-            helper_exit.write_text("exit", encoding="utf-8")
+            release_launch.write_text("release", encoding="utf-8")
             with pytest.raises(asyncio.CancelledError):
                 await asyncio.wait_for(start1, timeout=15)
             assert manager.snapshot("owner") is None
@@ -856,8 +860,6 @@ def test_windows_setup_session_cancelled_start_before_ready_confirms_cleanup(tmp
                 await asyncio.sleep(0.05)
             assert process_identity_state(child_identity) != "alive"
 
-            helper_exit.unlink()
-            helper_ready.write_text("ready", encoding="utf-8")
             running = await asyncio.wait_for(manager.start("owner", "copilot", launch, "fallback"), timeout=15)
             assert running.state == "running"
             evidence = await asyncio.wait_for(manager.stop("owner"), timeout=15)
@@ -867,7 +869,7 @@ def test_windows_setup_session_cancelled_start_before_ready_confirms_cleanup(tmp
             raise
         finally:
             with contextlib.suppress(Exception):
-                helper_exit.write_text("exit", encoding="utf-8")
+                release_launch.write_text("release", encoding="utf-8")
             if start1 is not None and not start1.done():
                 start1.cancel()
                 with contextlib.suppress(asyncio.CancelledError, TimeoutError):
@@ -887,11 +889,12 @@ def test_windows_setup_session_cancelled_start_before_ready_blocks_on_unknown_ac
 ):
     from flowgency.jobs.connected_process import start_connected_process
     import flowgency.jobs.windows_job as windows_job
+    from flowgency.jobs.windows_job import WindowsJobOwner
 
     native_python, native_env = _native_python_launch()
     child_pid_path = tmp_path / "unknown-child.pid"
-    helper_started = tmp_path / "unknown-helper-started.txt"
-    helper_exit = tmp_path / "unknown-helper-exit.txt"
+    launch_started = tmp_path / "unknown-launch-started.txt"
+    release_launch = tmp_path / "unknown-release-launch.txt"
     child_script = _write_script(
         tmp_path / "unknown_child.py",
         (
@@ -900,35 +903,17 @@ def test_windows_setup_session_cancelled_start_before_ready_blocks_on_unknown_ac
             "time.sleep(120)\n"
         ),
     )
-    helper_script = _write_script(
-        tmp_path / "unknown_cancel_helper.py",
-        (
-            "import pathlib, subprocess, sys, time\n"
-            "from flowgency.jobs.windows_pty_protocol import FrameType, decode_start, read_frame\n"
-            f"started = pathlib.Path({str(helper_started)!r})\n"
-            f"stop_now = pathlib.Path({str(helper_exit)!r})\n"
-            "frame = read_frame(sys.stdin.buffer)\n"
-            "if frame is None or frame[0] is not FrameType.START:\n"
-            "    raise SystemExit(2)\n"
-            "launch, _rows, _cols = decode_start(frame[1])\n"
-            "subprocess.Popen(\n"
-            "    list(launch.argv),\n"
-            "    cwd=str(launch.cwd),\n"
-            "    env=dict(launch.env),\n"
-            "    stdin=subprocess.DEVNULL,\n"
-            "    stdout=subprocess.DEVNULL,\n"
-            "    stderr=subprocess.DEVNULL,\n"
-            "    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),\n"
-            ")\n"
-            "started.write_text('started', encoding='utf-8')\n"
-            "while not stop_now.exists():\n"
-            "    time.sleep(0.02)\n"
-        ),
-    )
-    monkeypatch.setattr(
-        "flowgency.jobs.windows_connected_process._helper_launch",
-        lambda: ((native_python, "-u", str(helper_script)), native_env),
-    )
+
+    real_launch_conpty = WindowsJobOwner.launch_conpty
+
+    def delayed_launch(argv, cwd, env, pseudoconsole):
+        owner = real_launch_conpty(argv, cwd, env, pseudoconsole)
+        launch_started.write_text("started", encoding="utf-8")
+        while not release_launch.exists():
+            time.sleep(0.02)
+        return owner
+
+    monkeypatch.setattr(WindowsJobOwner, "launch_conpty", staticmethod(delayed_launch))
     real_job_exit_status = windows_job._job_exit_status
     calls = {"count": 0}
 
@@ -952,12 +937,12 @@ def test_windows_setup_session_cancelled_start_before_ready_blocks_on_unknown_ac
         primary_error: BaseException | None = None
         try:
             start1 = asyncio.create_task(manager.start("owner", "copilot", launch, "fallback"))
-            await asyncio.to_thread(_wait_for_text, helper_started)
+            await asyncio.to_thread(_wait_for_text, launch_started)
             child_identity = read_process_identity(int(await asyncio.to_thread(_wait_for_text, child_pid_path)))
             assert child_identity is not None
             start1.cancel()
             await asyncio.sleep(0.05)
-            helper_exit.write_text("exit", encoding="utf-8")
+            release_launch.write_text("release", encoding="utf-8")
             with pytest.raises(asyncio.CancelledError):
                 await asyncio.wait_for(start1, timeout=15)
             snapshot = manager.snapshot("owner")
@@ -974,7 +959,7 @@ def test_windows_setup_session_cancelled_start_before_ready_blocks_on_unknown_ac
             raise
         finally:
             with contextlib.suppress(Exception):
-                helper_exit.write_text("exit", encoding="utf-8")
+                release_launch.write_text("release", encoding="utf-8")
             if start1 is not None and not start1.done():
                 start1.cancel()
                 with contextlib.suppress(asyncio.CancelledError, TimeoutError):

@@ -391,7 +391,14 @@ class SetupSessionManager:
                     chunk = await asyncio.to_thread(session.process.read)
                 except asyncio.CancelledError:
                     return
-                except (EOFError, OSError):
+                except EOFError:
+                    break
+                except OSError as error:
+                    async with self._state_lock:
+                        if self._session is not session or session.finalized:
+                            return
+                        if not session.message:
+                            session.message = str(error) or "PTY output failed"
                     break
                 if not chunk:
                     break  # PTY adapter reports end-of-stream as an empty read

@@ -635,6 +635,7 @@ def test_launch_conpty_post_create_failure_keeps_uncertain_handles_and_never_res
 
     assert _uncertain == [], "a previous test leaked an uncertain job registration"
     resume_calls = []
+    mock_called = False
     child_stdin, parent_stdin, parent_stdout, child_stdout = _make_std_pipes()
 
     startup = win32process.STARTUPINFO()
@@ -657,12 +658,22 @@ def test_launch_conpty_post_create_failure_keeps_uncertain_handles_and_never_res
     win32job.AssignProcessToJobObject(job_handle, process_handle)
 
     def fail_after_create(argv, cwd, env, pseudoconsole, passed_job_handle):
+        nonlocal mock_called
         del argv, cwd, env, pseudoconsole
+        mock_called = True
         assert int(passed_job_handle) == int(job_handle)
+        assert int(process_handle) != 0
+        assert int(thread_handle) != 0
+        process_raw = process_handle.Detach()
+        thread_raw = thread_handle.Detach()
+        assert process_raw != 0
+        assert thread_raw != 0
+        assert int(process_handle) == 0
+        assert int(thread_handle) == 0
         raise WindowsConPTYCreateProcessError(
             "attribute cleanup failed",
-            process_handle=int(process_handle),
-            thread_handle=int(thread_handle),
+            process_handle=process_raw,
+            thread_handle=thread_raw,
             pid=pid,
             thread_id=thread_id,
         )
@@ -686,13 +697,20 @@ def test_launch_conpty_post_create_failure_keeps_uncertain_handles_and_never_res
                 os.environ.copy(),
                 0x1234,
             )
+        assert mock_called is True
         assert raised.value.cleanup_confirmed is True
         assert raised.value.process_terminated is True
         assert raised.value.job_empty_confirmed is True
         assert resume_calls == []
         assert _uncertain == []
         assert not _process_exists(pid)
+        assert int(process_handle) == 0
+        assert int(thread_handle) == 0
     finally:
+        if not mock_called:
+            with contextlib.suppress(Exception):
+                win32process.TerminateProcess(process_handle, 1)
+            _close_all(process_handle, thread_handle, job_handle)
         _close_all(child_stdin, parent_stdin, parent_stdout, child_stdout)
 
 
