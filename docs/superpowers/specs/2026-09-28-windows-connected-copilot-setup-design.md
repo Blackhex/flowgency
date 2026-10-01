@@ -1,7 +1,11 @@
 # Native Windows Connected Copilot Setup
 
 **Date:** 2026-09-28
-**Status:** Proposed written design; Windows in-page setup approved in conversation
+**Status:** Historical helper-inheritance design; superseded after live Copilot containment failed.
+
+The current design is [Native Atomic Windows ConPTY Setup](2026-10-01-windows-atomic-conpty-design.md).
+The implementation below records the rejected inheritance assumption, not a
+qualified production backend.
 
 ## Problem And Goal
 
