@@ -850,6 +850,32 @@ def test_windows_connected_process_preserves_unicode_argv_env_split_input_and_re
         assert evidence.confirmed
 
 
+def test_windows_connected_process_preserves_empty_argument_token(tmp_path: Path):
+    native_python, native_env = _native_python_launch()
+    marker_path = tmp_path / "empty-arg.txt"
+    script = _write_script(
+        tmp_path / "empty_arg.py",
+        (
+            "import pathlib, sys, time\n"
+            "assert sys.argv[2] == ''\n"
+            "pathlib.Path(sys.argv[1]).write_text('preserved', encoding='utf-8')\n"
+            "time.sleep(60)\n"
+        ),
+    )
+    launch = RuntimeLaunch(
+        (native_python, "-u", str(script), str(marker_path), ""),
+        tmp_path,
+        native_env,
+        "connected",
+    )
+    process = start_connected_process(launch)
+    try:
+        assert _wait_for_text(marker_path) == "preserved"
+    finally:
+        evidence = _stop(process, "empty-arg")
+        assert evidence.confirmed
+
+
 def test_windows_stop_retry_confirms_after_job_accounting_recovers(tmp_path: Path):
     native_python, native_env = _native_python_launch()
     launch = RuntimeLaunch(

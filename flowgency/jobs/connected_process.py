@@ -102,8 +102,6 @@ def _validate_launch(launch: RuntimeLaunch) -> None:
     if os.name == "nt":
         if any(not isinstance(item, str) for item in launch.argv):
             raise ConnectedLaunchError("Connected launch arguments must be strings", cleanup_confirmed=True)
-        if any(not item for item in launch.argv):
-            raise ConnectedLaunchError("Connected launch arguments must not be empty", cleanup_confirmed=True)
     if any("\0" in str(item) for item in launch.argv):
         raise ConnectedLaunchError("Connected launch arguments must not contain NUL", cleanup_confirmed=True)
     if os.name == "nt":
