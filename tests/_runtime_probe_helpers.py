@@ -85,6 +85,7 @@ def pin_resolved_executable(monkeypatch, runtime: InstalledRuntime, registry=REG
 # another disabled built-in; nothing else may quietly stand in for it.
 DISABLED_BUILTIN_MCP_SERVERS = frozenset({"github-mcp-server"})
 OPTIONAL_DISABLED_BUILTIN_MCP_SERVERS = frozenset({"githubiq"})
+SOURCELESS_OPTIONAL_DISABLED_BUILTIN_MCP_SERVERS = frozenset({"githubiq"})
 
 _DEFAULT_COPILOT_TEST_MODEL = "gpt-5.4"
 
@@ -820,6 +821,8 @@ def assert_mcp_server_inventory(
     allowed_optional = frozenset(optional_disabled)
     required = frozenset(expected_disabled) | frozenset(expected_connected)
     observed_statuses: dict[str, set[str]] = {}
+    observed_optional_sources: dict[str, set[object]] = {}
+    observed_optional_missing_source: set[str] = set()
     inventory_seen = False
 
     for event in events:
@@ -839,6 +842,11 @@ def assert_mcp_server_inventory(
                 status = entry.get("status")
                 if isinstance(name, str) and isinstance(status, str):
                     observed_statuses.setdefault(name, set()).add(status)
+                    if name in allowed_optional:
+                        if "source" in entry:
+                            observed_optional_sources.setdefault(name, set()).add(entry.get("source"))
+                        else:
+                            observed_optional_missing_source.add(name)
         elif event_type == "session.mcp_server_status_changed":
             name = data.get("serverName")
             status = data.get("status")
@@ -869,6 +877,17 @@ def assert_mcp_server_inventory(
         assert statuses == {"disabled"}, (
             f"{name} must report only 'disabled' throughout the session; "
             f"observed statuses={sorted(statuses)!r}"
+        )
+        if name in observed_optional_missing_source:
+            assert name in SOURCELESS_OPTIONAL_DISABLED_BUILTIN_MCP_SERVERS, (
+                f"{name} omitted its inventory source, but only "
+                f"{sorted(SOURCELESS_OPTIONAL_DISABLED_BUILTIN_MCP_SERVERS)!r} may do that"
+            )
+        sources = observed_optional_sources.get(name, set())
+        invalid_sources = {source for source in sources if source != "builtin"}
+        assert not invalid_sources, (
+            f"{name} must report inventory source 'builtin' whenever the source field is present; "
+            f"observed sources={sorted(repr(source) for source in sources)!r}"
         )
 
     for name in expected_connected:

@@ -293,6 +293,90 @@ def test_assert_mcp_server_inventory_accepts_known_optional_disabled_builtin_whe
     )
 
 
+def test_assert_mcp_server_inventory_accepts_known_optional_disabled_builtin_without_reported_source():
+    events = [
+        _servers_loaded_event(
+            [
+                {"name": "github-mcp-server", "status": "disabled", "source": "builtin"},
+                {"name": "githubiq", "status": "disabled"},
+                {"name": "flowgency-tickets", "status": "connected", "source": "additional"},
+            ]
+        ),
+    ]
+
+    assert_mcp_server_inventory(
+        events,
+        expected_disabled=DISABLED_BUILTIN_MCP_SERVERS,
+        optional_disabled=OPTIONAL_DISABLED_BUILTIN_MCP_SERVERS,
+        expected_connected=frozenset({"flowgency-tickets"}),
+    )
+
+
+@pytest.mark.parametrize("source", ("plugin", "personal", "additional", "invalid-source"))
+def test_assert_mcp_server_inventory_rejects_optional_disabled_builtin_when_reported_from_nonbuiltin_source(source: str):
+    events = [
+        _servers_loaded_event(
+            [
+                {"name": "github-mcp-server", "status": "disabled", "source": "builtin"},
+                {"name": "githubiq", "status": "disabled", "source": source},
+                {"name": "flowgency-tickets", "status": "connected", "source": "additional"},
+            ]
+        ),
+    ]
+
+    with pytest.raises(AssertionError, match="githubiq"):
+        assert_mcp_server_inventory(
+            events,
+            expected_disabled=DISABLED_BUILTIN_MCP_SERVERS,
+            optional_disabled=OPTIONAL_DISABLED_BUILTIN_MCP_SERVERS,
+            expected_connected=frozenset({"flowgency-tickets"}),
+        )
+
+
+def test_assert_mcp_server_inventory_rejects_optional_disabled_builtin_when_source_is_explicit_null():
+    events = [
+        _servers_loaded_event(
+            [
+                {"name": "github-mcp-server", "status": "disabled", "source": "builtin"},
+                {"name": "githubiq", "status": "disabled", "source": None},
+                {"name": "flowgency-tickets", "status": "connected", "source": "additional"},
+            ]
+        ),
+    ]
+
+    with pytest.raises(AssertionError, match="githubiq"):
+        assert_mcp_server_inventory(
+            events,
+            expected_disabled=DISABLED_BUILTIN_MCP_SERVERS,
+            optional_disabled=OPTIONAL_DISABLED_BUILTIN_MCP_SERVERS,
+            expected_connected=frozenset({"flowgency-tickets"}),
+        )
+
+
+def test_assert_mcp_server_inventory_rejects_optional_disabled_builtin_if_any_inventory_snapshot_reports_nonbuiltin_source():
+    events = [
+        _servers_loaded_event(
+            [
+                {"name": "github-mcp-server", "status": "disabled", "source": "builtin"},
+                {"name": "githubiq", "status": "disabled", "source": "plugin"},
+            ]
+        ),
+        _servers_loaded_event(
+            [
+                {"name": "github-mcp-server", "status": "disabled", "source": "builtin"},
+                {"name": "githubiq", "status": "disabled", "source": "builtin"},
+            ]
+        ),
+    ]
+
+    with pytest.raises(AssertionError, match="githubiq"):
+        assert_mcp_server_inventory(
+            events,
+            expected_disabled=DISABLED_BUILTIN_MCP_SERVERS,
+            optional_disabled=OPTIONAL_DISABLED_BUILTIN_MCP_SERVERS,
+        )
+
+
 def test_assert_mcp_server_inventory_catches_an_unexpected_leaked_server():
     """An unrelated plugin server present in the inventory, even connected,
     must be caught -- not just servers a tool call happened to reach."""
