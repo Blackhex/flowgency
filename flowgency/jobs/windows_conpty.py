@@ -13,6 +13,7 @@ _HANDLE_FLAG_INHERIT = 0x00000001
 _CREATE_SUSPENDED = 0x00000004
 _CREATE_UNICODE_ENVIRONMENT = 0x00000400
 _EXTENDED_STARTUPINFO_PRESENT = 0x00080000
+_STARTF_USESTDHANDLES = 0x00000100
 _PROC_THREAD_ATTRIBUTE_JOB_LIST = 0x0002000D
 _PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = 0x00020016
 _ERROR_BROKEN_PIPE = 109
@@ -349,6 +350,10 @@ def create_suspended_conpty_process(
         )
         startup = bindings.STARTUPINFOEXW()
         startup.StartupInfo.cb = ctypes.sizeof(bindings.STARTUPINFOEXW)
+        startup.StartupInfo.dwFlags |= _STARTF_USESTDHANDLES
+        startup.StartupInfo.hStdInput = bindings.HANDLE(0)
+        startup.StartupInfo.hStdOutput = bindings.HANDLE(0)
+        startup.StartupInfo.hStdError = bindings.HANDLE(0)
         startup.lpAttributeList = attribute_list.pointer
         creation_flags = (
             _CREATE_SUSPENDED
@@ -407,9 +412,19 @@ class WindowsConPTY:
     def pseudoconsole(self) -> int:
         return int(self._pseudoconsole)
 
+    def _owns_open_resources(self) -> bool:
+        if self.pseudoconsole:
+            return True
+        if any((self._input_read, self._input_write, self._output_read, self._output_write)):
+            return True
+        thread = self._close_thread
+        return (thread is not None and thread.is_alive()) or self._close_error is not None
+
     def open(self) -> None:
         if self.pseudoconsole:
             return
+        if self._owns_open_resources():
+            raise RuntimeError("previous open attempt still owns resources")
         bindings = _get_bindings()
         security = bindings.SECURITY_ATTRIBUTES()
         security.nLength = ctypes.sizeof(bindings.SECURITY_ATTRIBUTES)

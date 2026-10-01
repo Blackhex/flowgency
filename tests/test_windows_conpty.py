@@ -91,6 +91,10 @@ def test_create_suspended_conpty_process_uses_atomic_job_and_conpty_attributes(m
                     "environment": "".join(chars),
                     "cwd": cwd,
                     "startup_cb": startup._obj.StartupInfo.cb,
+                    "startup_flags": startup._obj.StartupInfo.dwFlags,
+                    "std_input": int(startup._obj.StartupInfo.hStdInput or 0),
+                    "std_output": int(startup._obj.StartupInfo.hStdOutput or 0),
+                    "std_error": int(startup._obj.StartupInfo.hStdError or 0),
                     "attribute_list": startup._obj.lpAttributeList,
                 }
             )
@@ -128,6 +132,10 @@ def test_create_suspended_conpty_process_uses_atomic_job_and_conpty_attributes(m
     assert call["environment"] == "FLOWGENCY_TEST=žluťoučký\x00\x00"
     assert str(call["cwd"]).replace("\\", "/") == "C:/tmp/work"
     assert call["startup_cb"] == ctypes.sizeof(windows_conpty._STARTUPINFOEXW)
+    assert call["startup_flags"] & 0x00000100
+    assert call["std_input"] == 0
+    assert call["std_output"] == 0
+    assert call["std_error"] == 0
     assert call["attribute_list"]
 
 
@@ -345,6 +353,151 @@ def test_windows_conpty_open_retains_child_end_handles_until_explicit_close(monk
     assert terminal._input_write == 0x102
     assert terminal._output_read == 0x201
     assert fake.closed_handles == [0x101, 0x202]
+
+
+def test_windows_conpty_open_refuses_reentry_after_failed_pseudoconsole_creation(monkeypatch) -> None:
+    import flowgency.jobs.windows_conpty as windows_conpty
+
+    class FakeBindings:
+        HANDLE = ctypes.c_void_p
+        HPCON = ctypes.c_void_p
+        DWORD = ctypes.c_uint32
+        BOOL = ctypes.c_int
+        COORD = windows_conpty._COORD
+        SECURITY_ATTRIBUTES = windows_conpty._SECURITY_ATTRIBUTES
+
+        def __init__(self) -> None:
+            self.round = 0
+            self.create_pipe_calls = 0
+
+        def CreatePipe(self, read_handle, write_handle, security, size):
+            del security, size
+            pairs = ((0x101, 0x102), (0x201, 0x202), (0x301, 0x302), (0x401, 0x402))
+            read_value, write_value = pairs[self.round]
+            self.round += 1
+            self.create_pipe_calls += 1
+            read_handle._obj.value = read_value
+            write_handle._obj.value = write_value
+            return 1
+
+        def SetHandleInformation(self, handle, mask, flags):
+            del handle, mask, flags
+            return 1
+
+        def CreatePseudoConsole(self, coord, input_read, output_write, flags, hpcon):
+            del coord, input_read, output_write, flags, hpcon
+            return -1
+
+    fake = FakeBindings()
+    monkeypatch.setattr(windows_conpty, "_get_bindings", lambda: fake)
+
+    terminal = windows_conpty.WindowsConPTY(24, 80)
+
+    with pytest.raises(OSError, match="CreatePseudoConsole failed"):
+        terminal.open()
+
+    assert terminal.pseudoconsole == 0
+    assert terminal._input_read == 0x101
+    assert terminal._input_write == 0x102
+    assert terminal._output_read == 0x201
+    assert terminal._output_write == 0x202
+    assert fake.create_pipe_calls == 2
+
+    with pytest.raises(RuntimeError, match="previous open attempt still owns resources"):
+        terminal.open()
+
+    assert terminal._input_read == 0x101
+    assert terminal._input_write == 0x102
+    assert terminal._output_read == 0x201
+    assert terminal._output_write == 0x202
+    assert fake.create_pipe_calls == 2
+
+
+@pytest.mark.parametrize(
+    ("failure_stage", "expected_message", "expected_handles"),
+    [
+        ("output-pipe", "CreatePipe failed for ConPTY output", (0x101, 0x102, 0, 0)),
+        (
+            "input-writer-inherit",
+            "SetHandleInformation failed for ConPTY input writer",
+            (0x101, 0x102, 0x201, 0x202),
+        ),
+        (
+            "output-reader-inherit",
+            "SetHandleInformation failed for ConPTY output reader",
+            (0x101, 0x102, 0x201, 0x202),
+        ),
+    ],
+)
+def test_windows_conpty_open_refuses_reentry_after_partial_open_failures(
+    monkeypatch,
+    failure_stage,
+    expected_message,
+    expected_handles,
+) -> None:
+    import flowgency.jobs.windows_conpty as windows_conpty
+
+    class FakeBindings:
+        HANDLE = ctypes.c_void_p
+        HPCON = ctypes.c_void_p
+        DWORD = ctypes.c_uint32
+        BOOL = ctypes.c_int
+        COORD = windows_conpty._COORD
+        SECURITY_ATTRIBUTES = windows_conpty._SECURITY_ATTRIBUTES
+
+        def __init__(self) -> None:
+            self._pipe_values = iter((0x101, 0x102, 0x201, 0x202, 0x301, 0x302, 0x401, 0x402))
+            self.create_pipe_calls = 0
+            self.set_handle_calls = 0
+
+        def CreatePipe(self, read_handle, write_handle, security, size):
+            del security, size
+            self.create_pipe_calls += 1
+            if failure_stage == "output-pipe" and self.create_pipe_calls == 2:
+                return 0
+            read_handle._obj.value = next(self._pipe_values)
+            write_handle._obj.value = next(self._pipe_values)
+            return 1
+
+        def SetHandleInformation(self, handle, mask, flags):
+            del handle, mask, flags
+            self.set_handle_calls += 1
+            if failure_stage == "input-writer-inherit" and self.set_handle_calls == 1:
+                return 0
+            if failure_stage == "output-reader-inherit" and self.set_handle_calls == 2:
+                return 0
+            return 1
+
+        def CreatePseudoConsole(self, coord, input_read, output_write, flags, hpcon):
+            del coord, input_read, output_write, flags, hpcon
+            pytest.fail("CreatePseudoConsole should not run after earlier open-stage failure")
+
+    fake = FakeBindings()
+    monkeypatch.setattr(windows_conpty, "_get_bindings", lambda: fake)
+
+    terminal = windows_conpty.WindowsConPTY(24, 80)
+
+    with pytest.raises(OSError, match=expected_message):
+        terminal.open()
+
+    assert terminal.pseudoconsole == 0
+    assert (
+        terminal._input_read,
+        terminal._input_write,
+        terminal._output_read,
+        terminal._output_write,
+    ) == expected_handles
+
+    with pytest.raises(RuntimeError, match="previous open attempt still owns resources"):
+        terminal.open()
+
+    assert (
+        terminal._input_read,
+        terminal._input_write,
+        terminal._output_read,
+        terminal._output_write,
+    ) == expected_handles
+    assert fake.create_pipe_calls == 2
 
 
 def test_create_suspended_conpty_process_retains_created_handles_on_attribute_cleanup_failure(monkeypatch) -> None:

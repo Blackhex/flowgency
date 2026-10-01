@@ -65,6 +65,22 @@ def _process_exists(pid: int) -> bool:
         win32api.CloseHandle(handle)
 
 
+def _open_process_query_handle(pid: int):
+    return win32api.OpenProcess(
+        win32con.PROCESS_QUERY_LIMITED_INFORMATION | win32con.SYNCHRONIZE,
+        False,
+        pid,
+    )
+
+
+def _wait_for_known_exit(process_handle, *, timeout: float) -> int:
+    wait_status = win32event.WaitForSingleObject(process_handle, max(0, int(timeout * 1000)))
+    assert wait_status == win32event.WAIT_OBJECT_0
+    exit_code = win32process.GetExitCodeProcess(process_handle)
+    assert exit_code != win32con.STILL_ACTIVE
+    return int(exit_code)
+
+
 def test_helper_is_assigned_before_resume(monkeypatch, tmp_path):
     events = []
     security = win32security.SECURITY_ATTRIBUTES()
@@ -551,6 +567,68 @@ def test_launch_conpty_assigns_before_resume_and_contains_descendants(monkeypatc
         terminal.close_streams()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Atomic ConPTY launch is Windows-specific")
+def test_launch_conpty_root_exit_keeps_job_alive_until_stop(tmp_path):
+    from flowgency.jobs.windows_conpty import WindowsConPTY
+
+    native_python, native_env = _native_python_launch()
+    started = tmp_path / "root-exit-started.txt"
+    grandchild_pid_path = tmp_path / "root-exit-grandchild.pid"
+    child_script = _write_script(
+        tmp_path / "conpty_root_exit.py",
+        "import os, pathlib, subprocess, sys\n"
+        f"python = {native_python!r}\n"
+        "started = pathlib.Path(sys.argv[1])\n"
+        "grandchild_pid_path = pathlib.Path(sys.argv[2])\n"
+        "grandchild = subprocess.Popen([python, '-c', 'import time; time.sleep(60)'], creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), env=os.environ.copy())\n"
+        "grandchild_pid_path.write_text(str(grandchild.pid), encoding='utf-8')\n"
+        "started.write_text('ready', encoding='utf-8')\n"
+        "sys.stdout.write('root-exited-marker\\n')\n"
+        "sys.stdout.flush()\n",
+    )
+    terminal = WindowsConPTY(24, 80)
+    owner = None
+    stopped = False
+
+    try:
+        terminal.open()
+        owner = WindowsJobOwner.launch_conpty(
+            (native_python, "-u", str(child_script), str(started), str(grandchild_pid_path)),
+            tmp_path,
+            native_env,
+            terminal.pseudoconsole,
+        )
+        terminal.close_child_ends()
+        _wait_for_path(started, timeout=10)
+        _wait_for_path(grandchild_pid_path, timeout=5)
+        grandchild_pid = int(grandchild_pid_path.read_text(encoding="utf-8"))
+
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and owner.exit_code() is None:
+            time.sleep(0.02)
+
+        assert owner.exit_code() == 0
+        assert owner.alive()
+        assert owner.contains(grandchild_pid)
+
+        confirmed, reason = owner.stop(time.monotonic() + 5)
+        assert confirmed, reason
+        stopped = True
+        assert not owner.alive()
+        assert not _process_exists(grandchild_pid)
+        terminal.begin_close()
+    finally:
+        if owner is not None:
+            if not stopped:
+                confirmed, _reason = owner.stop(time.monotonic() + 5)
+                stopped = confirmed
+            if stopped:
+                owner.close_confirmed()
+        terminal.begin_close()
+        assert terminal.wait_closed(time.monotonic() + 5)
+        terminal.close_streams()
+
+
 def test_launch_conpty_post_create_failure_keeps_uncertain_handles_and_never_resumes(monkeypatch, tmp_path):
     from flowgency.jobs.windows_conpty import WindowsConPTYCreateProcessError
     from flowgency.jobs.processes import create_kill_on_close_windows_job
@@ -618,7 +696,13 @@ def test_launch_conpty_post_create_failure_keeps_uncertain_handles_and_never_res
         _close_all(child_stdin, parent_stdin, parent_stdout, child_stdout)
 
 
-def _owner_process_launch_conpty_script(native_python: str, child_script_path: str, ready_path: str) -> str:
+def _owner_process_launch_conpty_script(
+    native_python: str,
+    child_script_path: str,
+    ready_path: str,
+    child_pid_path: str,
+    grandchild_pid_path: str,
+) -> str:
     return (
         "import os, pathlib, sys, time\n"
         "from flowgency.jobs.windows_conpty import WindowsConPTY\n"
@@ -632,7 +716,18 @@ def _owner_process_launch_conpty_script(native_python: str, child_script_path: s
         "    terminal.pseudoconsole,\n"
         ")\n"
         "terminal.close_child_ends()\n"
-        "sys.stdout.write(str(owner.pid) + chr(10))\n"
+        f"ready = pathlib.Path({ready_path!r})\n"
+        f"child_pid_path = pathlib.Path({child_pid_path!r})\n"
+        f"grandchild_pid_path = pathlib.Path({grandchild_pid_path!r})\n"
+        "deadline = time.monotonic() + 10\n"
+        "while time.monotonic() < deadline and not (ready.exists() and child_pid_path.exists() and grandchild_pid_path.exists()):\n"
+        "    time.sleep(0.05)\n"
+        "child_pid = int(child_pid_path.read_text(encoding='utf-8'))\n"
+        "grandchild_pid = int(grandchild_pid_path.read_text(encoding='utf-8'))\n"
+        "sys.stdout.write(\n"
+        "    str(owner.pid) + ' ' + str(child_pid) + ' ' + str(grandchild_pid) + ' ' +\n"
+        "    str(owner.contains(child_pid)) + ' ' + str(owner.contains(grandchild_pid)) + chr(10)\n"
+        ")\n"
         "sys.stdout.flush()\n"
         "time.sleep(300)\n"
     )
@@ -661,7 +756,13 @@ def test_launch_conpty_owner_crash_closes_sole_job_handle_and_reaps_tree(tmp_pat
     )
     owner_script = _write_script(
         tmp_path / "owner_conpty_process.py",
-        _owner_process_launch_conpty_script(native_python, str(child_script), str(ready)),
+        _owner_process_launch_conpty_script(
+            native_python,
+            str(child_script),
+            str(ready),
+            str(child_pid_path),
+            str(grandchild_pid_path),
+        ),
     )
     owner_process = subprocess.Popen(
         [native_python, str(owner_script)],
@@ -671,27 +772,45 @@ def test_launch_conpty_owner_crash_closes_sole_job_handle_and_reaps_tree(tmp_pat
         creationflags=subprocess.CREATE_NO_WINDOW,
         env=native_env,
     )
+    root_handle = None
+    grandchild_handle = None
     try:
-        line = owner_process.stdout.readline()
-        assert line.strip().isdigit()
+        deadline = time.monotonic() + 5
+        line = ""
+        while time.monotonic() < deadline:
+            candidate = owner_process.stdout.readline()
+            assert candidate, "owner process reported nothing before exiting"
+            if len(candidate.split()) == 5:
+                line = candidate
+                break
+        assert line, "owner process never reported structured membership output"
         _wait_for_path(ready, timeout=5)
-        child_pid = int(child_pid_path.read_text(encoding="utf-8"))
-        grandchild_pid = int(grandchild_pid_path.read_text(encoding="utf-8"))
-        assert _process_exists(child_pid)
-        assert _process_exists(grandchild_pid)
+        root_pid_str, child_pid_str, grandchild_pid_str, child_in_job_str, grandchild_in_job_str = line.split()
+        child_pid = int(child_pid_str)
+        grandchild_pid = int(grandchild_pid_str)
+        assert int(root_pid_str) == child_pid
+        assert child_in_job_str == "True"
+        assert grandchild_in_job_str == "True"
+
+        root_handle = _open_process_query_handle(child_pid)
+        grandchild_handle = _open_process_query_handle(grandchild_pid)
+        assert win32process.GetExitCodeProcess(root_handle) == win32con.STILL_ACTIVE
+        assert win32process.GetExitCodeProcess(grandchild_handle) == win32con.STILL_ACTIVE
 
         owner_process.terminate()
         owner_process.wait(timeout=5)
 
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline and (
-            _process_exists(child_pid) or _process_exists(grandchild_pid)
-        ):
-            time.sleep(0.05)
-
+        assert _wait_for_known_exit(root_handle, timeout=5) is not None
+        assert _wait_for_known_exit(grandchild_handle, timeout=5) is not None
         assert not _process_exists(child_pid)
         assert not _process_exists(grandchild_pid)
     finally:
+        if grandchild_handle is not None:
+            with contextlib.suppress(Exception):
+                win32api.CloseHandle(grandchild_handle)
+        if root_handle is not None:
+            with contextlib.suppress(Exception):
+                win32api.CloseHandle(root_handle)
         if owner_process.poll() is None:
             with contextlib.suppress(Exception):
                 owner_process.kill()
@@ -699,6 +818,156 @@ def test_launch_conpty_owner_crash_closes_sole_job_handle_and_reaps_tree(tmp_pat
                 owner_process.wait(timeout=5)
         with contextlib.suppress(Exception):
             owner_process.stdout.close()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Atomic ConPTY launch is Windows-specific")
+def test_launch_conpty_drains_trailing_output_while_close_completes(tmp_path):
+    from flowgency.jobs.windows_conpty import WindowsConPTY
+
+    trailing_marker = b"TRAILING-MARKER-9f1b3f38"
+    terminal = WindowsConPTY(24, 80)
+    owner = None
+    stopped = False
+    drained = bytearray()
+    reader_done = threading.Event()
+    reader = None
+
+    def drain_native_pty() -> None:
+        try:
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                chunk = terminal.read()
+                if chunk is None:
+                    time.sleep(0.02)
+                    continue
+                if chunk == b"":
+                    return
+                drained.extend(chunk)
+        finally:
+            reader_done.set()
+
+    try:
+        terminal.open()
+        owner = WindowsJobOwner.launch_conpty(
+            (
+                "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+                "-NoLogo",
+                "-NoProfile",
+                "-Command",
+                f"Write-Output {trailing_marker.decode('ascii')}",
+            ),
+            tmp_path,
+            os.environ.copy(),
+            terminal.pseudoconsole,
+        )
+        terminal.close_child_ends()
+
+        reader = threading.Thread(target=drain_native_pty, daemon=True)
+        reader.start()
+
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and trailing_marker not in drained:
+            time.sleep(0.02)
+        assert trailing_marker in drained
+
+        terminal.begin_close()
+        confirmed, reason = owner.stop(time.monotonic() + 5)
+        assert confirmed, reason
+        stopped = True
+
+        assert reader_done.wait(timeout=5), "native PTY reader did not drain to EOF"
+        reader.join(timeout=0)
+        assert not reader.is_alive()
+        assert terminal.wait_closed(time.monotonic() + 5)
+        assert trailing_marker in bytes(drained)
+        assert terminal.read() == b""
+    finally:
+        if owner is not None:
+            if not stopped:
+                confirmed, _reason = owner.stop(time.monotonic() + 5)
+                stopped = confirmed
+            if stopped:
+                owner.close_confirmed()
+        terminal.begin_close()
+        assert terminal.wait_closed(time.monotonic() + 5)
+        if reader is not None and reader.is_alive():
+            reader.join(timeout=0)
+        terminal.close_streams()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Atomic ConPTY launch is Windows-specific")
+def test_launch_conpty_redirected_parent_stdout_stays_off_host_logs(tmp_path):
+    script = (
+        "import json, os, shutil, subprocess, sys, tempfile, time\n"
+        "from pathlib import Path\n"
+        "from flowgency.jobs.windows_conpty import WindowsConPTY\n"
+        "from flowgency.jobs.windows_job import WindowsJobOwner\n"
+        "root = Path.cwd()\n"
+        "terminal = WindowsConPTY(24, 80)\n"
+        "owner = None\n"
+        "pty_output = bytearray()\n"
+        "proof = {'marker_in_pty': False, 'job_empty': False, 'console_closed': False}\n"
+        "private = tempfile.mkdtemp(prefix='redirected-parent-', dir=root)\n"
+        "try:\n"
+        "        terminal.open()\n"
+        "        owner = WindowsJobOwner.launch_conpty((\n"
+        "            'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',\n"
+        "            '-NoLogo',\n"
+        "            '-NoProfile',\n"
+        "            '-Command',\n"
+        "            \"Write-Output 'REDIRECTED-PARENT-MARKER'\",\n"
+        "        ), Path(private), os.environ.copy(), terminal.pseudoconsole)\n"
+        "        terminal.close_child_ends()\n"
+        "        deadline = time.monotonic() + 4\n"
+        "        while time.monotonic() < deadline:\n"
+        "            chunk = terminal.read()\n"
+        "            if chunk:\n"
+        "                pty_output.extend(chunk)\n"
+        "                if b'REDIRECTED-PARENT-MARKER' in pty_output:\n"
+        "                    break\n"
+        "            elif chunk == b'':\n"
+        "                break\n"
+        "            time.sleep(0.01)\n"
+        "        proof['marker_in_pty'] = b'REDIRECTED-PARENT-MARKER' in pty_output\n"
+        "finally:\n"
+        "    if owner is not None:\n"
+        "        proof['job_empty'], _reason = owner.stop(time.monotonic() + 5)\n"
+        "    terminal.begin_close()\n"
+        "    deadline = time.monotonic() + 5\n"
+        "    while time.monotonic() < deadline:\n"
+        "        chunk = terminal.read()\n"
+        "        if chunk:\n"
+        "            pty_output.extend(chunk)\n"
+        "        if chunk == b'':\n"
+        "            break\n"
+        "        time.sleep(0.01)\n"
+        "    proof['console_closed'] = terminal.wait_closed(time.monotonic() + 2)\n"
+        "    if proof['job_empty'] and owner is not None:\n"
+        "        owner.close_confirmed()\n"
+        "    terminal.close_streams()\n"
+        "    shutil.rmtree(private)\n"
+        "proof['pty_bytes'] = len(pty_output)\n"
+        "print(json.dumps(proof))\n"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=str(tmp_path),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=25,
+    )
+
+    assert result.returncode == 0, result.stderr
+    stdout_lines = [line for line in result.stdout.splitlines() if line.strip()]
+    assert len(stdout_lines) == 1, result.stdout
+    assert "REDIRECTED-PARENT-MARKER" not in result.stdout
+    proof = json.loads(stdout_lines[0])
+    assert proof["marker_in_pty"] is True, proof
+    assert proof["job_empty"] is True, proof
+    assert proof["console_closed"] is True, proof
+    assert proof["pty_bytes"] > 0, proof
 
 
 def _write_script(path, body: str):
