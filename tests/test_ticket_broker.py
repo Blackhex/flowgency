@@ -7,6 +7,7 @@ import json
 import socket
 import threading
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 
@@ -19,6 +20,7 @@ from flowgency.tickets.broker import (
     MAX_BROKER_BODY_BYTES,
     TicketBroker,
     TicketToolClient,
+    read_bounded_json,
     _build_app,
 )
 from flowgency.tickets.models import TicketOperation, UserTicketContext
@@ -51,6 +53,40 @@ def _raw_call(
             return response.status, json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as error:
         return error.code, json.loads(error.read().decode("utf-8"))
+
+
+def _raw_header_only_call(
+    endpoint: str,
+    operation: str,
+    *,
+    token: str,
+    content_length: int,
+) -> tuple[int, dict]:
+    parsed = urllib.parse.urlparse(endpoint)
+    request = (
+        f"POST /operations/{operation} HTTP/1.1\r\n"
+        f"Host: {parsed.netloc}\r\n"
+        f"Authorization: Bearer {token}\r\n"
+        "Content-Type: application/json\r\n"
+        f"Content-Length: {content_length}\r\n"
+        "Connection: close\r\n"
+        "\r\n"
+    ).encode("ascii")
+
+    with socket.create_connection((parsed.hostname, parsed.port), timeout=5) as conn:
+        conn.sendall(request)
+        conn.shutdown(socket.SHUT_WR)
+        response = b""
+        while True:
+            chunk = conn.recv(4096)
+            if not chunk:
+                break
+            response += chunk
+
+    header_block, _, body = response.partition(b"\r\n\r\n")
+    status_line = header_block.split(b"\r\n", 1)[0]
+    status = int(status_line.split()[1])
+    return status, json.loads(body.decode("utf-8"))
 
 
 class _BoundaryHookStorage:
@@ -276,15 +312,34 @@ def test_broker_rejects_oversized_body(workflow_env):
     authority = env.running_job("builder", "run-a")
 
     with TicketBroker(env.service, env.access_registry, authority=authority) as broker:
-        status, payload = _raw_call(
+        status, payload = _raw_header_only_call(
             broker.endpoint.url,
             "list_tickets",
-            {"workflow_id": "board-a", "query": "x" * (2 * 1024 * 1024)},
             token=broker.endpoint.grant.token,
+            content_length=MAX_BROKER_BODY_BYTES + 1,
         )
 
     assert status == 422
     assert payload["error"]["code"] == "invalid-request"
+
+
+def test_broker_rejects_oversized_content_length_without_reading_stream():
+    class _Request:
+        def __init__(self) -> None:
+            self.headers = {"content-length": str(MAX_BROKER_BODY_BYTES + 1)}
+            self.stream_reads = 0
+
+        async def stream(self):
+            self.stream_reads += 1
+            yield b'{"workflow_id":"board-a"}'
+
+    request = _Request()
+
+    with pytest.raises(InvalidTicketRequest) as exc_info:
+        asyncio.run(read_bounded_json(request, MAX_BROKER_BODY_BYTES))
+
+    assert exc_info.value.code == "invalid-request"
+    assert request.stream_reads == 0
 
 
 def test_broker_rejects_invalid_artifact_bytes(workflow_env):
@@ -653,6 +708,32 @@ def test_ticket_tool_client_uses_timeout_and_redacts_malformed_error(monkeypatch
     assert result["error"]["code"] == "unavailable"
     assert "token" not in json.dumps(result)
     assert "secret" not in json.dumps(result).lower()
+
+
+def test_ticket_tool_client_rejects_oversized_payload_without_network_upload(monkeypatch):
+    client = TicketToolClient("http://127.0.0.1:8500", "token")
+    opened = {"called": False}
+
+    def unexpected_open(request, timeout=None):
+        opened["called"] = True
+        raise AssertionError("network upload should not start")
+
+    monkeypatch.setattr(client._opener, "open", unexpected_open)
+
+    result = client.call(
+        "list_tickets",
+        {"workflow_id": "board-a", "query": "x" * (2 * 1024 * 1024)},
+    )
+
+    assert opened["called"] is False
+    assert result == {
+        "ok": False,
+        "error": {
+            "code": "invalid-request",
+            "message": "Ticket request body exceeds the maximum size",
+            "details": {},
+        },
+    }
 
 
 def test_broker_registers_target_before_start_work_commit(workflow_env):

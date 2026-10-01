@@ -125,6 +125,14 @@ class TicketToolClient:
 
     def call(self, operation: str, payload: dict) -> dict:
         body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        if len(body) > MAX_BROKER_BODY_BYTES:
+            return {
+                "ok": False,
+                "error": InvalidTicketRequest(
+                    "invalid-request",
+                    "Ticket request body exceeds the maximum size",
+                ).as_dict(),
+            }
         request = urllib.request.Request(
             url=f"{self.endpoint}/operations/{operation}",
             data=body,
