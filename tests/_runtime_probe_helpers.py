@@ -81,8 +81,10 @@ def pin_resolved_executable(monkeypatch, runtime: InstalledRuntime, registry=REG
 
 
 # Every live Copilot probe -- ordinary and ticket-capable alike -- must
-# disable exactly this built-in; nothing else may quietly stand in for it.
+# disable this built-in. Newer CLIs may also report `githubiq`, but only as
+# another disabled built-in; nothing else may quietly stand in for it.
 DISABLED_BUILTIN_MCP_SERVERS = frozenset({"github-mcp-server"})
+OPTIONAL_DISABLED_BUILTIN_MCP_SERVERS = frozenset({"githubiq"})
 
 _DEFAULT_COPILOT_TEST_MODEL = "gpt-5.4"
 
@@ -170,6 +172,7 @@ def verified_copilot_run(runtime: InstalledRuntime, *, expected_connected: froze
     assert_mcp_server_inventory(
         [event for text in raw_stdout for event in iter_jsonl_events(text)],
         expected_disabled=DISABLED_BUILTIN_MCP_SERVERS,
+        optional_disabled=OPTIONAL_DISABLED_BUILTIN_MCP_SERVERS,
         expected_connected=expected_connected,
     )
 
@@ -787,16 +790,20 @@ def assert_mcp_server_inventory(
     events: list[dict],
     *,
     expected_disabled: frozenset[str] = frozenset(),
+    optional_disabled: frozenset[str] = frozenset(),
     expected_connected: frozenset[str] = frozenset(),
 ) -> None:
-    """Every MCP server this session ever reported must be exactly
-    `expected_disabled | expected_connected`, each settled into the status its
+    """Every MCP server this session ever reported must be one of the
+    mandatory required names (`expected_disabled | expected_connected`) or an
+    explicit `optional_disabled` name, each settled into the status its
     caller actually requires.
 
     - An `expected_disabled` server must report *only* ``disabled`` -- any
       other status it ever carried, even a transient one absorbed into a
       later snapshot, is a leak (an ordinary session must not have any server
       actually start).
+    - An `optional_disabled` server may be absent entirely, but if it ever
+      appears it must report *only* ``disabled``.
     - An `expected_connected` server must report ``connected`` at least once,
       with nothing besides ``connected``/``pending`` ever observed for it: a
       server that also reported ``failed`` at some point is not proof of a
@@ -810,7 +817,8 @@ def assert_mcp_server_inventory(
     status-changed event, cannot pass by looking clean in the last inventory
     alone.
     """
-    expected = frozenset(expected_disabled) | frozenset(expected_connected)
+    allowed_optional = frozenset(optional_disabled)
+    required = frozenset(expected_disabled) | frozenset(expected_connected)
     observed_statuses: dict[str, set[str]] = {}
     inventory_seen = False
 
@@ -840,13 +848,23 @@ def assert_mcp_server_inventory(
     assert inventory_seen, "no session.mcp_servers_loaded event was observed"
 
     observed_names = frozenset(observed_statuses)
-    assert observed_names == expected, (
+    unexpected = observed_names - required - allowed_optional
+    missing = required - observed_names
+    assert not unexpected and not missing, (
         f"unexpected MCP server set: observed={sorted(observed_names)!r}, "
-        f"expected={sorted(expected)!r}; "
+        f"expected required={sorted(required)!r}, "
+        f"optional disabled={sorted(allowed_optional)!r}; "
         f"statuses={ {name: sorted(statuses) for name, statuses in observed_statuses.items()} }"
     )
 
     for name in expected_disabled:
+        statuses = observed_statuses[name]
+        assert statuses == {"disabled"}, (
+            f"{name} must report only 'disabled' throughout the session; "
+            f"observed statuses={sorted(statuses)!r}"
+        )
+
+    for name in observed_names & allowed_optional:
         statuses = observed_statuses[name]
         assert statuses == {"disabled"}, (
             f"{name} must report only 'disabled' throughout the session; "

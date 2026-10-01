@@ -43,6 +43,8 @@ from flowgency.integrations import REGISTRY
 from flowgency.workflows.models import ArtifactRef
 from tests._runtime_probe_helpers import (
     AI_CLI_COMMANDS,
+    DISABLED_BUILTIN_MCP_SERVERS,
+    OPTIONAL_DISABLED_BUILTIN_MCP_SERVERS,
     assert_mcp_server_inventory,
     assert_successful_file_read_before_publish,
     assert_sandbox_denied_write,
@@ -266,7 +268,27 @@ def test_assert_mcp_server_inventory_accepts_disabled_builtin_and_connected_tick
 
     assert_mcp_server_inventory(
         events,
-        expected_disabled=frozenset({"github-mcp-server"}),
+        expected_disabled=DISABLED_BUILTIN_MCP_SERVERS,
+        optional_disabled=OPTIONAL_DISABLED_BUILTIN_MCP_SERVERS,
+        expected_connected=frozenset({"flowgency-tickets"}),
+    )
+
+
+def test_assert_mcp_server_inventory_accepts_known_optional_disabled_builtin_when_present():
+    events = [
+        _servers_loaded_event(
+            [
+                {"name": "github-mcp-server", "status": "disabled", "source": "builtin"},
+                {"name": "githubiq", "status": "disabled", "source": "builtin"},
+                {"name": "flowgency-tickets", "status": "connected", "source": "additional"},
+            ]
+        ),
+    ]
+
+    assert_mcp_server_inventory(
+        events,
+        expected_disabled=DISABLED_BUILTIN_MCP_SERVERS,
+        optional_disabled=OPTIONAL_DISABLED_BUILTIN_MCP_SERVERS,
         expected_connected=frozenset({"flowgency-tickets"}),
     )
 
@@ -287,8 +309,27 @@ def test_assert_mcp_server_inventory_catches_an_unexpected_leaked_server():
     with pytest.raises(AssertionError, match="unexpected MCP server set"):
         assert_mcp_server_inventory(
             events,
-            expected_disabled=frozenset({"github-mcp-server"}),
+            expected_disabled=DISABLED_BUILTIN_MCP_SERVERS,
+            optional_disabled=OPTIONAL_DISABLED_BUILTIN_MCP_SERVERS,
             expected_connected=frozenset({"flowgency-tickets"}),
+        )
+
+
+def test_assert_mcp_server_inventory_rejects_an_unknown_disabled_builtin():
+    events = [
+        _servers_loaded_event(
+            [
+                {"name": "github-mcp-server", "status": "disabled", "source": "builtin"},
+                {"name": "future-builtin", "status": "disabled", "source": "builtin"},
+            ]
+        ),
+    ]
+
+    with pytest.raises(AssertionError, match="unexpected MCP server set"):
+        assert_mcp_server_inventory(
+            events,
+            expected_disabled=DISABLED_BUILTIN_MCP_SERVERS,
+            optional_disabled=OPTIONAL_DISABLED_BUILTIN_MCP_SERVERS,
         )
 
 
@@ -332,7 +373,26 @@ def test_assert_mcp_server_inventory_rejects_a_builtin_reported_enabled_even_if_
 
     with pytest.raises(AssertionError, match="github-mcp-server"):
         assert_mcp_server_inventory(
-            events, expected_disabled=frozenset({"github-mcp-server"})
+            events,
+            expected_disabled=DISABLED_BUILTIN_MCP_SERVERS,
+            optional_disabled=OPTIONAL_DISABLED_BUILTIN_MCP_SERVERS,
+        )
+
+
+@pytest.mark.parametrize("status", ("pending", "connected", "failed"))
+def test_assert_mcp_server_inventory_rejects_optional_disabled_builtin_in_any_non_disabled_status(status: str):
+    events = [
+        _servers_loaded_event(
+            [{"name": "github-mcp-server", "status": "disabled", "source": "builtin"}]
+        ),
+        _status_changed_event("githubiq", status),
+    ]
+
+    with pytest.raises(AssertionError, match="githubiq"):
+        assert_mcp_server_inventory(
+            events,
+            expected_disabled=DISABLED_BUILTIN_MCP_SERVERS,
+            optional_disabled=OPTIONAL_DISABLED_BUILTIN_MCP_SERVERS,
         )
 
 
@@ -349,7 +409,9 @@ def test_assert_mcp_server_inventory_catches_a_server_visible_only_in_status_cha
 
     with pytest.raises(AssertionError, match="unexpected MCP server set"):
         assert_mcp_server_inventory(
-            events, expected_disabled=frozenset({"github-mcp-server"})
+            events,
+            expected_disabled=DISABLED_BUILTIN_MCP_SERVERS,
+            optional_disabled=OPTIONAL_DISABLED_BUILTIN_MCP_SERVERS,
         )
 
 
@@ -367,7 +429,8 @@ def test_assert_mcp_server_inventory_requires_the_trusted_server_to_actually_con
     with pytest.raises(AssertionError, match="flowgency-tickets"):
         assert_mcp_server_inventory(
             events,
-            expected_disabled=frozenset({"github-mcp-server"}),
+            expected_disabled=DISABLED_BUILTIN_MCP_SERVERS,
+            optional_disabled=OPTIONAL_DISABLED_BUILTIN_MCP_SERVERS,
             expected_connected=frozenset({"flowgency-tickets"}),
         )
 
@@ -384,7 +447,8 @@ def test_assert_mcp_server_inventory_requires_the_trusted_server_to_be_named_at_
     with pytest.raises(AssertionError, match="unexpected MCP server set"):
         assert_mcp_server_inventory(
             events,
-            expected_disabled=frozenset({"github-mcp-server"}),
+            expected_disabled=DISABLED_BUILTIN_MCP_SERVERS,
+            optional_disabled=OPTIONAL_DISABLED_BUILTIN_MCP_SERVERS,
             expected_connected=frozenset({"flowgency-tickets"}),
         )
 
@@ -920,7 +984,8 @@ else:
         # built-in and the trusted ticket channel this run actually needed.
         assert_mcp_server_inventory(
             [event for text in raw_stdout for event in iter_jsonl_events(text)],
-            expected_disabled=frozenset({"github-mcp-server"}),
+            expected_disabled=DISABLED_BUILTIN_MCP_SERVERS,
+            optional_disabled=OPTIONAL_DISABLED_BUILTIN_MCP_SERVERS,
             expected_connected=frozenset({"flowgency-tickets"}),
         )
         # A read-only run leaves the ticket and every protected input untouched.
@@ -1329,7 +1394,8 @@ else:
         # No plugin- or personal-config MCP server leaked in.
         assert_mcp_server_inventory(
             [event for text in raw_stdout for event in iter_jsonl_events(text)],
-            expected_disabled=frozenset({"github-mcp-server"}),
+            expected_disabled=DISABLED_BUILTIN_MCP_SERVERS,
+            optional_disabled=OPTIONAL_DISABLED_BUILTIN_MCP_SERVERS,
             expected_connected=frozenset({"flowgency-tickets"}),
         )
 
@@ -1451,7 +1517,8 @@ else:
         # No plugin- or personal-config MCP server leaked in.
         assert_mcp_server_inventory(
             [event for text in raw_stdout for event in iter_jsonl_events(text)],
-            expected_disabled=frozenset({"github-mcp-server"}),
+            expected_disabled=DISABLED_BUILTIN_MCP_SERVERS,
+            optional_disabled=OPTIONAL_DISABLED_BUILTIN_MCP_SERVERS,
             expected_connected=frozenset({"flowgency-tickets"}),
         )
         assert read_job(authority.path).result_metadata["write_attempts"] == [blocked_note.name]
@@ -1633,6 +1700,7 @@ if TICKET_CAPABLE_RUNTIMES:
         # No plugin- or personal-config MCP server leaked in.
         assert_mcp_server_inventory(
             [event for text in raw_stdout for event in iter_jsonl_events(text)],
-            expected_disabled=frozenset({"github-mcp-server"}),
+            expected_disabled=DISABLED_BUILTIN_MCP_SERVERS,
+            optional_disabled=OPTIONAL_DISABLED_BUILTIN_MCP_SERVERS,
             expected_connected=frozenset({"flowgency-tickets"}),
         )
