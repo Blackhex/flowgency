@@ -258,6 +258,7 @@ def test_windows_connected_process_launch_failure_passthrough_stays_unconfirmed(
     ("launch", "rows", "cols", "error_type", "match"),
     [
         (RuntimeLaunch((), Path("C:/"), {}, "connected"), 24, 80, ValueError, "command"),
+        (RuntimeLaunch(("",), Path("C:/"), {}, "connected"), 24, 80, ConnectedLaunchError, "executable"),
         (RuntimeLaunch(("copilot",), Path("C:/"), {}, "headless"), 24, 80, ValueError, "connected"),
         (RuntimeLaunch(("copilot",), Path("relative"), {}, "connected"), 24, 80, ConnectedLaunchError, "cwd"),
         (
@@ -280,6 +281,7 @@ def test_windows_connected_process_launch_failure_passthrough_stays_unconfirmed(
     ],
     ids=[
         "empty-argv",
+        "empty-executable",
         "wrong-mode",
         "relative-cwd",
         "missing-cwd",
