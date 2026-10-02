@@ -252,19 +252,16 @@ test('connected setup terminal warns instead of pretending truncated scrollback 
   await assertNoConsoleErrors(page);
 });
 
-test('connected setup terminal stays on the session view when setup becomes ready', async ({ page, request }) => {
+test('connected setup terminal opens the dashboard when setup becomes ready', async ({ page, request }) => {
   await launchConnectedTerminal(page, request);
 
   const ready = await request.post('/__ui/setup/ready');
   expect(ready.status()).toBe(204);
 
-  await expect
-    .poll(async () => (await (await request.get('/setup/status')).json()).state)
-    .toBe('ready');
-
-  await page.waitForTimeout(2000);
-  await expect(page).toHaveURL(/\/setup\/session$/);
-  await expect(page.locator('#setup-terminal .xterm-screen')).toBeVisible();
+  await expect(page).toHaveURL(/\/newsletter\/$/);
+  await expect(page.getByRole('link', { name: 'View terminal' })).toBeVisible();
+  const state = await page.evaluate(() => fetch('/setup/session/state', { cache: 'no-store' }).then((response) => response.json()));
+  expect(state.state).toBe('running');
 
   await assertNoConsoleErrors(page);
 });

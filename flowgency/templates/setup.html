@@ -342,6 +342,7 @@
       if (statusMessage) {
         const terminalElement = document.getElementById("setup-terminal");
         const sessionView = !!(terminalElement && terminalElement.dataset.sessionView === "true");
+        const preserveSessionView = sessionView && {{ 'true' if status_state == 'ready' else 'false' }};
         const defaultMessages = {
           waiting: "We’ll keep checking for a complete configuration.",
           invalid: "Setup wrote an invalid configuration. Fix the setup session, then wait for the next refresh.",
@@ -354,7 +355,7 @@
           try {
             const response = await fetch("/setup/status", { cache: "no-store" });
             const payload = await response.json();
-            if (payload.state === "ready" && payload.redirect && !sessionView) {
+            if (payload.state === "ready" && payload.redirect && !preserveSessionView) {
               shouldScheduleNextPoll = false;
               window.location.assign(payload.redirect);
               return;
