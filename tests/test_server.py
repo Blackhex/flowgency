@@ -15,6 +15,7 @@ from flowgency.configuration import ValidationFailed
 from flowgency.integrations import IntegrationError
 from flowgency.integrations.models import RuntimeLaunch
 from flowgency.jobs.connected_process import ConnectedLaunchError
+from flowgency.jobs.processes import ProcessStopEvidence
 from flowgency.web.setup_sessions import SetupSessionConflict, SetupSessionManager
 from tests._connected_setup_helpers import FakeProcess
 
@@ -455,34 +456,34 @@ def test_setup_launch_error_response_preserves_csrf_for_retry(tmp_path, monkeypa
         "flowgency.web.routes.admin_teams.launchable_integrations",
         lambda integrations, root: (_LaunchIntegration(),),
     )
-    client = _local_client()
-    csrf = _setup_csrf(client)
+    with _local_client() as client:
+        csrf = _setup_csrf(client)
 
-    response = client.post(
-        "/setup/launch",
-        data={
-            "data_root": str(data_root.resolve()),
-            "integration": "not-registered",
-            "setup_csrf": csrf,
-        },
-        headers={"Origin": _LOCAL_BASE_URL},
-    )
+        response = client.post(
+            "/setup/launch",
+            data={
+                "data_root": str(data_root.resolve()),
+                "integration": "not-registered",
+                "setup_csrf": csrf,
+            },
+            headers={"Origin": _LOCAL_BASE_URL},
+        )
 
-    assert response.status_code == 200
-    match = re.search(r'name="setup_csrf" value="([^"]+)"', response.text)
-    assert match is not None, response.text
-    retry_csrf = match.group(1)
-    assert retry_csrf == csrf
+        assert response.status_code == 200
+        match = re.search(r'name="setup_csrf" value="([^"]+)"', response.text)
+        assert match is not None, response.text
+        retry_csrf = match.group(1)
+        assert retry_csrf == csrf
 
-    retry = client.post(
-        "/setup/launch",
-        data={
-            "data_root": str(data_root.resolve()),
-            "integration": "copilot",
-            "setup_csrf": retry_csrf,
-        },
-        headers={"Origin": _LOCAL_BASE_URL},
-    )
+        retry = client.post(
+            "/setup/launch",
+            data={
+                "data_root": str(data_root.resolve()),
+                "integration": "copilot",
+                "setup_csrf": retry_csrf,
+            },
+            headers={"Origin": _LOCAL_BASE_URL},
+        )
     assert retry.status_code == 200
     assert "Waiting for setup to complete" in retry.text
 
@@ -501,34 +502,34 @@ def test_setup_launch_waiting_response_preserves_csrf_for_relaunch(tmp_path, mon
         "flowgency.web.routes.admin_teams.launchable_integrations",
         lambda integrations, root: (integration,),
     )
-    client = _local_client()
-    csrf = _setup_csrf(client)
+    with _local_client() as client:
+        csrf = _setup_csrf(client)
 
-    response = client.post(
-        "/setup/launch",
-        data={
-            "data_root": str(data_root.resolve()),
-            "integration": "custom-launcher",
-            "setup_csrf": csrf,
-        },
-        headers={"Origin": _LOCAL_BASE_URL},
-    )
-    assert response.status_code == 200
-    assert "Waiting for setup to complete" in response.text
-    match = re.search(r'name="setup_csrf" value="([^"]+)"', response.text)
-    assert match is not None, response.text
-    relaunch_csrf = match.group(1)
-    assert relaunch_csrf == csrf
+        response = client.post(
+            "/setup/launch",
+            data={
+                "data_root": str(data_root.resolve()),
+                "integration": "custom-launcher",
+                "setup_csrf": csrf,
+            },
+            headers={"Origin": _LOCAL_BASE_URL},
+        )
+        assert response.status_code == 200
+        assert "Waiting for setup to complete" in response.text
+        match = re.search(r'name="setup_csrf" value="([^"]+)"', response.text)
+        assert match is not None, response.text
+        relaunch_csrf = match.group(1)
+        assert relaunch_csrf == csrf
 
-    relaunch = client.post(
-        "/setup/launch",
-        data={
-            "data_root": str(data_root.resolve()),
-            "integration": "custom-launcher",
-            "setup_csrf": relaunch_csrf,
-        },
-        headers={"Origin": _LOCAL_BASE_URL},
-    )
+        relaunch = client.post(
+            "/setup/launch",
+            data={
+                "data_root": str(data_root.resolve()),
+                "integration": "custom-launcher",
+                "setup_csrf": relaunch_csrf,
+            },
+            headers={"Origin": _LOCAL_BASE_URL},
+        )
     assert relaunch.status_code == 200
     assert "Waiting for setup to complete" in relaunch.text
 
@@ -553,14 +554,14 @@ def test_setup_launch_does_not_write_config(tmp_path, monkeypatch):
         "flowgency.web.routes.admin_teams.run_in_threadpool",
         fake_run_in_threadpool,
     )
-    client = _local_client()
-    csrf = _setup_csrf(client)
+    with _local_client() as client:
+        csrf = _setup_csrf(client)
 
-    response = client.post(
-        "/setup/launch",
-        data={"data_root": str(data_root.resolve()), "integration": "copilot", "setup_csrf": csrf},
-        headers={"Origin": _LOCAL_BASE_URL},
-    )
+        response = client.post(
+            "/setup/launch",
+            data={"data_root": str(data_root.resolve()), "integration": "copilot", "setup_csrf": csrf},
+            headers={"Origin": _LOCAL_BASE_URL},
+        )
 
     assert response.status_code == 200
     assert not config_path.exists()
@@ -636,18 +637,18 @@ def test_setup_launch_uses_integration_owned_fallback_when_launch_fails(
         "flowgency.web.routes.admin_teams.run_in_threadpool",
         fake_run_in_threadpool,
     )
-    client = _local_client()
-    csrf = _setup_csrf(client)
+    with _local_client() as client:
+        csrf = _setup_csrf(client)
 
-    response = client.post(
-        "/setup/launch",
-        data={
-            "data_root": str(data_root.resolve()),
-            "integration": "custom-launcher",
-            "setup_csrf": csrf,
-        },
-        headers={"Origin": _LOCAL_BASE_URL},
-    )
+        response = client.post(
+            "/setup/launch",
+            data={
+                "data_root": str(data_root.resolve()),
+                "integration": "custom-launcher",
+                "setup_csrf": csrf,
+            },
+            headers={"Origin": _LOCAL_BASE_URL},
+        )
 
     assert response.status_code == 200
     assert "Waiting for setup to complete" in response.text
@@ -664,14 +665,14 @@ def test_setup_launch_creates_and_uses_missing_data_root(tmp_path, monkeypatch):
         "flowgency.web.routes.admin_teams.launchable_integrations",
         lambda integrations, root: (integration,),
     )
-    client = _local_client()
-    csrf = _setup_csrf(client)
+    with _local_client() as client:
+        csrf = _setup_csrf(client)
 
-    response = client.post(
-        "/setup/launch",
-        data={"data_root": str(data_root), "integration": "copilot", "setup_csrf": csrf},
-        headers={"Origin": _LOCAL_BASE_URL},
-    )
+        response = client.post(
+            "/setup/launch",
+            data={"data_root": str(data_root), "integration": "copilot", "setup_csrf": csrf},
+            headers={"Origin": _LOCAL_BASE_URL},
+        )
 
     assert response.status_code == 200
     assert data_root.is_dir()
@@ -695,19 +696,111 @@ def test_setup_launch_returns_to_form_when_launch_and_fallback_fail(
         "flowgency.web.routes.admin_teams.launchable_integrations",
         lambda integrations, root: (integration,),
     )
-    client = _local_client()
-    csrf = _setup_csrf(client)
+    with _local_client() as client:
+        csrf = _setup_csrf(client)
 
-    response = client.post(
-        "/setup/launch",
-        data={"data_root": str(data_root), "integration": "copilot", "setup_csrf": csrf},
-        headers={"Origin": _LOCAL_BASE_URL},
-    )
+        response = client.post(
+            "/setup/launch",
+            data={"data_root": str(data_root), "integration": "copilot", "setup_csrf": csrf},
+            headers={"Origin": _LOCAL_BASE_URL},
+        )
 
     assert response.status_code == 200
     assert data_root.is_dir()
     assert "Bundled setup skill is unavailable." in response.text
     assert "Waiting for setup to complete" not in response.text
+
+
+@pytest.mark.parametrize("slot_state", ["running", "failed-start", "failed-stop"])
+@pytest.mark.parametrize("integration_name", ["copilot", "codex"])
+def test_external_setup_launch_requires_confirmed_cleanup(tmp_path, monkeypatch, slot_state, integration_name):
+    config_path = _configure_missing_config(tmp_path, monkeypatch)
+    root = tmp_path / "Flowgency"
+    connected = _ConnectedLaunchIntegration()
+    external = _LaunchIntegration(integration_name, "External setup")
+
+    class CleanupProcess(FakeProcess):
+        confirmed = False
+
+        def stop(self, lifecycle):
+            if not self.confirmed:
+                return ProcessStopEvidence(lifecycle.job_id, lifecycle.generation, False, "cleanup-pending")
+            return super().stop(lifecycle)
+
+    process = CleanupProcess()
+
+    def factory(launch):
+        if slot_state == "failed-start":
+            raise ConnectedLaunchError("cleanup pending", cleanup_confirmed=False, _cleanup=process)
+        return process
+
+    manager = SetupSessionManager(process_factory=factory, sweep_interval=0)
+    monkeypatch.setattr(app_mod, "SetupSessionManager", lambda: manager)
+    monkeypatch.setattr("flowgency.web.routes.admin_teams.connected_process_available", lambda: True)
+    monkeypatch.setattr("flowgency.web.routes.admin_teams.launchable_integrations", lambda integrations, data_root: (connected,))
+    with _local_client() as client:
+        try:
+            csrf = _setup_csrf(client)
+            headers = {"Origin": _LOCAL_BASE_URL}
+            form = {"data_root": str(root), "integration": "copilot", "setup_csrf": csrf}
+            first = client.post("/setup/launch", data=form, headers=headers, follow_redirects=False)
+            assert first.status_code == (409 if slot_state == "failed-start" else 303)
+            if slot_state == "failed-stop":
+                assert client.post("/setup/session/stop", data={"setup_csrf": csrf}, headers=headers).status_code == 409
+
+            monkeypatch.setattr("flowgency.web.routes.admin_teams.launchable_integrations", lambda integrations, data_root: (external,))
+            form["integration"] = integration_name
+            blocked = client.post("/setup/launch", data=form, headers=headers, follow_redirects=False)
+
+            assert blocked.status_code == 409
+            assert external.requests == []
+            assert process.running is True
+            assert not config_path.exists()
+
+            process.confirmed = True
+            assert client.post("/setup/session/stop", data={"setup_csrf": csrf}, headers=headers, follow_redirects=False).status_code == 303
+            allowed = client.post("/setup/launch", data=form, headers=headers, follow_redirects=False)
+            assert allowed.status_code == 200
+            assert len(external.requests) == 1
+            assert external.requests[0].data_root == root.resolve()
+            assert not config_path.exists()
+        finally:
+            process.confirmed = True
+
+
+@pytest.mark.parametrize("failure_path", ["connected-structured", "connected-generic", "external-barrier", "external-barrier-generic"])
+def test_failed_setup_launch_http_diagnostics_are_sanitized(tmp_path, monkeypatch, failure_path):
+    config_path = _configure_missing_config(tmp_path, monkeypatch)
+    integration = _LaunchIntegration("codex", "Codex") if failure_path.startswith("external-barrier") else _ConnectedLaunchIntegration()
+
+    def fail(launch=None):
+        if failure_path.endswith("generic"):
+            raise RuntimeError("private launch detail")
+        raise ConnectedLaunchError("private launch detail", cleanup_confirmed=False)
+
+    manager = SetupSessionManager(process_factory=fail, sweep_interval=0)
+    monkeypatch.setattr(app_mod, "SetupSessionManager", lambda: manager)
+    monkeypatch.setattr("flowgency.web.routes.admin_teams.connected_process_available", lambda: True)
+    monkeypatch.setattr("flowgency.web.routes.admin_teams.launchable_integrations", lambda integrations, root: (integration,))
+    if failure_path.startswith("external-barrier"):
+        monkeypatch.setattr("flowgency.web.setup_sessions._retry_unconfirmed", fail)
+    with _local_client() as client:
+        csrf = _setup_csrf(client)
+        response = client.post(
+            "/setup/launch", data={"data_root": str(tmp_path / "Flowgency"), "integration": integration.name, "setup_csrf": csrf},
+            headers={"Origin": _LOCAL_BASE_URL}, follow_redirects=False,
+        )
+
+        assert response.status_code == 409
+        assert "private launch detail" not in response.text
+        state = client.get("/setup/session/state").json()
+        assert state["state"] == "failed"
+        assert "private launch detail" not in state["message"]
+        assert "cleanup could not be confirmed" in state["message"]
+        assert client.post("/setup/session/stop", data={"setup_csrf": csrf}, headers={"Origin": _LOCAL_BASE_URL}).status_code == 409
+        assert client.get("/setup/session/state").json()["state"] == "failed"
+        assert integration.requests == []
+        assert not config_path.exists()
 
 
 def test_connected_launch_is_local_idempotent_and_streams_output(tmp_path, monkeypatch):

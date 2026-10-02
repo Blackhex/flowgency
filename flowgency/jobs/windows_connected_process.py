@@ -10,7 +10,7 @@ from collections import deque
 from flowgency.integrations.models import RuntimeLaunch
 from flowgency.jobs.connected_process import ConnectedLaunchError, _OwnedTerminal
 from flowgency.jobs.windows_conpty import WindowsConPTY, native_conpty_available
-from flowgency.jobs.windows_job import WindowsJobLaunchError, WindowsJobOwner
+from flowgency.jobs.windows_job import WindowsJobLaunchError, WindowsJobOwner, _UncertainWindowsJob
 
 
 MAX_DATA_BYTES = 65536
@@ -82,13 +82,17 @@ class WindowsConnectedProcess(_OwnedTerminal):
         self._reader_done = threading.Event()
         self._reader_done.set()
         self._stop_deadline = 0.0
+        self._cleanup_error: Exception | None = None
+        self._failed_launch_owners: tuple[_UncertainWindowsJob, ...] = ()
 
     @classmethod
     def spawn(cls, launch: RuntimeLaunch, *, rows: int, cols: int) -> "WindowsConnectedProcess":
         process = cls(WindowsConPTY(rows, cols))
+        job_launch_attempted = False
         try:
             process._terminal.open()
             process._start_reader()
+            job_launch_attempted = True
             owner = WindowsJobOwner.launch_conpty(
                 tuple(str(item) for item in launch.argv),
                 launch.cwd,
@@ -100,28 +104,43 @@ class WindowsConnectedProcess(_OwnedTerminal):
             process._terminal.close_child_ends()
             return process
         except WindowsJobLaunchError as error:
-            cleanup_confirmed = process._cleanup_after_launch_failure() and error.cleanup_confirmed
+            process._failed_launch_owners = error._cleanup_owners
+            known_job_cleanup = error.cleanup_confirmed or bool(error._cleanup_owners)
+            cleanup_confirmed = process._cleanup_after_launch_failure() and known_job_cleanup
             raise ConnectedLaunchError(
                 f"Could not start {launch.argv[0]} in a PTY: {error}",
                 cleanup_confirmed=cleanup_confirmed,
+                _cleanup=process if known_job_cleanup and not cleanup_confirmed else None,
             ) from error
         except Exception as error:
-            cleanup_confirmed = process._cleanup_after_launch_failure()
+            known_job_cleanup = not job_launch_attempted or process._owner is not None
+            cleanup_confirmed = process._cleanup_after_launch_failure() and known_job_cleanup
             raise ConnectedLaunchError(
                 f"Could not start {launch.argv[0]} in a PTY: {error}",
                 cleanup_confirmed=cleanup_confirmed,
+                _cleanup=process if known_job_cleanup and not cleanup_confirmed else None,
             ) from error
 
     def _start_reader(self) -> None:
         self._reader_done.clear()
         self._reader_wakeup.clear()
-        self._reader_thread = threading.Thread(target=self._read_terminal_output, name="windows-connected-conpty", daemon=False)
-        self._reader_thread.start()
+        try:
+            thread = threading.Thread(target=self._read_terminal_output, name="windows-connected-conpty", daemon=False)
+            thread.start()
+        except BaseException:
+            self._reader_done.set()
+            raise
+        self._reader_thread = thread
+
+    def _close_child_ends(self) -> None:
+        try:
+            self._terminal.close_child_ends()
+        except Exception as error:
+            self._cleanup_error = error
 
     def _cleanup_after_launch_failure(self) -> bool:
         if self._owner is None:
-            with contextlib.suppress(Exception):
-                self._terminal.close_child_ends()
+            self._close_child_ends()
         confirmed, _reason = self._stop_tree()
         return confirmed
 
@@ -183,21 +202,34 @@ class WindowsConnectedProcess(_OwnedTerminal):
         try:
             self._terminal.begin_close()
             return True
+        except Exception as error:
+            self._cleanup_error = error
+            raise
         finally:
             self._terminal_state_lock.release()
 
     def _terminate_tree(self, deadline: float) -> tuple[bool, str]:
         self._stop_deadline = deadline
-        if self._owner is None:
-            self._request_close()
-            if self._terminal.wait_closed(deadline):
-                return True, "stopped"
-            return False, "console-close-pending"
-        confirmed, reason = self._owner.stop(deadline)
-        if confirmed:
-            self._capture_exit_code()
-            self._request_close()
-        return confirmed, reason
+        try:
+            for owner in self._failed_launch_owners:
+                confirmed, reason = owner.stop(deadline)
+                if not confirmed:
+                    return False, reason
+            if self._owner is None:
+                self._close_child_ends()
+                self._request_close()
+                if self._terminal.wait_closed(deadline):
+                    return True, "stopped"
+                return False, "console-close-pending"
+            confirmed, reason = self._owner.stop(deadline)
+            if confirmed:
+                self._capture_exit_code()
+                self._close_child_ends()
+                self._request_close()
+            return confirmed, reason
+        except Exception as error:
+            self._cleanup_error = error
+            return False, "terminal-cleanup-failed"
 
     def _cancel_reads(self) -> None:
         self._reader_wakeup.set()
@@ -220,22 +252,22 @@ class WindowsConnectedProcess(_OwnedTerminal):
     def _release(self, drained: bool) -> bool:
         if not drained:
             return False
-        reader = self._reader_thread
-        if reader is not None:
-            reader.join(timeout=_READER_JOIN_TIMEOUT_SECONDS)
-            if reader.is_alive():
-                return False
-        if not self._terminal.wait_closed(self._stop_deadline):
-            return False
         try:
-            self._terminal.close_streams()
-        except OSError:
-            return False
-        if self._owner is not None:
-            try:
-                self._owner.close_confirmed()
-            except Exception:
+            reader = self._reader_thread
+            if reader is not None:
+                reader.join(timeout=_READER_JOIN_TIMEOUT_SECONDS)
+                if reader.is_alive():
+                    return False
+            if not self._terminal.wait_closed(self._stop_deadline):
                 return False
+            self._terminal.close_streams()
+            if self._owner is not None:
+                self._owner.close_confirmed()
+            for owner in self._failed_launch_owners:
+                owner.close_confirmed()
+        except Exception as error:
+            self._cleanup_error = error
+            return False
         return True
 
     def _read_terminal_output(self) -> None:
@@ -252,7 +284,7 @@ class WindowsConnectedProcess(_OwnedTerminal):
                     owner = self._owner
                     if owner is None:
                         with self._io_lock:
-                            stopping = self._io_closed
+                            stopping = self._io_closed and not self._failed_launch_owners
                         if stopping:
                             self._request_close()
                     elif not owner.alive():

@@ -35,7 +35,7 @@ from flowgency.web.setup_flow import (
     startup_error_status,
 )
 from flowgency.web.setup_security import SetupAccessDenied
-from flowgency.web.setup_sessions import SetupSessionConflict
+from flowgency.web.setup_sessions import SetupSessionConflict, _SANITIZED_START_FAILURE
 
 
 router = APIRouter()
@@ -429,14 +429,17 @@ async def _external_setup_launch(
     setup_request: InteractiveSetupRequest,
     resolved_data_root: Path,
     *,
+    owner: str,
     launch_notice: str = "",
     setup_csrf: str = "",
 ):
     fallback_command = ""
     try:
-        result = await run_in_threadpool(
-            integration.launch_interactive_setup,
-            setup_request,
+        result = await request.app.state.setup_sessions._launch_external(
+            owner,
+            integration.name,
+            resolved_data_root,
+            lambda: integration.launch_interactive_setup(setup_request),
         )
         if result.fallback_command:
             fallback_command = result.fallback_command
@@ -445,6 +448,13 @@ async def _external_setup_launch(
                 setup_request
             )
     except Exception as launch_error:
+        if isinstance(launch_error, SetupSessionConflict) or (
+            isinstance(launch_error, ConnectedLaunchError) and not launch_error.cleanup_confirmed
+        ):
+            message = str(launch_error) if isinstance(launch_error, SetupSessionConflict) else _SANITIZED_START_FAILURE
+            return JSONResponse(
+                {"error": message, "session": "/setup/session"}, status_code=409,
+            )
         if not launch_notice:
             launch_notice = str(launch_error).strip() or "Interactive setup could not be launched."
         try:
@@ -574,7 +584,7 @@ async def setup_launch(
             )
         except ConnectedLaunchError as exc:
             if not exc.cleanup_confirmed:
-                return JSONResponse({"error": str(exc)}, status_code=409)
+                return JSONResponse({"error": _SANITIZED_START_FAILURE}, status_code=409)
             # A confirmed-clean failure frees the slot; fall back to the
             # existing external launcher rather than leaving the user stuck.
             return await _external_setup_launch(
@@ -587,14 +597,15 @@ async def setup_launch(
                 integration,
                 setup_request,
                 resolved_data_root,
+                owner=owner,
                 launch_notice=str(exc),
                 setup_csrf=csrf_token,
             )
-        except Exception as exc:
+        except Exception:
             # No evidence the spawn attempt was cleaned up; never fall back
             # to an external launch that could race a still-blocked slot.
             return JSONResponse(
-                {"error": str(exc).strip() or "Setup session could not be started."},
+                {"error": _SANITIZED_START_FAILURE},
                 status_code=409,
             )
         return RedirectResponse("/setup/session", status_code=303)
@@ -609,6 +620,7 @@ async def setup_launch(
         integration,
         setup_request,
         resolved_data_root,
+        owner=owner,
         setup_csrf=csrf_token,
     )
 

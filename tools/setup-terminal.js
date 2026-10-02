@@ -7,6 +7,7 @@ const STATE_LABELS = {
   running: 'Connected',
   exited: 'The setup session exited.',
   stopped: 'The setup session was stopped.',
+  failed: 'Setup cleanup could not be confirmed.',
   unavailable: 'Setup session is no longer available.',
 };
 
@@ -75,6 +76,7 @@ const POLICY_CLOSE_CODE = 1008;
   };
 
   function connect() {
+    if (stopRetrying) return;
     setStatus('Connecting');
     terminal.options.disableStdin = true;
     // A reconnect always starts from a clean screen: the server replays
@@ -85,10 +87,6 @@ const POLICY_CLOSE_CODE = 1008;
     const url = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/setup/session/ws`;
     socket = new WebSocket(url);
     socket.binaryType = 'arraybuffer';
-
-    socket.addEventListener('open', () => {
-      retryCount = 0;
-    });
 
     socket.addEventListener('message', ({ data }) => {
       if (typeof data !== 'string') {
@@ -101,12 +99,15 @@ const POLICY_CLOSE_CODE = 1008;
       } catch (error) {
         return;
       }
-      if (state.truncated) {
+      if (state.state === 'failed') {
+        setStatus(state.message || STATE_LABELS.failed);
+      } else if (state.truncated) {
         setStatus('Earlier terminal output is unavailable.');
       } else {
         setStatus(STATE_LABELS[state.state] || state.state);
       }
       if (state.state === 'running') {
+        retryCount = 0;
         terminal.options.disableStdin = false;
         // The PTY starts at a fixed default size; send the browser's fitted
         // size as soon as attach is confirmed rather than waiting for a
@@ -121,15 +122,19 @@ const POLICY_CLOSE_CODE = 1008;
         // session rather than stranding the user on a dead terminal.
         terminal.options.disableStdin = true;
         stopRetrying = true;
+        window.clearTimeout(retryTimer);
         if (relaunchForm) relaunchForm.classList.remove('hidden');
-      } else if (state.state === 'unavailable') {
+      } else if (state.state === 'failed' || state.state === 'unavailable') {
         terminal.options.disableStdin = true;
         stopRetrying = true;
+        window.clearTimeout(retryTimer);
+        if (relaunchForm) relaunchForm.classList.add('hidden');
       }
     });
 
     socket.addEventListener('close', (event) => {
       terminal.options.disableStdin = true;
+      if (stopRetrying) return;
       if (event.code === POLICY_CLOSE_CODE) {
         stopRetrying = true;
         setStatus('Setup access was denied. Reload the page to try again.');

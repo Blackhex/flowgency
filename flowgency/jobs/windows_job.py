@@ -12,10 +12,15 @@ import contextlib
 import subprocess
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from flowgency.jobs.processes import _job_exit_status, create_kill_on_close_windows_job
+from flowgency.jobs.processes import (
+    ProcessStopEvidence,
+    RuntimeProcessLifecycle,
+    _job_exit_status,
+    create_kill_on_close_windows_job,
+)
 from flowgency.jobs.windows_conpty import (
     WindowsConPTYCreateProcessError,
     create_suspended_conpty_process,
@@ -32,18 +37,93 @@ class WindowsJobLaunchError(RuntimeError):
         cleanup_confirmed: bool,
         process_terminated: bool | None = None,
         job_empty_confirmed: bool | None = None,
+        _cleanup_owners: tuple[_UncertainWindowsJob, ...] = (),
     ) -> None:
         super().__init__(message)
         self.cleanup_confirmed = cleanup_confirmed
         self.process_terminated = process_terminated
         self.job_empty_confirmed = job_empty_confirmed
+        self._cleanup_owners = _cleanup_owners
+        self._cleanup = _WindowsJobLaunchCleanup(_cleanup_owners) if _cleanup_owners else None
 
 
-@dataclass
+@dataclass(eq=False)
 class _UncertainWindowsJob:
     job_handle: object
-    process_handle: object
+    process_handle: object | None
     pid: int
+    thread_handle: object | None = None
+    process_terminated: bool = False
+    job_empty_confirmed: bool = False
+    _confirmed_empty: bool = False
+    _process_closed: bool = False
+    _job_closed: bool = False
+    _thread_closed: bool = False
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    def stop(self, deadline: float) -> tuple[bool, str]:
+        import win32job
+        import win32process
+
+        with self._lock:
+            if self._confirmed_empty:
+                return True, "stopped"
+            if self.process_handle is not None:
+                with contextlib.suppress(Exception):
+                    win32process.TerminateProcess(self.process_handle, 1)
+            with contextlib.suppress(Exception):
+                win32job.TerminateJobObject(self.job_handle, 1)
+            self.process_terminated = self.process_handle is None or _process_terminated(self.process_handle, deadline)
+            status = _job_exit_status(self.job_handle, deadline)
+            self.job_empty_confirmed = status == "empty"
+            if self.process_terminated and self.job_empty_confirmed:
+                self._confirmed_empty = True
+                return True, "stopped"
+            if not self.process_terminated:
+                return False, "process-termination-unconfirmed"
+            return False, "job-accounting-unavailable" if status == "unknown" else "job-active-processes"
+
+    def close_confirmed(self) -> None:
+        import win32api
+
+        with self._lock:
+            if not self._confirmed_empty:
+                raise WindowsJobLaunchError("Failed launch cleanup is unconfirmed", cleanup_confirmed=False)
+            if not self._process_closed:
+                if self.process_handle is not None:
+                    win32api.CloseHandle(self.process_handle)
+                self._process_closed = True
+            if not self._thread_closed:
+                if self.thread_handle is not None:
+                    win32api.CloseHandle(self.thread_handle)
+                self._thread_closed = True
+            if not self._job_closed:
+                win32api.CloseHandle(self.job_handle)
+                self._job_closed = True
+            with _uncertain_lock:
+                if self in _uncertain:
+                    _uncertain.remove(self)
+
+
+class _WindowsJobLaunchCleanup:
+    def __init__(self, owners: tuple[_UncertainWindowsJob, ...]) -> None:
+        self._owners = owners
+        self._error: Exception | None = None
+
+    def stop(self, lifecycle: RuntimeProcessLifecycle) -> ProcessStopEvidence:
+        deadline = time.monotonic() + 5.0
+        confirmed, reason = True, "stopped"
+        for owner in self._owners:
+            try:
+                stopped, stop_reason = owner.stop(deadline)
+                if stopped:
+                    owner.close_confirmed()
+            except Exception as error:
+                self._error = error
+                stopped, stop_reason = False, "job-cleanup-failed"
+            if not stopped:
+                confirmed, reason = False, stop_reason
+        return ProcessStopEvidence(lifecycle.job_id, lifecycle.generation, confirmed, reason)
 
 
 # Job/process handles whose emptiness after a failed assignment could not be confirmed; a new
@@ -54,15 +134,7 @@ _uncertain: list[_UncertainWindowsJob] = []
 
 
 def _close_uncertain(entry: _UncertainWindowsJob) -> None:
-    import win32api
-
-    with contextlib.suppress(Exception):
-        win32api.CloseHandle(entry.process_handle)
-    with contextlib.suppress(Exception):
-        win32api.CloseHandle(entry.job_handle)
-    with _uncertain_lock:
-        if entry in _uncertain:
-            _uncertain.remove(entry)
+    entry.close_confirmed()
 
 
 def _process_terminated(process_handle, deadline: float) -> bool:
@@ -90,46 +162,48 @@ def _retry_uncertain(deadline: float) -> None:
     with _uncertain_lock:
         pending = list(_uncertain)
     for entry in pending:
-        process_terminated = _process_terminated(entry.process_handle, deadline)
-        if process_terminated and _job_exit_status(entry.job_handle, deadline) == "empty":
-            _close_uncertain(entry)
+        confirmed, _reason = entry.stop(deadline)
+        if confirmed:
+            with contextlib.suppress(Exception):
+                _close_uncertain(entry)
     with _uncertain_lock:
-        remaining = len(_uncertain)
+        remaining = tuple(_uncertain)
     if remaining:
         raise WindowsJobLaunchError(
-            f"{remaining} earlier windows job(s) could not be confirmed stopped",
+            f"{len(remaining)} earlier windows job(s) could not be confirmed stopped",
             cleanup_confirmed=False,
+            _cleanup_owners=remaining,
         )
 
 
-def _fail_before_resume(job_handle, process_handle, pid: int, cause: Exception) -> None:
-    import win32api
-    import win32process
-
+def _fail_before_resume(
+    job_handle, process_handle, pid: int, cause: Exception, *,
+    message: str | None = None, thread_handle: object | None = None,
+) -> None:
     deadline = time.monotonic() + 5
-    with contextlib.suppress(Exception):
-        win32process.TerminateProcess(process_handle, 1)
-    process_terminated = _process_terminated(process_handle, deadline)
-    status = _job_exit_status(job_handle, deadline)
-    if process_terminated and status == "empty":
-        with contextlib.suppress(Exception):
-            win32api.CloseHandle(process_handle)
-        with contextlib.suppress(Exception):
-            win32api.CloseHandle(job_handle)
+    failure = message or f"Assigning helper process {pid} to its job failed"
+    entry = _UncertainWindowsJob(job_handle, process_handle, pid, thread_handle=thread_handle)
+    with _uncertain_lock:
+        _uncertain.append(entry)
+    confirmed, _reason = entry.stop(deadline)
+    if confirmed:
+        try:
+            _close_uncertain(entry)
+        except Exception:
+            confirmed = False
+    if confirmed:
         raise WindowsJobLaunchError(
-            f"Assigning helper process {pid} to its job failed: {cause}",
+            f"{failure}: {cause}",
             cleanup_confirmed=True,
             process_terminated=True,
             job_empty_confirmed=True,
         ) from cause
-    with _uncertain_lock:
-        _uncertain.append(_UncertainWindowsJob(job_handle, process_handle, pid))
     raise WindowsJobLaunchError(
-        f"Assigning helper process {pid} to its job failed and its job could not be "
-        f"confirmed stopped: {cause}",
+        f"{failure} and its job could not be confirmed stopped: {cause}",
         cleanup_confirmed=False,
-        process_terminated=process_terminated,
-        job_empty_confirmed=(status == "empty"),
+        process_terminated=entry.process_terminated,
+        job_empty_confirmed=entry.job_empty_confirmed,
+        _cleanup_owners=(entry,),
     ) from cause
 
 
@@ -142,6 +216,11 @@ class WindowsJobOwner:
         self.pid = pid
         self._confirmed_empty = False
         self._closed = False
+        self._process_closed = False
+        self._job_closed = False
+        self._thread_handle: object | None = None
+        self._thread_closed = False
+        self._cleanup_error: Exception | None = None
 
     @classmethod
     def launch(
@@ -221,6 +300,8 @@ class WindowsJobOwner:
         job_handle = create_kill_on_close_windows_job()
         process_handle = None
         thread_handle = None
+        failure_owns_thread = False
+        owner: WindowsJobOwner | None = None
         try:
             try:
                 process_raw, thread_raw, pid, _thread_id = create_suspended_conpty_process(
@@ -235,31 +316,35 @@ class WindowsJobOwner:
             except WindowsConPTYCreateProcessError as error:
                 process_handle = error.process_handle
                 thread_handle = error.thread_handle
-                _fail_before_resume(job_handle, process_handle, error.pid, error)
+                failure_owns_thread = True
+                _fail_before_resume(job_handle, process_handle, error.pid, error, thread_handle=thread_handle)
             except Exception as error:
-                with contextlib.suppress(Exception):
-                    win32api.CloseHandle(job_handle)
-                raise WindowsJobLaunchError(
-                    f"Could not start {argv[0]}: {error}",
-                    cleanup_confirmed=True,
-                ) from error
+                _fail_before_resume(job_handle, None, 0, error, message=f"Could not start {argv[0]}")
 
-            owner = cls(job_handle, process_handle, pid)
             try:
+                owner = cls(job_handle, process_handle, pid)
                 if not owner.contains(pid):
                     raise RuntimeError("created process was not in its assigned job before resume")
             except Exception as error:
-                _fail_before_resume(job_handle, process_handle, pid, error)
+                failure_owns_thread = True
+                _fail_before_resume(job_handle, process_handle, pid, error, thread_handle=thread_handle)
 
             try:
                 win32process.ResumeThread(thread_handle)
             except Exception as error:
-                _fail_before_resume(job_handle, process_handle, pid, error)
+                failure_owns_thread = True
+                _fail_before_resume(job_handle, process_handle, pid, error, thread_handle=thread_handle)
         finally:
-            if thread_handle is not None:
-                with contextlib.suppress(Exception):
+            if thread_handle is not None and not failure_owns_thread:
+                try:
                     win32api.CloseHandle(thread_handle)
-        return cls(job_handle, process_handle, pid)
+                except Exception as error:
+                    if owner is None:
+                        _fail_before_resume(job_handle, process_handle, pid, error, thread_handle=thread_handle)
+                    owner._thread_handle = thread_handle
+                    owner._cleanup_error = error
+        assert owner is not None
+        return owner
 
     def contains(self, pid: int) -> bool:
         import pywintypes
@@ -311,8 +396,14 @@ class WindowsJobOwner:
             return
         import win32api
 
-        with contextlib.suppress(Exception):
+        if not self._process_closed:
             win32api.CloseHandle(self._process_handle)
-        with contextlib.suppress(Exception):
+            self._process_closed = True
+        if not self._thread_closed:
+            if self._thread_handle is not None:
+                win32api.CloseHandle(self._thread_handle)
+            self._thread_closed = True
+        if not self._job_closed:
             win32api.CloseHandle(self._job_handle)
+            self._job_closed = True
         self._closed = True

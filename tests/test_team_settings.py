@@ -248,19 +248,19 @@ def test_setup_launch_preserves_existing_bootstrap_config(monkeypatch, tmp_path)
         "flowgency.web.routes.admin_teams.launchable_integrations",
         lambda integrations, root: (integration,),
     )
-    client = _local_client()
-    csrf = _setup_csrf(client)
+    with _local_client() as client:
+        csrf = _setup_csrf(client)
 
-    response = client.post(
-        "/setup/launch",
-        data={
-            "data_root": str(data_root.resolve()),
-            "integration": "copilot",
-            "setup_csrf": csrf,
-        },
-        headers={"Origin": _LOCAL_BASE_URL},
-        follow_redirects=False,
-    )
+        response = client.post(
+            "/setup/launch",
+            data={
+                "data_root": str(data_root.resolve()),
+                "integration": "copilot",
+                "setup_csrf": csrf,
+            },
+            headers={"Origin": _LOCAL_BASE_URL},
+            follow_redirects=False,
+        )
 
     assert response.status_code == 200
     assert "Waiting for setup to complete" in response.text

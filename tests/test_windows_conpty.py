@@ -1,19 +1,64 @@
 from __future__ import annotations
 
+import builtins
 import ctypes
 import os
+import runpy
 import subprocess
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+
+
+def _raise_native_error(message: str) -> None:
+    raise OSError(message)
+
+
+def test_windows_job_tests_collect_without_windows_only_imports(monkeypatch) -> None:
+    module_path = Path(__file__).with_name("test_windows_job.py")
+    original_import = builtins.__import__
+
+    def portable_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if globals is not None and globals.get("__file__") == str(module_path):
+            if name == "os":
+                return SimpleNamespace(name="posix")
+            if name == "msvcrt" or name.startswith("win32") or name == "pywintypes":
+                raise ModuleNotFoundError(f"{name} is unavailable on POSIX")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", portable_import)
+    namespace = runpy.run_path(str(module_path))
+
+    assert any(name.startswith("test_") and callable(value) for name, value in namespace.items())
+    assert namespace["pytestmark"].args == (True,)
 
 
 def test_windows_conpty_module_imports_safely() -> None:
     import flowgency.jobs.windows_conpty as windows_conpty
 
     assert hasattr(windows_conpty, "native_conpty_available")
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        None,
+        ("output-pipe", "CreatePipe failed for ConPTY output", (0x101, 0x102, 0, 0)),
+        ("input-writer-inherit", "SetHandleInformation failed for ConPTY input writer", (0x101, 0x102, 0x201, 0x202)),
+        ("output-reader-inherit", "SetHandleInformation failed for ConPTY output reader", (0x101, 0x102, 0x201, 0x202)),
+    ],
+    ids=["streams-close", "output-pipe", "input-writer-inherit", "output-reader-inherit"],
+)
+def test_native_failure_fakes_without_windows_error_apis(monkeypatch, failure) -> None:
+    monkeypatch.delattr(ctypes, "WinError", raising=False)
+    monkeypatch.delattr(ctypes, "get_last_error", raising=False)
+    if failure is None:
+        test_windows_conpty_close_streams_retains_failed_handle_for_retry(monkeypatch)
+    else:
+        test_windows_conpty_open_refuses_reentry_after_partial_open_failures(monkeypatch, *failure)
 
 
 def test_create_suspended_conpty_process_uses_atomic_job_and_conpty_attributes(monkeypatch) -> None:
@@ -257,8 +302,50 @@ def test_windows_conpty_wait_closed_requires_confirmed_close(monkeypatch) -> Non
     terminal.begin_close()
 
     assert terminal.wait_closed(time.monotonic() + 1.0) is False
+    terminal.begin_close()
     assert terminal.wait_closed(time.monotonic() + 1.0) is False
     assert terminal.pseudoconsole == 0x1234
+    assert fake.close_calls == [0x1234]
+
+
+def test_windows_conpty_close_thread_start_failure_retains_retryable_resources(monkeypatch) -> None:
+    import flowgency.jobs.windows_conpty as windows_conpty
+
+    class FakeBindings:
+        HPCON = ctypes.c_void_p
+
+        def __init__(self) -> None:
+            self.close_calls: list[int] = []
+
+        def ClosePseudoConsole(self, hpcon):
+            self.close_calls.append(int(hpcon.value))
+
+    fake = FakeBindings()
+    monkeypatch.setattr(windows_conpty, "_get_bindings", lambda: fake)
+    original_start = threading.Thread.start
+    attempts = 0
+
+    def start(thread):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("close thread unavailable")
+        return original_start(thread)
+
+    monkeypatch.setattr(threading.Thread, "start", start)
+    terminal = windows_conpty.WindowsConPTY(24, 80)
+    terminal._pseudoconsole = 0x1234
+
+    with pytest.raises(RuntimeError, match="close thread unavailable"):
+        terminal.begin_close()
+
+    assert terminal.wait_closed(time.monotonic() + 0.1) is False
+    assert terminal.pseudoconsole == 0x1234
+    assert fake.close_calls == []
+
+    terminal.begin_close()
+
+    assert terminal.wait_closed(time.monotonic() + 1.0) is True
     assert fake.close_calls == [0x1234]
 
 
@@ -279,6 +366,7 @@ def test_windows_conpty_close_streams_retains_failed_handle_for_retry(monkeypatc
 
     fake = FakeBindings()
     monkeypatch.setattr(windows_conpty, "_get_bindings", lambda: fake)
+    monkeypatch.setattr(windows_conpty, "_raise_last_winerror", _raise_native_error)
 
     terminal = windows_conpty.WindowsConPTY(24, 80)
     terminal._input_write = 0x2001
@@ -311,11 +399,14 @@ def test_windows_conpty_open_retains_child_end_handles_until_explicit_close(monk
         SECURITY_ATTRIBUTES = windows_conpty._SECURITY_ATTRIBUTES
 
         def __init__(self) -> None:
-            self._pipe_values = iter((0x101, 0x102, 0x201, 0x202))
+            self._pipe_values = iter((0x101, 0x102, 0x201, 0x202, 0x301, 0x302, 0x401, 0x402))
             self.closed_handles: list[int] = []
+            self.pipe_inheritance: list[bool] = []
+            self.close_calls: list[int] = []
 
         def CreatePipe(self, read_handle, write_handle, security, size):
-            del security, size
+            del size
+            self.pipe_inheritance.append(bool(security._obj.bInheritHandle))
             read_handle._obj.value = next(self._pipe_values)
             write_handle._obj.value = next(self._pipe_values)
             return 1
@@ -333,12 +424,16 @@ def test_windows_conpty_open_retains_child_end_handles_until_explicit_close(monk
             self.closed_handles.append(int(handle.value))
             return 1
 
+        def ClosePseudoConsole(self, hpcon):
+            self.close_calls.append(int(hpcon.value))
+
     fake = FakeBindings()
     monkeypatch.setattr(windows_conpty, "_get_bindings", lambda: fake)
 
     terminal = windows_conpty.WindowsConPTY(24, 80)
     terminal.open()
 
+    assert fake.pipe_inheritance == [False, False]
     assert terminal.pseudoconsole == 0x999
     assert terminal._input_read == 0x101
     assert terminal._input_write == 0x102
@@ -353,6 +448,15 @@ def test_windows_conpty_open_retains_child_end_handles_until_explicit_close(monk
     assert terminal._input_write == 0x102
     assert terminal._output_read == 0x201
     assert fake.closed_handles == [0x101, 0x202]
+
+    terminal.begin_close()
+    assert terminal.wait_closed(time.monotonic() + 1.0) is True
+    terminal.close_streams()
+    terminal.open()
+    terminal.begin_close()
+    assert terminal.wait_closed(time.monotonic() + 1.0) is True
+    terminal.close_streams()
+    assert fake.close_calls == [0x999, 0x999]
 
 
 def test_windows_conpty_open_refuses_reentry_after_failed_pseudoconsole_creation(monkeypatch) -> None:
@@ -474,6 +578,7 @@ def test_windows_conpty_open_refuses_reentry_after_partial_open_failures(
 
     fake = FakeBindings()
     monkeypatch.setattr(windows_conpty, "_get_bindings", lambda: fake)
+    monkeypatch.setattr(windows_conpty, "_raise_last_winerror", _raise_native_error)
 
     terminal = windows_conpty.WindowsConPTY(24, 80)
 

@@ -425,10 +425,12 @@ class WindowsConPTY:
             return
         if self._owns_open_resources():
             raise RuntimeError("previous open attempt still owns resources")
+        with self._close_lock:
+            self._close_thread = None
         bindings = _get_bindings()
         security = bindings.SECURITY_ATTRIBUTES()
         security.nLength = ctypes.sizeof(bindings.SECURITY_ATTRIBUTES)
-        security.bInheritHandle = 1
+        security.bInheritHandle = 0
         input_read = bindings.HANDLE()
         input_write = bindings.HANDLE()
         output_read = bindings.HANDLE()
@@ -551,9 +553,8 @@ class WindowsConPTY:
         if self.pseudoconsole == 0:
             return
         with self._close_lock:
-            if self._close_thread is not None and self._close_thread.is_alive():
+            if self._close_thread is not None:
                 return
-            self._close_thread = None
             self._close_error = None
             value = self.pseudoconsole
             bindings = _get_bindings()
@@ -566,11 +567,17 @@ class WindowsConPTY:
                 else:
                     self._pseudoconsole = 0
 
-            self._close_thread = threading.Thread(target=worker, name="flowgency-conpty-close")
-            self._close_thread.start()
+            try:
+                thread = threading.Thread(target=worker, name="flowgency-conpty-close")
+                thread.start()
+            except BaseException as error:
+                self._close_error = error
+                raise
+            self._close_thread = thread
 
     def wait_closed(self, deadline: float) -> bool:
-        thread = self._close_thread
+        with self._close_lock:
+            thread = self._close_thread
         if thread is None:
             return self.pseudoconsole == 0 and self._close_error is None
         remaining = max(0.0, deadline - time.monotonic())

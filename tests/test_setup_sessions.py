@@ -210,6 +210,82 @@ def test_setup_session_blocks_slot_when_stop_unconfirmed(tmp_path: Path):
     asyncio.run(exercise())
 
 
+@pytest.mark.parametrize("uncertain", [False, True])
+def test_setup_session_external_launch_requires_confirmed_clear_slot(tmp_path: Path, uncertain):
+    async def exercise():
+        process = _UnconfirmedThenConfirmedProcess() if uncertain else FakeProcess()
+        manager = SetupSessionManager(process_factory=lambda launch: process, sweep_interval=0)
+        launched = []
+
+        def external():
+            launched.append("codex")
+            return "external-launched"
+
+        launch = RuntimeLaunch(("copilot",), tmp_path, {}, "connected")
+        try:
+            await manager.start("owner", "copilot", launch, "fallback")
+            if uncertain:
+                assert (await manager.stop("owner")).confirmed is False
+            with pytest.raises(SetupSessionConflict):
+                await manager._launch_external("other", "codex", tmp_path, external)
+            assert launched == []
+            assert (await manager.stop("owner")).confirmed is True
+            assert await manager._launch_external("other", "codex", tmp_path, external) == "external-launched"
+            assert launched == ["codex"]
+        finally:
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("cancelled", [False, True])
+def test_setup_session_external_launch_holds_atomic_exclusion_until_settled(tmp_path: Path, cancelled):
+    async def exercise():
+        release = threading.Event()
+        entered: queue.Queue[bool] = queue.Queue()
+        connected = FakeProcess()
+        connected_launches = []
+
+        def factory(launch):
+            connected_launches.append(launch)
+            return connected
+
+        def external():
+            entered.put(True)
+            release.wait(2)
+            return "external-launched"
+
+        manager = SetupSessionManager(process_factory=factory, sweep_interval=0)
+        launch = RuntimeLaunch(("copilot",), tmp_path, {}, "connected")
+        starting = None
+        try:
+            external_task = asyncio.create_task(manager._launch_external("owner", "codex", tmp_path, external))
+            await asyncio.to_thread(entered.get, True, 1)
+            if cancelled:
+                external_task.cancel()
+            starting = asyncio.create_task(manager.start("owner", "copilot", launch, "fallback"))
+            await asyncio.sleep(0.05)
+            assert not external_task.done()
+            assert not starting.done()
+            assert connected_launches == []
+            release.set()
+            if cancelled:
+                with pytest.raises(asyncio.CancelledError):
+                    await external_task
+            else:
+                assert await external_task == "external-launched"
+            assert (await starting).state == "running"
+            assert connected_launches == [launch]
+        finally:
+            release.set()
+            if starting is not None:
+                with contextlib.suppress(Exception):
+                    await starting
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
 def test_setup_session_holds_lifecycle_lock_across_spawn(tmp_path: Path):
     async def exercise():
         release = threading.Event()
@@ -500,6 +576,58 @@ def test_setup_session_rejects_input_after_eof_before_finalize(tmp_path: Path):
     asyncio.run(exercise())
 
 
+@pytest.mark.parametrize("cancelled", [False, True])
+def test_setup_session_failed_start_retains_cleanup_for_public_stop_retry(tmp_path: Path, cancelled):
+    async def exercise():
+        release = threading.Event()
+        entered: queue.Queue[bool] = queue.Queue()
+        cleanup = _UnconfirmedThenConfirmedProcess()
+        replacement = FakeProcess()
+        calls = 0
+
+        def factory(launch):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                entered.put(True)
+                release.wait(2)
+                raise ConnectedLaunchError("failed native launch", cleanup_confirmed=False, _cleanup=cleanup)
+            return replacement
+
+        manager = SetupSessionManager(process_factory=factory, sweep_interval=0)
+        launch = RuntimeLaunch(("copilot",), tmp_path, {}, "connected")
+        try:
+            starting = asyncio.create_task(manager.start("owner", "copilot", launch, "fallback"))
+            await asyncio.to_thread(entered.get, True, 1)
+            _, _, pending = await manager.attach("owner")
+            if cancelled:
+                starting.cancel()
+            release.set()
+            with pytest.raises(asyncio.CancelledError if cancelled else ConnectedLaunchError):
+                await starting
+
+            assert manager.snapshot("owner").state == "failed"
+            assert await asyncio.wait_for(pending.get(), timeout=1) is None
+            first = await manager.stop("owner")
+            assert first.confirmed is False
+            with pytest.raises(SetupSessionConflict):
+                await manager.start("other", "codex", launch, "fallback")
+            assert calls == 1
+
+            second = await manager.stop("owner")
+            assert second.confirmed is True
+            assert cleanup.running is False
+            assert manager.snapshot("owner").state == "stopped"
+            assert (await manager.start("other", "codex", launch, "fallback")).state == "running"
+            assert calls == 2
+        finally:
+            release.set()
+            await manager.shutdown()
+            cleanup.stop(manager._session.lifecycle)
+
+    asyncio.run(exercise())
+
+
 def test_setup_session_owner_stop_retries_unconfirmed_until_confirmed(tmp_path: Path):
     async def exercise():
         # A Stop that cannot confirm the whole tree is gone must block the slot
@@ -703,6 +831,31 @@ def test_setup_session_cancelled_start_unconfirmed_stop_preserves_handle_for_ret
     asyncio.run(exercise())
 
 
+@pytest.mark.parametrize("structured", [False, True])
+def test_setup_session_failed_start_diagnostics_do_not_expose_private_exception_detail(tmp_path: Path, structured):
+    async def exercise():
+        def factory(launch):
+            if structured:
+                raise ConnectedLaunchError("private launch detail", cleanup_confirmed=False)
+            raise RuntimeError("private launch detail")
+
+        manager = SetupSessionManager(process_factory=factory, sweep_interval=0)
+        launch = RuntimeLaunch(("copilot",), tmp_path, {}, "connected")
+        try:
+            with pytest.raises(ConnectedLaunchError if structured else RuntimeError):
+                await manager.start("owner", "copilot", launch, "fallback")
+
+            snapshot = manager.snapshot("owner")
+            assert snapshot.state == "failed"
+            assert "private launch detail" not in snapshot.message
+            assert "cleanup could not be confirmed" in snapshot.message
+            assert (await manager.stop("owner")).confirmed is False
+        finally:
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
 def test_setup_session_failed_spawn_releases_starting_subscriber(tmp_path: Path):
     async def exercise():
         # A subscriber that attached while the session was still `starting`
@@ -764,6 +917,9 @@ def test_setup_session_unproven_spawn_error_blocks_slot_and_releases_subscriber(
         assert failed is not None
         assert failed.state == "failed"
         assert failed.message
+        evidence = await manager.stop("owner")
+        assert evidence.confirmed is False
+        assert manager.snapshot("owner").state == "failed"
         with pytest.raises(SetupSessionConflict):
             await manager.start("owner", "copilot", launch, "fallback")
         assert calls == 1  # blocked slot refuses a second factory call
@@ -802,6 +958,130 @@ def test_setup_session_confirmed_cancel_releases_starting_subscriber(tmp_path: P
         assert fakes[0].running is False
         await manager.shutdown()
 
+    asyncio.run(exercise())
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows connected startup cancellation is Windows-specific")
+def test_windows_external_launch_retains_global_job_cleanup_for_public_stop(tmp_path: Path, monkeypatch):
+    import pywintypes
+    import win32con
+    import win32job
+    import flowgency.jobs.windows_job as windows_job
+    from tests.test_windows_job import _close_all, _make_std_pipes, _wait_for_known_exit
+
+    pipes = _make_std_pipes()
+    native_python, native_env = _native_python_launch()
+    original_query = windows_job._job_exit_status
+    original_process = None
+
+    def fail_assign(job, process):
+        raise pywintypes.error(5, "AssignProcessToJobObject", "denied")
+
+    async def exercise():
+        manager = SetupSessionManager(sweep_interval=0)
+        launched = []
+
+        def external():
+            launched.append("codex")
+            return "external-launched"
+
+        try:
+            with pytest.raises(ConnectedLaunchError):
+                await manager._launch_external("owner", "codex", tmp_path, external)
+            assert launched == []
+            assert manager.snapshot("owner").state == "failed"
+            assert (await manager.stop("owner")).confirmed is False
+            with pytest.raises(SetupSessionConflict):
+                await manager._launch_external("owner", "codex", tmp_path, external)
+
+            monkeypatch.setattr(windows_job, "_job_exit_status", original_query)
+            assert (await manager.stop("owner")).confirmed is True
+            _wait_for_known_exit(original_process, timeout=1.0)
+            assert windows_job._uncertain == []
+            assert await manager._launch_external("owner", "codex", tmp_path, external) == "external-launched"
+            assert launched == ["codex"]
+        finally:
+            monkeypatch.setattr(windows_job, "_job_exit_status", original_query)
+            await manager.shutdown()
+
+    monkeypatch.setattr(windows_job, "_job_exit_status", lambda job, deadline: "unknown")
+    try:
+        with monkeypatch.context() as patched:
+            patched.setattr(win32job, "AssignProcessToJobObject", fail_assign)
+            with pytest.raises(windows_job.WindowsJobLaunchError) as raised:
+                windows_job.WindowsJobOwner.launch(
+                    (native_python, "-c", "pass"), tmp_path, native_env, int(pipes[0]), int(pipes[3])
+                )
+            assert raised.value.cleanup_confirmed is False
+        original_process = win32api.OpenProcess(
+            win32con.PROCESS_QUERY_LIMITED_INFORMATION | win32con.SYNCHRONIZE, False, raised.value._cleanup_owners[0].pid
+        )
+        asyncio.run(exercise())
+    finally:
+        monkeypatch.setattr(windows_job, "_job_exit_status", original_query)
+        windows_job._retry_uncertain(time.monotonic() + 5.0)
+        if original_process is not None:
+            _close_all(original_process)
+        _close_all(*pipes)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows connected startup cancellation is Windows-specific")
+@pytest.mark.parametrize("external", [False, True])
+def test_windows_setup_session_recovers_global_failed_launch_ownership_through_stop(tmp_path: Path, monkeypatch, external):
+    import flowgency.jobs.connected_process as connected_process
+    import flowgency.jobs.windows_job as windows_job
+    from flowgency.jobs.windows_connected_process import WindowsConnectedProcess
+    from flowgency.jobs.windows_conpty import WindowsConPTY
+    from flowgency.jobs.windows_job import WindowsJobOwner
+
+    native_python, native_env = _native_python_launch()
+    launch = RuntimeLaunch((native_python, "-u", "-c", "pass"), tmp_path, native_env, "connected")
+    original_query = windows_job._job_exit_status
+    original_wait = WindowsConPTY.wait_closed
+    blocked_console = True
+
+    def wait_closed(terminal, deadline):
+        if blocked_console:
+            return False
+        return original_wait(terminal, deadline)
+
+    async def exercise():
+        nonlocal blocked_console
+        manager = SetupSessionManager(sweep_interval=0)
+        try:
+            with pytest.raises(ConnectedLaunchError):
+                WindowsConnectedProcess.spawn(launch, rows=24, cols=80)
+            with pytest.raises(ConnectedLaunchError):
+                if external:
+                    await manager._launch_external("owner", "codex", tmp_path, lambda: pytest.fail("unsafe external launch"))
+                else:
+                    await manager.start("owner", "copilot", launch, "fallback")
+
+            assert manager.snapshot("owner").state == "failed"
+            assert (await manager.stop("owner")).confirmed is False
+            monkeypatch.setattr(windows_job, "_job_exit_status", original_query)
+            assert (await manager.stop("owner")).confirmed is False
+            assert manager.snapshot("owner").state == "failed"
+            with pytest.raises(SetupSessionConflict):
+                await manager.start("other", "codex", launch, "fallback")
+
+            blocked_console = False
+            assert (await manager.stop("owner")).confirmed is True
+            assert manager.snapshot("owner").state == "stopped"
+            assert windows_job._uncertain == []
+            connected_process._retry_unconfirmed()
+        finally:
+            blocked_console = False
+            monkeypatch.setattr(windows_job, "_job_exit_status", original_query)
+            monkeypatch.setattr(WindowsConPTY, "wait_closed", original_wait)
+            await manager.shutdown()
+            windows_job._retry_uncertain(time.monotonic() + 5.0)
+            connected_process._retry_unconfirmed()
+
+    monkeypatch.setattr(connected_process, "_STOP_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(WindowsJobOwner, "contains", lambda self, pid: False)
+    monkeypatch.setattr(windows_job, "_job_exit_status", lambda job, deadline: "unknown")
+    monkeypatch.setattr(WindowsConPTY, "wait_closed", wait_closed)
     asyncio.run(exercise())
 
 

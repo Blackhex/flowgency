@@ -29,10 +29,33 @@ _MAX_TERMINAL_DIMENSION = 32767
 _POSIX_KILL_SIGNAL = getattr(signal, "SIGKILL", signal.SIGTERM)
 
 
+class _LaunchCleanup(Protocol):
+    def stop(self, lifecycle: RuntimeProcessLifecycle) -> ProcessStopEvidence: ...
+
+
+class _LaunchCleanupGroup:
+    def __init__(self, owners: tuple[_OwnedTerminal, ...]) -> None:
+        self._owners = owners
+        self._error: Exception | None = None
+
+    def stop(self, lifecycle: RuntimeProcessLifecycle) -> ProcessStopEvidence:
+        result = ProcessStopEvidence(lifecycle.job_id, lifecycle.generation, True, "stopped")
+        for owner in self._owners:
+            try:
+                evidence = owner.stop(lifecycle)
+            except Exception as error:
+                self._error = error
+                evidence = ProcessStopEvidence(lifecycle.job_id, lifecycle.generation, False, "cleanup-failed")
+            if not evidence.confirmed:
+                result = evidence
+        return result
+
+
 class ConnectedLaunchError(IntegrationError):
-    def __init__(self, message: str, *, cleanup_confirmed: bool):
+    def __init__(self, message: str, *, cleanup_confirmed: bool, _cleanup: _LaunchCleanup | None = None):
         super().__init__(message)
         self.cleanup_confirmed = cleanup_confirmed
+        self._cleanup = _cleanup
 
 
 class ConnectedProcess(Protocol):
@@ -133,12 +156,22 @@ def _retry_unconfirmed() -> None:
     for process in pending:
         process._stop_tree()
     with _unconfirmed_lock:
-        remaining = len(_unconfirmed)
+        remaining = tuple(_unconfirmed)
     if remaining:
         raise ConnectedLaunchError(
-            f"{remaining} earlier connected process tree(s) could not be confirmed stopped",
+            f"{len(remaining)} earlier connected process tree(s) could not be confirmed stopped",
             cleanup_confirmed=False,
+            _cleanup=_LaunchCleanupGroup(remaining),
         )
+    if os.name == "nt":
+        from flowgency.jobs.windows_job import WindowsJobLaunchError, _retry_uncertain
+
+        try:
+            _retry_uncertain(time.monotonic())
+        except WindowsJobLaunchError as error:
+            raise ConnectedLaunchError(
+                str(error), cleanup_confirmed=False, _cleanup=error._cleanup,
+            ) from error
 
 
 def _track(process: "_OwnedTerminal", confirmed: bool) -> None:

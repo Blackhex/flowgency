@@ -96,6 +96,54 @@ test('connected setup terminal forwards keyboard input as the owning browser', a
   await assertNoConsoleErrors(page);
 });
 
+for (const truncated of [false, true]) {
+  test(`failed setup terminal retains diagnostics and stops reconnecting with truncated=${truncated}`, async ({ page, request }) => {
+    await page.clock.install();
+    let connections = 0;
+    const diagnostic = 'Setup could not be started; cleanup could not be confirmed.';
+    await page.routeWebSocket('**/setup/session/ws', (socket) => {
+      connections += 1;
+      socket.send(JSON.stringify({ state: 'failed', message: diagnostic, truncated }));
+      socket.close();
+    });
+
+    await launchConnectedTerminal(page, request);
+    await expect(page.locator('#terminal-connection')).toContainText(diagnostic);
+    await expect(page.getByRole('button', { name: /^Relaunch/ })).toBeHidden();
+    await page.clock.runFor(60_000);
+
+    expect(connections).toBe(1);
+    await expect(page.locator('#terminal-connection')).toContainText(diagnostic);
+    await expect(page.getByRole('button', { name: /^Relaunch/ })).toBeHidden();
+    await assertNoConsoleErrors(page);
+  });
+}
+
+test('setup terminal bounds reconnects when accepted sockets never confirm running', async ({ page, request }) => {
+  await page.clock.install();
+  let connections = 0;
+  await page.routeWebSocket('**/setup/session/ws', (socket) => {
+    connections += 1;
+    socket.send(JSON.stringify({ state: 'starting', truncated: false }));
+    socket.close();
+  });
+
+  await launchConnectedTerminal(page, request);
+  await expect(page.locator('#terminal-connection')).toHaveText('Reconnecting');
+  for (let retry = 0; retry < 6 && connections < 7; retry += 1) {
+    const previous = connections;
+    await page.clock.runFor(8000);
+    await expect.poll(() => connections).toBeGreaterThan(previous);
+    await expect(page.locator('#terminal-connection')).toHaveText(/^Reconnecting$|^Setup session disconnected\./);
+  }
+  await page.clock.runFor(60_000);
+
+  expect(connections).toBe(7);
+  await expect(page.locator('#terminal-connection')).toContainText('Setup session disconnected.');
+  await expect(page.getByRole('button', { name: /^Relaunch/ })).toBeHidden();
+  await assertNoConsoleErrors(page);
+});
+
 test('connected setup terminal reports its initial size without a manual resize, and again after reconnect', async ({
   page,
   request,

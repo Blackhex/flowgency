@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import msvcrt
 import os
 import subprocess
 import sys
@@ -17,6 +16,7 @@ import pytest
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="Windows Job Objects are Windows-specific")
 
 if os.name == "nt":
+    import msvcrt
     import pywintypes
     import win32api
     import win32con
@@ -27,6 +27,47 @@ if os.name == "nt":
     import win32security
 
     from flowgency.jobs.windows_job import WindowsJobLaunchError, WindowsJobOwner, _uncertain
+
+
+def test_conpty_failed_launch_retains_exact_cleanup_owners_for_retry(monkeypatch, tmp_path):
+    import flowgency.jobs.windows_job as windows_job
+    from flowgency.jobs.windows_conpty import WindowsConPTY
+
+    assert _uncertain == []
+    terminal = WindowsConPTY(24, 80)
+    terminal.open()
+    original_process = None
+    native_python = win32process.GetModuleFileNameEx(win32api.GetCurrentProcess(), 0)
+    env = os.environ.copy()
+    env["__PYVENV_LAUNCHER__"] = sys.executable
+    try:
+        with monkeypatch.context() as patched:
+            patched.setattr(WindowsJobOwner, "contains", lambda self, pid: False)
+            patched.setattr(windows_job, "_job_exit_status", lambda job, deadline: "unknown")
+            with pytest.raises(WindowsJobLaunchError) as raised:
+                WindowsJobOwner.launch_conpty(
+                    (native_python, "-c", "pass"), tmp_path, env, terminal.pseudoconsole
+                )
+
+            assert raised.value.cleanup_confirmed is False
+            cleanup = raised.value._cleanup_owners
+            assert len(cleanup) == 1
+            assert cleanup[0] is _uncertain[0]
+            original_process = _open_process_query_handle(cleanup[0].pid)
+            assert cleanup[0].stop(time.monotonic() + 1.0)[0] is False
+            assert _uncertain == [cleanup[0]]
+
+        assert cleanup[0].stop(time.monotonic() + 1.0)[0] is True
+        _wait_for_known_exit(original_process, timeout=1.0)
+        cleanup[0].close_confirmed()
+        assert _uncertain == []
+    finally:
+        windows_job._retry_uncertain(time.monotonic() + 5.0)
+        if original_process is not None:
+            _close_all(original_process)
+        terminal.begin_close()
+        assert terminal.wait_closed(time.monotonic() + 5.0)
+        terminal.close_streams()
 
 
 def _make_std_pipes():
@@ -73,6 +114,179 @@ def _wait_for_known_exit(process_handle, *, timeout: float) -> int:
     exit_code = win32process.GetExitCodeProcess(process_handle)
     assert exit_code != win32con.STILL_ACTIVE
     return int(exit_code)
+
+
+def test_confirmed_owner_retains_failed_handle_close_without_reclosing_released_handle(monkeypatch, tmp_path):
+    pipes = _make_std_pipes()
+    native_python = win32process.GetModuleFileNameEx(win32api.GetCurrentProcess(), 0)
+    env = os.environ.copy()
+    env["__PYVENV_LAUNCHER__"] = sys.executable
+    owner = WindowsJobOwner.launch(
+        (native_python, "-c", "import time; time.sleep(60)"), tmp_path, env, int(pipes[0]), int(pipes[3])
+    )
+    original_process = _open_process_query_handle(owner.pid)
+    real_close = win32api.CloseHandle
+    process_value = int(owner._process_handle)
+    job_value = int(owner._job_handle)
+    closed = []
+    blocked = True
+
+    def close(handle):
+        value = int(handle)
+        closed.append(value)
+        if value == job_value and blocked:
+            raise OSError("job handle close unavailable")
+        return real_close(handle)
+
+    try:
+        assert owner.stop(time.monotonic() + 5.0)[0] is True
+        _wait_for_known_exit(original_process, timeout=1.0)
+        monkeypatch.setattr(win32api, "CloseHandle", close)
+        with pytest.raises(OSError, match="job handle close unavailable"):
+            owner.close_confirmed()
+        assert owner._closed is False
+
+        blocked = False
+        owner.close_confirmed()
+        owner.close_confirmed()
+
+        assert owner._closed is True
+        assert closed == [process_value, job_value, job_value]
+    finally:
+        blocked = False
+        owner.close_confirmed()
+        monkeypatch.setattr(win32api, "CloseHandle", real_close)
+        _close_all(original_process, *pipes)
+
+
+def test_conpty_creation_failure_retains_partial_job_when_close_fails(monkeypatch, tmp_path):
+    import flowgency.jobs.windows_job as windows_job
+
+    assert _uncertain == []
+    jobs = []
+    real_factory = windows_job.create_kill_on_close_windows_job
+    real_close = win32api.CloseHandle
+    blocked = True
+
+    def create_job():
+        job = real_factory()
+        jobs.append(job)
+        return job
+
+    def fail_create(*args):
+        raise OSError("native creation failed")
+
+    def close(handle):
+        if jobs and handle is jobs[0] and blocked:
+            raise OSError("job handle close unavailable")
+        return real_close(handle)
+
+    monkeypatch.setattr(windows_job, "create_kill_on_close_windows_job", create_job)
+    monkeypatch.setattr(windows_job, "create_suspended_conpty_process", fail_create)
+    monkeypatch.setattr(win32api, "CloseHandle", close)
+    try:
+        with pytest.raises(WindowsJobLaunchError) as raised:
+            WindowsJobOwner.launch_conpty(("python.exe", "-c", "pass"), tmp_path, {}, 0x1234)
+
+        assert raised.value.cleanup_confirmed is False
+        cleanup = raised.value._cleanup_owners[0]
+        assert cleanup.job_handle is jobs[0]
+        assert cleanup.process_handle is None
+        assert cleanup.stop(time.monotonic() + 1.0)[0] is True
+        with pytest.raises(OSError, match="job handle close unavailable"):
+            cleanup.close_confirmed()
+        assert _uncertain == [cleanup]
+
+        blocked = False
+        cleanup.close_confirmed()
+        assert _uncertain == []
+    finally:
+        blocked = False
+        monkeypatch.setattr(win32api, "CloseHandle", real_close)
+        if _uncertain:
+            windows_job._retry_uncertain(time.monotonic() + 5.0)
+        elif jobs and int(jobs[0]):
+            assert windows_job._job_exit_status(jobs[0], time.monotonic() + 1.0) == "empty"
+            real_close(jobs[0])
+
+
+def test_conpty_owner_construction_failure_retains_created_handle_cleanup(monkeypatch, tmp_path):
+    import flowgency.jobs.windows_job as windows_job
+    from flowgency.jobs.windows_conpty import WindowsConPTY
+
+    terminal = WindowsConPTY(24, 80)
+    terminal.open()
+    native_python = win32process.GetModuleFileNameEx(win32api.GetCurrentProcess(), 0)
+    env = os.environ.copy()
+    env["__PYVENV_LAUNCHER__"] = sys.executable
+    real_factory = windows_job.create_kill_on_close_windows_job
+    real_create = windows_job.create_suspended_conpty_process
+    real_close = win32api.CloseHandle
+    original_query = windows_job._job_exit_status
+    created_job = None
+    original_process = None
+    created_handles = None
+    closed = set()
+
+    def create_job():
+        nonlocal created_job
+        created_job = real_factory()
+        return created_job
+
+    def create(*args):
+        nonlocal created_handles, original_process
+        created_handles = real_create(*args)
+        original_process = _open_process_query_handle(created_handles[2])
+        return created_handles
+
+    def close(handle):
+        value = int(handle)
+        result = real_close(handle)
+        closed.add(value)
+        return result
+
+    def fail_construct(self, job, process, pid):
+        raise RuntimeError("owner construction failed")
+
+    monkeypatch.setattr(windows_job, "create_kill_on_close_windows_job", create_job)
+    monkeypatch.setattr(windows_job, "create_suspended_conpty_process", create)
+    monkeypatch.setattr(windows_job, "_job_exit_status", lambda job, deadline: "unknown")
+    monkeypatch.setattr(win32api, "CloseHandle", close)
+    monkeypatch.setattr(WindowsJobOwner, "__init__", fail_construct)
+    try:
+        with pytest.raises(WindowsJobLaunchError) as raised:
+            WindowsJobOwner.launch_conpty((native_python, "-c", "pass"), tmp_path, env, terminal.pseudoconsole)
+
+        assert raised.value.cleanup_confirmed is False
+        cleanup = raised.value._cleanup_owners[0]
+        assert cleanup.job_handle is created_job
+        assert cleanup.process_handle == created_handles[0]
+        assert cleanup.thread_handle == created_handles[1]
+        _wait_for_known_exit(original_process, timeout=1.0)
+
+        monkeypatch.setattr(windows_job, "_job_exit_status", original_query)
+        assert cleanup.stop(time.monotonic() + 1.0)[0] is True
+        cleanup.close_confirmed()
+        assert _uncertain == []
+    finally:
+        monkeypatch.setattr(windows_job, "_job_exit_status", original_query)
+        if created_job is not None and int(created_job):
+            win32job.TerminateJobObject(created_job, 1)
+            _wait_for_known_exit(original_process, timeout=1.0)
+            assert original_query(created_job, time.monotonic() + 1.0) == "empty"
+        windows_job._retry_uncertain(time.monotonic() + 5.0)
+        if created_handles is not None:
+            for handle in created_handles[:2]:
+                if handle not in closed:
+                    close(handle)
+        if created_job is not None and int(created_job):
+            close(created_job)
+        if original_process is not None:
+            close(original_process)
+        terminal.close_child_ends()
+        terminal.begin_close()
+        assert terminal.wait_closed(time.monotonic() + 5.0)
+        terminal.close_streams()
 
 
 def test_child_is_assigned_before_resume(monkeypatch, tmp_path):

@@ -26,13 +26,15 @@ import contextlib
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Literal
+from typing import Callable, Literal, TypeVar
 from uuid import uuid4
 
 from flowgency.integrations.models import RuntimeLaunch
 from flowgency.jobs.connected_process import (
     ConnectedLaunchError,
     ConnectedProcess,
+    _LaunchCleanup,
+    _retry_unconfirmed,
     start_connected_process,
 )
 from flowgency.jobs.processes import ProcessStopEvidence, RuntimeProcessLifecycle
@@ -47,8 +49,10 @@ _MAX_LIFETIME_SECONDS = 14400.0
 _SWEEP_INTERVAL_SECONDS = 30.0
 _DEFAULT_REPLAY_LIMIT = 2 * 1024 * 1024
 _DEFAULT_CLIENT_LIMIT = 1 << 18
+_SANITIZED_START_FAILURE = "Setup could not be started; cleanup could not be confirmed."
 
 ProcessFactory = Callable[[RuntimeLaunch], ConnectedProcess]
+_ExternalResult = TypeVar("_ExternalResult")
 
 
 class SetupSessionConflict(Exception):
@@ -83,7 +87,7 @@ class _Session:
         self,
         owner: str,
         integration_name: str,
-        launch: RuntimeLaunch,
+        data_root: Path,
         fallback_command: str,
         *,
         now: Callable[[], float],
@@ -92,10 +96,11 @@ class _Session:
     ) -> None:
         self.owner = owner
         self.integration_name = integration_name
-        self.data_root = launch.cwd
+        self.data_root = data_root
         self.fallback_command = fallback_command
         self.lifecycle = RuntimeProcessLifecycle(job_id="setup-session", generation=uuid4().hex)
         self.process: ConnectedProcess | None = None
+        self.cleanup: _LaunchCleanup | None = None
         self.state: SetupSessionState = "starting"
         self.exit_code: int | None = None
         self.message: str = ""
@@ -188,7 +193,7 @@ class SetupSessionManager:
             session = _Session(
                 owner,
                 integration_name,
-                launch,
+                launch.cwd,
                 fallback_command,
                 now=self._now,
                 replay_limit=self._replay_limit,
@@ -214,6 +219,54 @@ class SetupSessionManager:
                 session.reader_task = asyncio.ensure_future(self._read_loop(session))
             self._ensure_sweeper()
             return self._snapshot_of(session)
+
+    async def _launch_external(
+        self,
+        owner: str,
+        integration_name: str,
+        data_root: Path,
+        launch: Callable[[], _ExternalResult],
+    ) -> _ExternalResult:
+        async with self._lifecycle_lock:
+            if self._closing:
+                raise SetupSessionConflict("Setup is shutting down")
+            async with self._state_lock:
+                existing = self._session
+            if existing is not None:
+                if existing.state == "failed":
+                    raise SetupSessionConflict("The previous setup process could not be confirmed stopped")
+                if existing.state in {"starting", "running"}:
+                    raise SetupSessionConflict("Stop the running setup session before launching an external terminal")
+
+            async def operation() -> _ExternalResult:
+                try:
+                    await asyncio.to_thread(_retry_unconfirmed)
+                except Exception as error:
+                    failure = error if isinstance(error, ConnectedLaunchError) else ConnectedLaunchError(
+                        _SANITIZED_START_FAILURE, cleanup_confirmed=False,
+                    )
+                    session = _Session(
+                        owner, integration_name, data_root, "", now=self._now,
+                        replay_limit=self._replay_limit, client_limit=self._client_limit,
+                    )
+                    async with self._state_lock:
+                        self._session = session
+                    await self._fail_spawn(session, failure)
+                    if failure is error:
+                        raise
+                    raise failure from error
+                return await asyncio.to_thread(launch)
+
+            task = asyncio.ensure_future(operation())
+            try:
+                return await asyncio.shield(task)
+            except asyncio.CancelledError:
+                while not task.done():
+                    with contextlib.suppress(BaseException):
+                        await asyncio.shield(task)
+                if not task.cancelled():
+                    task.exception()
+                raise
 
     def _ensure_sweeper(self) -> None:
         if self._sweeper is None and self._sweep_interval > 0:
@@ -273,8 +326,9 @@ class SetupSessionManager:
                 # Only a proven-clean ConnectedLaunchError may free the slot; any
                 # other error (including an unconfirmed ConnectedLaunchError) is
                 # no evidence the process tree was cleaned up, so fail closed.
+                session.cleanup = error._cleanup if isinstance(error, ConnectedLaunchError) else None
                 session.state = "failed"
-                session.message = str(error)
+                session.message = _SANITIZED_START_FAILURE
                 session.finalized = True
             # Release any subscriber that attached while the session was still
             # `starting`, so no WebSocket writer lingers on a dead session.
@@ -467,8 +521,10 @@ class SetupSessionManager:
         if self._confirmed_gone(session):
             assert session.stop_evidence is not None
             evidence = session.stop_evidence
-        elif session.process is not None:
-            evidence = await asyncio.to_thread(session.process.stop, session.lifecycle)
+        elif session.process is not None or session.cleanup is not None:
+            cleanup = session.process if session.process is not None else session.cleanup
+            assert cleanup is not None
+            evidence = await asyncio.to_thread(cleanup.stop, session.lifecycle)
             await self._finalize(session, evidence, natural_exit=False)
         else:
             evidence = ProcessStopEvidence(
