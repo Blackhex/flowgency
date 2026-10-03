@@ -23,6 +23,7 @@
 - Use measured Playwright 1.61.1/Chromium 1228 locally without save/lockfile to avoid known native-focus snapshot drift; do not edit snapshots/tolerances.
 - Complete Python and browser gates are sequential; never overlap their shared UI runtime.
 - Follow task/branch review and pre-authorized repository integration, full master gate, both pushes, and owned-worktree cleanup. Retain the branch.
+- User-approved gate amendment: `docs/superpowers/specs/2026-10-03-live-ticket-probe-contract-design.md`, commit `a6910d2`; written spec approved. Task 2 may clarify ticket reporting permission prose and correct live-probe contracts/helpers, but may not change actual permissions, transport, auth, model, markers, or runtime data.
 
 ## Preparation
 
@@ -219,6 +220,244 @@ git commit -m "fix(setup): measure terminal after font readiness"
 Stage only generated files that actually changed. Inspect file diagnostics and
 review the task before whole-branch gates. Do not touch the live user browser
 or answer its workspace question while testing.
+
+### Task 2: Strict Semantic Live Ticket Acceptance
+
+**Files:**
+- Modify: `flowgency/tickets/reporting.py`
+- Modify/test: `tests/test_ticket_reporting.py`
+- Modify: `tests/_runtime_probe_helpers.py`
+- Modify/test: `tests/test_ticket_runtime_live.py`
+- Reuse: deterministic ticket fixtures and authenticated observer boundary.
+
+**Interfaces:**
+- Production `build_ticket_reporting_protocol` and `append_ticket_reporting_protocol` retain signatures and append-once behavior.
+- Existing `record_ticket_tool_calls` entries retain all fields and gain safe copied `request_version` / `response_version` evidence where present.
+- New test-only `assert_read_only_ticket_probe(calls, ticket_id)` and `assert_stale_refresh_sign_off_probe(calls, ticket_a_id, ticket_b_id)` assert semantic broker sequences, not fixed operation-ID names.
+
+This task is explicitly approved scope expansion to resolve the blocked full
+gate. No font implementation changes, model changes, weakened markers, new
+public APIs, backend transport changes, or permission widening.
+
+- [ ] **Step 1: Add a deterministic regression for valid recovery with different operation names.**
+
+Add to the existing live-test module outside the installed-runtime conditional,
+so it always runs without needing Copilot. Start with literal, hand-checked
+observer entries matching the existing event schema and minimal version copies:
+
+```python
+def test_semantic_ticket_probe_accepts_fresh_recovery_operation_names():
+  ref_a = {"binding_id": "binding-a", "team_id": "team-a",
+       "workflow_id": "board-a", "ticket_id": "ticket-a"}
+  ref_b = {"binding_id": "binding-b", "team_id": "team-a",
+       "workflow_id": "board-b", "ticket_id": "ticket-b"}
+  version_old = {"ref": ref_a, "revision": 3,
+           "workflow_digest": "definition-a", "context_digest": "context-a"}
+  version_new = {"ref": ref_a, "revision": 4,
+           "workflow_digest": "definition-a", "context_digest": "context-a"}
+  version_b = {"ref": ref_b, "revision": 2,
+         "workflow_digest": "definition-b", "context_digest": "context-b"}
+  calls = [
+    {"tool": "ticket_get", "ticket_id": "ticket-a", "ok": True,
+     "response_version": version_old},
+    {"tool": "ticket_start_work", "ticket_id": "ticket-a", "ok": True,
+     "operation_id": "begin-first-ticket", "request_version": version_old},
+    {"tool": "ticket_transition", "ticket_id": "ticket-a", "ok": False,
+     "error_code": "stale-ticket", "operation_id": "attempt-first",
+     "request_version": version_old},
+    {"tool": "ticket_get", "ticket_id": "ticket-a", "ok": True,
+     "response_version": version_new},
+    {"tool": "ticket_transition", "ticket_id": "ticket-a", "ok": True,
+     "operation_id": "recovered-completion", "request_version": version_new},
+    {"tool": "ticket_start_work", "ticket_id": "ticket-b", "ok": True,
+     "operation_id": "begin-follow-up"},
+    {"tool": "ticket_get", "ticket_id": "ticket-b", "ok": True,
+     "response_version": version_b},
+    {"tool": "ticket_sign_off", "ticket_id": "ticket-b", "ok": True,
+     "operation_id": "recovered-sign-off", "request_version": version_b},
+  ]
+  assert_stale_refresh_sign_off_probe(calls, "ticket-a", "ticket-b")
+```
+
+This fixture tests the trace assertion contract, not a mocked broker. Keep the
+existing real broker observer test to verify recording authenticity. Retained
+final ticket states are asserted through the real service/provider in the live
+test and deterministic fixture integrations, not fabricated in these entries.
+
+- [ ] **Step 2: Run the exact red regression.**
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/test_ticket_runtime_live.py::test_semantic_ticket_probe_accepts_fresh_recovery_operation_names -q
+```
+
+Expected: the semantic assertion helper is absent or the current fixed-ID
+implementation rejects the valid trace. Do not modify font source or execute
+another full suite before this local check.
+
+- [ ] **Step 3: Implement small test-only sequence assertions.**
+
+Place them in the existing module, not a new framework. Use an ordered search
+with useful diagnostics; require successful operations on the intended ticket.
+
+```python
+def _find_probe_event(calls, start, *, tool, ticket_id, ok, error_code=None):
+  for index in range(start, len(calls)):
+    call = calls[index]
+    if (call.get("tool") == tool
+        and call.get("ticket_id") == ticket_id
+        and call.get("ok") is ok
+        and (error_code is None or call.get("error_code") == error_code)):
+      return index, call
+  raise AssertionError(f"Missing {tool} outcome for {ticket_id}: ok={ok}, error={error_code}")
+
+
+def assert_read_only_ticket_probe(calls, ticket_id):
+  assert calls, "No ticket broker calls were observed"
+  assert all(call.get("tool") == "ticket_get" for call in calls), calls
+  assert all(call.get("ticket_id") == ticket_id and call.get("ok") is True
+         for call in calls), calls
+
+
+def assert_stale_refresh_sign_off_probe(calls, ticket_a_id, ticket_b_id):
+  start_a_index, _started_a = _find_probe_event(
+    calls, 0, tool="ticket_start_work", ticket_id=ticket_a_id, ok=True,
+  )
+  stale_index, stale = _find_probe_event(
+    calls, start_a_index + 1, tool="ticket_transition", ticket_id=ticket_a_id,
+    ok=False, error_code="stale-ticket",
+  )
+  retry_index, retry = _find_probe_event(
+    calls, stale_index + 1, tool="ticket_transition", ticket_id=ticket_a_id, ok=True,
+  )
+  fresh_reads = [call for call in calls[stale_index + 1:retry_index]
+           if call.get("tool") == "ticket_get"
+           and call.get("ticket_id") == ticket_a_id
+           and call.get("ok") is True]
+  assert fresh_reads, "Successful fresh read is required before completion retry"
+  fresh = fresh_reads[-1]
+  assert fresh.get("response_version"), fresh
+  assert fresh["response_version"] != stale.get("request_version"), (stale, fresh)
+  assert retry.get("request_version") == fresh["response_version"], (fresh, retry)
+  assert isinstance(retry.get("operation_id"), str) and retry["operation_id"].strip(), retry
+
+  start_index, _started = _find_probe_event(
+    calls, 0, tool="ticket_start_work", ticket_id=ticket_b_id, ok=True,
+  )
+  signoff_index, signed_off = _find_probe_event(
+    calls, start_index + 1, tool="ticket_sign_off", ticket_id=ticket_b_id, ok=True,
+  )
+  current_reads = [call for call in calls[start_index + 1:signoff_index]
+           if call.get("tool") == "ticket_get"
+           and call.get("ticket_id") == ticket_b_id
+           and call.get("ok") is True]
+  assert current_reads, "Successful current read is required before sign-off"
+  current = current_reads[-1]
+  assert current.get("response_version"), current
+  assert signed_off.get("request_version") == current["response_version"], (current, signed_off)
+  assert isinstance(signed_off.get("operation_id"), str) and signed_off["operation_id"].strip(), signed_off
+```
+
+Use the most recent successful read before each accepted mutation as shown,
+including when intervening reads occur. Keep helper output and
+types modest; eliminate unused local names. A fresh version must belong to the
+same scoped ticket reference; comparing complete curated version objects does
+not license accepting a revision-only match on another ticket.
+
+Immediately rerun Step 2, then add negative cases that remove or corrupt each
+required event/version. Require every negative trace to raise AssertionError,
+including wrong ticket, no successful read, no stale denial, stale retry without
+fresh read, old-version retry, no work start, and no accepted sign-off.
+
+- [ ] **Step 4: Extend the real observer with minimal safe version evidence.**
+
+In `record_ticket_tool_calls`, copy only the protocol's version fields from
+request `payload["version"]` and returned command envelope's version. Inspect
+the shared command response contract to use the actual response location.
+Preserve existing ticket ID/error/operation fields and hooks. Never capture
+token, headers, auth, or arbitrary payload contents. Use existing `ref` and
+version models/parser, not JSON substring extraction.
+
+The safe-copy boundary is:
+
+```python
+def _observed_version(value):
+  if not isinstance(value, dict):
+    return None
+  ref = value.get("ref")
+  if not isinstance(ref, dict):
+    return None
+  return {
+    "ref": {name: ref[name] for name in
+        ("binding_id", "team_id", "workflow_id", "ticket_id") if name in ref},
+    **{name: value[name] for name in
+       ("revision", "workflow_digest", "context_digest") if name in value},
+  }
+```
+
+Add a real fixture/broker observation check proving captured get version and
+subsequent request version match, with no credential fields. Keep failed stale
+version evidence too. Do not log successful ticket payloads or private headers.
+
+- [ ] **Step 5: Correct permission prose without changing grants.**
+
+Update `_tool_sentence`/reporting text to describe the workspace filesystem tool
+policy separately from supplied live ticket operations. Include this meaning:
+
+```text
+Your workspace/filesystem tool policy is an allowlist: read, search.
+Live Flowgency ticket tools, when supplied by this job's authenticated ticket
+channel, are governed separately and do not require workspace write access.
+If the ticket tools are not supplied, report that blocker; do not invent a
+ticket result, broaden network access, or modify ticket storage directly.
+```
+
+Retain configured tool names dynamically, no-tool/all-tool wording semantics,
+non-ticket behavior, and append-once contract. Use failing consumer-level
+protocol/rendering assertions and the unchanged live read probe as behavioral
+evidence; avoid adding tests that only grep a new source-code sentence. Existing
+protocol tests are output-contract tests; preserve meaningful unchanged checks.
+
+- [ ] **Step 6: Wire semantic assertions into live probes and causal stale injection.**
+
+The read-only test calls its semantic helper on real captured calls, while
+keeping status/exit, MCP inventory, protected hashes, and final no-active-run
+checks. Keep the exact fully scoped JSON ref; format it clearly for the agent
+without replacing or fabricating fields.
+
+Force staleness on the intended ticket A's first completion transition, detected
+by operation and scoped payload ticket ID, not `complete-stale` spelling. Then
+call the semantic helper and retain all current final ticket/result assertions.
+Require the agent to inspect real failures and recover using current versions;
+operation names are nonempty idempotency identifiers, not an acceptance regex.
+Earlier denied sign-off attempts do not count as success. Final assignment and
+active-run checks on B remain strict. Do not trust its final prose/exit alone.
+
+- [ ] **Step 7: Run deterministic coverage, then the two unchanged real-runtime cases.**
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/test_ticket_reporting.py tests/test_ticket_runtime_live.py -q -m "not real_runtime"
+.\.venv\Scripts\python.exe -m pytest tests/test_ticket_runtime_live.py -q -k "restricted_agent_reads_ticket_over_http_without_editing or restricted_agent_refreshes_stale_transition_and_signs_off_second_ticket"
+```
+
+First command is focused deterministic coverage only, not a replacement full
+gate. Keep the canonical model, real installed CLI, auth/network/timeout failure
+policy and runtime marker unchanged. If live cases still fail, inspect fresh
+selected/redacted evidence; do not retry until green, change models, skip, or
+weaken semantics. Escalate a genuine persistent blocker.
+
+- [ ] **Step 8: Review and commit this amended task.**
+
+Inspect diagnostics and git diff --check. Report exact red/green proof, retained
+negative contract coverage, actual live observations, warnings, changed files,
+and remaining uncertainty. Stage only the listed task files:
+
+```powershell
+git add -- flowgency/tickets/reporting.py tests/test_ticket_reporting.py tests/_runtime_probe_helpers.py tests/test_ticket_runtime_live.py
+git commit -m "fix(tests): assert semantic live ticket contracts"
+```
+
+Review this task before rerunning complete combined-branch gates. Preserve the
+original failed full/recheck receipts and font-task completion in the ledger.
 
 ## Complete Verification And Integration
 
