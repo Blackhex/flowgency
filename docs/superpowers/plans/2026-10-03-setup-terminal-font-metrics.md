@@ -267,20 +267,20 @@ def test_semantic_ticket_probe_accepts_fresh_recovery_operation_names():
          "workflow_digest": "definition-b", "context_digest": "context-b"}
   calls = [
     {"tool": "ticket_get", "ticket_id": "ticket-a", "ok": True,
-     "response_version": version_old},
+     "request_ref": ref_a, "response_version": version_old},
     {"tool": "ticket_start_work", "ticket_id": "ticket-a", "ok": True,
      "operation_id": "begin-first-ticket", "request_version": version_old},
     {"tool": "ticket_transition", "ticket_id": "ticket-a", "ok": False,
      "error_code": "stale-ticket", "operation_id": "attempt-first",
      "request_version": version_old},
     {"tool": "ticket_get", "ticket_id": "ticket-a", "ok": True,
-     "response_version": version_new},
+     "request_ref": ref_a, "response_version": version_new},
     {"tool": "ticket_transition", "ticket_id": "ticket-a", "ok": True,
      "operation_id": "recovered-completion", "request_version": version_new},
     {"tool": "ticket_start_work", "ticket_id": "ticket-b", "ok": True,
-     "operation_id": "begin-follow-up"},
+     "operation_id": "begin-follow-up", "request_version": version_b},
     {"tool": "ticket_get", "ticket_id": "ticket-b", "ok": True,
-     "response_version": version_b},
+     "request_ref": ref_b, "response_version": version_b},
     {"tool": "ticket_sign_off", "ticket_id": "ticket-b", "ok": True,
      "operation_id": "recovered-sign-off", "request_version": version_b},
   ]
@@ -414,10 +414,9 @@ def _observed_version(value):
   }
 ```
 
-Add `request_ref` to each literal read event in Step 1; mutations carry the same
-full ref through their request version. Capture real read request refs with the
-existing TicketRef validator and compare all four fields. Never derive expected
-scope from the first observed response or retain authentication payload fields.
+Capture real read request refs with the existing TicketRef validator and compare
+all four fields. Never derive expected scope from the first observed response or
+retain authentication payload fields.
 
 Add a real fixture/broker observation check proving captured get version and
 subsequent request version match, with no credential fields. Keep failed stale
