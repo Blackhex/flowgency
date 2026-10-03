@@ -314,6 +314,10 @@ def test_read_only_ticket_probe_rejects_same_ticket_id_under_wrong_scope(field, 
 
 
 @pytest.mark.parametrize(
+    "target_ticket_id",
+    ["ticket-a", "ticket-b"],
+)
+@pytest.mark.parametrize(
     ("field", "wrong_value"),
     [
         ("binding_id", "binding-z"),
@@ -321,7 +325,9 @@ def test_read_only_ticket_probe_rejects_same_ticket_id_under_wrong_scope(field, 
         ("workflow_id", "board-z"),
     ],
 )
-def test_semantic_ticket_probe_rejects_same_ticket_id_under_wrong_scope(field, wrong_value):
+def test_semantic_ticket_probe_rejects_same_ticket_id_under_wrong_scope(
+    target_ticket_id, field, wrong_value
+):
     from tests._runtime_probe_helpers import assert_stale_refresh_sign_off_probe
 
     ref_a = TicketRef.model_validate(
@@ -344,19 +350,25 @@ def test_semantic_ticket_probe_rejects_same_ticket_id_under_wrong_scope(field, w
     for call in deepcopy(_semantic_probe_calls()):
         mutated = {**call}
         request_version = mutated.get("request_version")
-        if isinstance(request_version, dict) and request_version.get("ref", {}).get("ticket_id") == ref_a.ticket_id:
+        if (
+            isinstance(request_version, dict)
+            and request_version.get("ref", {}).get("ticket_id") == target_ticket_id
+        ):
             mutated["request_version"] = {
                 **request_version,
                 "ref": {**request_version["ref"], field: wrong_value},
             }
         response_version = mutated.get("response_version")
-        if isinstance(response_version, dict) and response_version.get("ref", {}).get("ticket_id") == ref_a.ticket_id:
+        if (
+            isinstance(response_version, dict)
+            and response_version.get("ref", {}).get("ticket_id") == target_ticket_id
+        ):
             mutated["response_version"] = {
                 **response_version,
                 "ref": {**response_version["ref"], field: wrong_value},
             }
         request_ref = mutated.get("request_ref")
-        if isinstance(request_ref, dict) and request_ref.get("ticket_id") == ref_a.ticket_id:
+        if isinstance(request_ref, dict) and request_ref.get("ticket_id") == target_ticket_id:
             mutated["request_ref"] = {**request_ref, field: wrong_value}
         calls.append(mutated)
 
@@ -569,6 +581,10 @@ def test_read_only_ticket_probe_fails_closed_on_malformed_scope(field, bad_value
 
 
 @pytest.mark.parametrize(
+    "target_ticket_id",
+    ["ticket-a", "ticket-b"],
+)
+@pytest.mark.parametrize(
     ("field", "remover"),
     [
         ("binding_id", lambda ref: {key: value for key, value in ref.items() if key != "binding_id"}),
@@ -576,7 +592,9 @@ def test_read_only_ticket_probe_fails_closed_on_malformed_scope(field, bad_value
         ("workflow_id", lambda ref: {key: value for key, value in ref.items() if key != "workflow_id"}),
     ],
 )
-def test_semantic_ticket_probe_fails_closed_on_missing_scope(field, remover):
+def test_semantic_ticket_probe_fails_closed_on_missing_scope(
+    target_ticket_id, field, remover
+):
     from tests._runtime_probe_helpers import assert_stale_refresh_sign_off_probe
 
     ref_a = TicketRef.model_validate(
@@ -599,19 +617,25 @@ def test_semantic_ticket_probe_fails_closed_on_missing_scope(field, remover):
     for call in deepcopy(_semantic_probe_calls()):
         mutated = {**call}
         request_version = mutated.get("request_version")
-        if isinstance(request_version, dict) and request_version.get("ref", {}).get("ticket_id") == ref_a.ticket_id:
+        if (
+            isinstance(request_version, dict)
+            and request_version.get("ref", {}).get("ticket_id") == target_ticket_id
+        ):
             mutated["request_version"] = {
                 **request_version,
                 "ref": remover(request_version["ref"]),
             }
         response_version = mutated.get("response_version")
-        if isinstance(response_version, dict) and response_version.get("ref", {}).get("ticket_id") == ref_a.ticket_id:
+        if (
+            isinstance(response_version, dict)
+            and response_version.get("ref", {}).get("ticket_id") == target_ticket_id
+        ):
             mutated["response_version"] = {
                 **response_version,
                 "ref": remover(response_version["ref"]),
             }
         request_ref = mutated.get("request_ref")
-        if isinstance(request_ref, dict) and request_ref.get("ticket_id") == ref_a.ticket_id:
+        if isinstance(request_ref, dict) and request_ref.get("ticket_id") == target_ticket_id:
             mutated["request_ref"] = remover(request_ref)
         calls.append(mutated)
 
@@ -620,6 +644,10 @@ def test_semantic_ticket_probe_fails_closed_on_missing_scope(field, remover):
 
 
 @pytest.mark.parametrize(
+    "target_ticket_id",
+    ["ticket-a", "ticket-b"],
+)
+@pytest.mark.parametrize(
     ("field", "bad_value"),
     [
         ("binding_id", 42),
@@ -627,7 +655,9 @@ def test_semantic_ticket_probe_fails_closed_on_missing_scope(field, remover):
         ("workflow_id", {"id": "board-a"}),
     ],
 )
-def test_semantic_ticket_probe_fails_closed_on_malformed_scope(field, bad_value):
+def test_semantic_ticket_probe_fails_closed_on_malformed_scope(
+    target_ticket_id, field, bad_value
+):
     from tests._runtime_probe_helpers import assert_stale_refresh_sign_off_probe
 
     ref_a = TicketRef.model_validate(
@@ -650,15 +680,21 @@ def test_semantic_ticket_probe_fails_closed_on_malformed_scope(field, bad_value)
     for call in deepcopy(_semantic_probe_calls()):
         mutated = {**call}
         request_version = mutated.get("request_version")
-        if isinstance(request_version, dict) and request_version.get("ref", {}).get("ticket_id") == ref_a.ticket_id:
+        if (
+            isinstance(request_version, dict)
+            and request_version.get("ref", {}).get("ticket_id") == target_ticket_id
+        ):
             mutated_ref = {**request_version["ref"], field: bad_value}
             mutated["request_version"] = {**request_version, "ref": mutated_ref}
         response_version = mutated.get("response_version")
-        if isinstance(response_version, dict) and response_version.get("ref", {}).get("ticket_id") == ref_a.ticket_id:
+        if (
+            isinstance(response_version, dict)
+            and response_version.get("ref", {}).get("ticket_id") == target_ticket_id
+        ):
             mutated_ref = {**response_version["ref"], field: bad_value}
             mutated["response_version"] = {**response_version, "ref": mutated_ref}
         request_ref = mutated.get("request_ref")
-        if isinstance(request_ref, dict) and request_ref.get("ticket_id") == ref_a.ticket_id:
+        if isinstance(request_ref, dict) and request_ref.get("ticket_id") == target_ticket_id:
             mutated["request_ref"] = {**request_ref, field: bad_value}
         calls.append(mutated)
 
