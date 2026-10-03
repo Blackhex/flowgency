@@ -11,6 +11,8 @@ from pathlib import Path, PurePosixPath
 import subprocess
 from uuid import uuid4
 
+from pydantic import ValidationError
+
 from flowgency.configuration import ValidationFailed
 from flowgency.fs.snapshot import SnapshotFile, TreeSnapshot, compute_source_digest
 from flowgency.integrations import REGISTRY, RunResult
@@ -19,6 +21,7 @@ from flowgency.integrations.models import (
     IntegrationRunRequest,
     ResolvedPermissionRule,
 )
+from flowgency.tickets.models import TicketVersion
 
 
 AI_CLI_COMMANDS = {
@@ -505,6 +508,133 @@ def _observed_ticket_id(payload: object) -> str | None:
     return None
 
 
+def _observed_version(value: object) -> dict | None:
+    if not isinstance(value, dict):
+        return None
+    try:
+        version = TicketVersion.model_validate(value)
+    except ValidationError:
+        return None
+    return {
+        "ref": version.ref.model_dump(mode="json"),
+        "revision": version.revision,
+        "workflow_digest": version.workflow_digest,
+        "context_digest": version.context_digest,
+    }
+
+
+def _observed_response_version(result: object) -> dict | None:
+    if not isinstance(result, dict):
+        return None
+    direct = _observed_version(result.get("version"))
+    if direct is not None:
+        return direct
+    nested = result.get("result")
+    if isinstance(nested, dict):
+        return _observed_version(nested.get("version"))
+    return None
+
+
+def _require_nonempty_operation_id(call: dict) -> None:
+    operation_id = call.get("operation_id")
+    assert isinstance(operation_id, str) and operation_id.strip(), call
+
+
+def _find_probe_event(calls, start, *, tool, ticket_id, ok, error_code=None):
+    for index in range(start, len(calls)):
+        call = calls[index]
+        if (
+            call.get("tool") == tool
+            and call.get("ticket_id") == ticket_id
+            and call.get("ok") is ok
+            and (error_code is None or call.get("error_code") == error_code)
+        ):
+            return index, call
+    raise AssertionError(
+        f"Missing {tool} outcome for {ticket_id}: ok={ok}, error={error_code}"
+    )
+
+
+def _successful_reads_between(calls, start, end, *, ticket_id):
+    reads = []
+    for call in calls[start:end]:
+        if (
+            call.get("tool") == "ticket_get"
+            and call.get("ticket_id") == ticket_id
+            and call.get("ok") is True
+        ):
+            version = call.get("response_version")
+            assert version, call
+            assert version.get("ref", {}).get("ticket_id") == ticket_id, call
+            reads.append(call)
+    return reads
+
+
+def assert_read_only_ticket_probe(calls, ticket_id):
+    assert calls, "No ticket broker calls were observed"
+    matching_reads = [
+        call
+        for call in calls
+        if call.get("tool") == "ticket_get"
+        and call.get("ticket_id") == ticket_id
+        and call.get("ok") is True
+    ]
+    assert matching_reads, f"Missing successful ticket_get for {ticket_id}: {calls}"
+    assert all(call.get("tool") == "ticket_get" for call in calls), calls
+    assert all(call.get("ticket_id") == ticket_id for call in calls), calls
+    assert all(call.get("ok") is True for call in calls), calls
+
+
+def assert_stale_refresh_sign_off_probe(calls, ticket_a_id, ticket_b_id):
+    start_a_index, started_a = _find_probe_event(
+        calls, 0, tool="ticket_start_work", ticket_id=ticket_a_id, ok=True
+    )
+    _require_nonempty_operation_id(started_a)
+
+    stale_index, stale = _find_probe_event(
+        calls,
+        start_a_index + 1,
+        tool="ticket_transition",
+        ticket_id=ticket_a_id,
+        ok=False,
+        error_code="stale-ticket",
+    )
+    _require_nonempty_operation_id(stale)
+    stale_version = stale.get("request_version")
+    assert stale_version, stale
+    assert stale_version.get("ref", {}).get("ticket_id") == ticket_a_id, stale
+
+    retry_index, retry = _find_probe_event(
+        calls, stale_index + 1, tool="ticket_transition", ticket_id=ticket_a_id, ok=True
+    )
+    fresh_reads = _successful_reads_between(
+        calls, stale_index + 1, retry_index, ticket_id=ticket_a_id
+    )
+    assert fresh_reads, "Successful fresh read is required before completion retry"
+    fresh = fresh_reads[-1]
+    fresh_version = fresh["response_version"]
+    assert fresh_version.get("ref") == stale_version.get("ref"), (stale, fresh)
+    assert fresh_version != stale_version, (stale, fresh)
+    assert retry.get("request_version") == fresh_version, (fresh, retry)
+    _require_nonempty_operation_id(retry)
+
+    start_b_index, started_b = _find_probe_event(
+        calls, 0, tool="ticket_start_work", ticket_id=ticket_b_id, ok=True
+    )
+    _require_nonempty_operation_id(started_b)
+
+    signoff_index, signed_off = _find_probe_event(
+        calls, start_b_index + 1, tool="ticket_sign_off", ticket_id=ticket_b_id, ok=True
+    )
+    current_reads = _successful_reads_between(
+        calls, start_b_index + 1, signoff_index, ticket_id=ticket_b_id
+    )
+    assert current_reads, "Successful current read is required before sign-off"
+    current = current_reads[-1]
+    assert signed_off.get("request_version") == current["response_version"], (current, signed_off)
+    _require_nonempty_operation_id(signed_off)
+
+
 @contextmanager
 def reclaim_gated_worker(worker, gate, *, join_timeout):
     """Release a gated live-test worker and join it on *every* exit path.
@@ -568,6 +698,7 @@ def record_ticket_tool_calls(*, before_dispatch=None, after_dispatch=None):
                         "error_code": error_code,
                         "error_message": error_message,
                         "operation_id": payload.get("operation_id") if isinstance(payload, dict) else None,
+                        "request_version": _observed_version(payload.get("version")) if isinstance(payload, dict) else None,
                         "ticket_id": _observed_ticket_id(payload),
                     }
                 )
@@ -588,6 +719,8 @@ def record_ticket_tool_calls(*, before_dispatch=None, after_dispatch=None):
                     "error_code": error.get("code") if isinstance(error, dict) else None,
                     "error_message": error.get("message") if isinstance(error, dict) else None,
                     "operation_id": payload.get("operation_id") if isinstance(payload, dict) else None,
+                    "request_version": _observed_version(payload.get("version")) if isinstance(payload, dict) else None,
+                    "response_version": _observed_response_version(result),
                     "ticket_id": _observed_ticket_id(payload),
                 }
             )

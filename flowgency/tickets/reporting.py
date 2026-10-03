@@ -8,14 +8,30 @@ def _tool_sentence(tool_mode: str, tool_names: tuple[str, ...]) -> str:
     if tool_mode == "allowlist":
         granted = ", ".join(tool_names) if tool_names else "no tools"
         return (
-            f"Your granted tool policy is an allowlist: {granted}. "
-            "If a task needs a capability outside that list, say so explicitly "
-            "and name the missing tool; do not attribute the refusal to any "
-            "other cause."
+            f"Your workspace/filesystem tool policy is an allowlist: {granted}. "
+            "If a task needs a filesystem capability outside that list, say so "
+            "explicitly and name the missing tool; do not attribute the refusal "
+            "to any other cause. Live Flowgency ticket tools, when supplied by "
+            "this job's authenticated ticket channel, are governed separately "
+            "and do not require workspace write access. If the ticket tools are "
+            "not supplied, report that blocker; do not invent a ticket result, "
+            "broaden network access, or modify ticket storage directly."
         )
     if tool_mode == "none":
-        return "You have been granted no tools."
-    return "You have been granted all tools."
+        return (
+            "You have been granted no tools. Live Flowgency ticket tools, when "
+            "supplied by this job's authenticated ticket channel, are governed "
+            "separately and do not require workspace write access. If the ticket "
+            "tools are not supplied, report that blocker; do not invent a ticket "
+            "result, broaden network access, or modify ticket storage directly."
+        )
+    return (
+        "You have been granted all tools. Live Flowgency ticket tools, when "
+        "supplied by this job's authenticated ticket channel, are governed "
+        "separately. If the ticket tools are not supplied, report that blocker; "
+        "do not invent a ticket result, broaden network access, or modify ticket "
+        "storage directly."
+    )
 
 
 def build_ticket_reporting_protocol(

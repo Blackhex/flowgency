@@ -16,7 +16,9 @@ def test_build_ticket_reporting_protocol_includes_ticket_tool_contract():
     assert "Use Flowgency ticket tools for work-item reporting." in protocol
     assert "Only an accepted transition changes ticket state." in protocol
     assert "Write memory only in the provided memory directory." in protocol
-    assert "Your granted tool policy is an allowlist: read, search." in protocol
+    assert "Your workspace/filesystem tool policy is an allowlist: read, search." in protocol
+    assert "Live Flowgency ticket tools, when supplied by this job's authenticated ticket channel, are governed separately and do not require workspace write access." in protocol
+    assert "If the ticket tools are not supplied, report that blocker; do not invent a ticket result, broaden network access, or modify ticket storage directly." in protocol
     assert "observations" not in protocol.lower()
     assert "proposals" not in protocol.lower()
     assert "decisions" not in protocol.lower()

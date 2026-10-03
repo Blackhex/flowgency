@@ -111,11 +111,199 @@ def test_record_ticket_tool_calls_observes_live_dispatch(workflow_env):
     with record_ticket_tool_calls() as calls:
         with env.broker_for(authority) as client:
             result = client.call("get_ticket", {"ref": ref.model_dump(mode="json")})
+            version = result["result"]["version"]
+            started = client.call(
+                "start_work",
+                {"version": version, "operation_id": "recorder-start"},
+            )
 
     assert result["ok"] is True
+    assert started["ok"] is True
     ticket_get_calls = [call for call in calls if call["tool"] == "ticket_get"]
+    start_work_calls = [call for call in calls if call["tool"] == "ticket_start_work"]
     assert ticket_get_calls, calls
+    assert start_work_calls, calls
     assert all(call["ok"] for call in ticket_get_calls)
+    assert ticket_get_calls[-1]["response_version"] == version
+    assert start_work_calls[-1]["request_version"] == version
+    assert "token" not in ticket_get_calls[-1]
+    assert "headers" not in ticket_get_calls[-1]
+    assert "token" not in start_work_calls[-1]
+    assert "headers" not in start_work_calls[-1]
+
+
+def _semantic_probe_calls():
+    ref_a = {
+        "binding_id": "binding-a",
+        "team_id": "team-a",
+        "workflow_id": "board-a",
+        "ticket_id": "ticket-a",
+    }
+    ref_b = {
+        "binding_id": "binding-b",
+        "team_id": "team-a",
+        "workflow_id": "board-b",
+        "ticket_id": "ticket-b",
+    }
+    version_old = {
+        "ref": ref_a,
+        "revision": 3,
+        "workflow_digest": "definition-a",
+        "context_digest": "context-a",
+    }
+    version_new = {
+        "ref": ref_a,
+        "revision": 4,
+        "workflow_digest": "definition-a",
+        "context_digest": "context-a",
+    }
+    version_b = {
+        "ref": ref_b,
+        "revision": 2,
+        "workflow_digest": "definition-b",
+        "context_digest": "context-b",
+    }
+    return [
+        {"tool": "ticket_get", "ticket_id": "ticket-a", "ok": True, "response_version": version_old},
+        {
+            "tool": "ticket_start_work",
+            "ticket_id": "ticket-a",
+            "ok": True,
+            "operation_id": "begin-first-ticket",
+            "request_version": version_old,
+        },
+        {
+            "tool": "ticket_transition",
+            "ticket_id": "ticket-a",
+            "ok": False,
+            "error_code": "stale-ticket",
+            "operation_id": "attempt-first",
+            "request_version": version_old,
+        },
+        {"tool": "ticket_get", "ticket_id": "ticket-a", "ok": True, "response_version": version_new},
+        {
+            "tool": "ticket_transition",
+            "ticket_id": "ticket-a",
+            "ok": True,
+            "operation_id": "recovered-completion",
+            "request_version": version_new,
+        },
+        {
+            "tool": "ticket_start_work",
+            "ticket_id": "ticket-b",
+            "ok": True,
+            "operation_id": "begin-follow-up",
+        },
+        {"tool": "ticket_get", "ticket_id": "ticket-b", "ok": True, "response_version": version_b},
+        {
+            "tool": "ticket_sign_off",
+            "ticket_id": "ticket-b",
+            "ok": True,
+            "operation_id": "recovered-sign-off",
+            "request_version": version_b,
+        },
+    ]
+
+
+def test_read_only_ticket_probe_requires_only_successful_reads_on_the_selected_ticket():
+    from tests._runtime_probe_helpers import assert_read_only_ticket_probe
+
+    calls = [
+        {
+            "tool": "ticket_get",
+            "ticket_id": "ticket-a",
+            "ok": True,
+            "response_version": {
+                "ref": {
+                    "binding_id": "binding-a",
+                    "team_id": "team-a",
+                    "workflow_id": "board-a",
+                    "ticket_id": "ticket-a",
+                },
+                "revision": 1,
+                "workflow_digest": "definition-a",
+                "context_digest": "context-a",
+            },
+        }
+    ]
+
+    assert_read_only_ticket_probe(calls, "ticket-a")
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (lambda calls: [], "No ticket broker calls were observed"),
+        (
+            lambda calls: [
+                {**call, "ticket_id": "ticket-z"} if call.get("tool") == "ticket_get" else call
+                for call in calls
+            ],
+            "Missing successful ticket_get for ticket-a",
+        ),
+        (
+            lambda calls: [
+                call for call in calls if not (call.get("tool") == "ticket_transition" and call.get("ok") is False)
+            ],
+            "Missing ticket_transition outcome for ticket-a: ok=False, error=stale-ticket",
+        ),
+        (
+            lambda calls: [
+                call for call in calls if not (call.get("tool") == "ticket_get" and call.get("ticket_id") == "ticket-a" and call.get("response_version", {}).get("revision") == 4)
+            ],
+            "Successful fresh read is required before completion retry",
+        ),
+        (
+            lambda calls: [
+                {**call, "request_version": deepcopy(calls[0]["response_version"])} if call.get("tool") == "ticket_transition" and call.get("ok") is True and call.get("ticket_id") == "ticket-a" else call
+                for call in calls
+            ],
+            "recovered-completion",
+        ),
+        (
+            lambda calls: [
+                call for call in calls if not (call.get("tool") == "ticket_start_work" and call.get("ticket_id") == "ticket-b")
+            ],
+            "Missing ticket_start_work outcome for ticket-b: ok=True, error=None",
+        ),
+        (
+            lambda calls: [
+                call for call in calls if not (call.get("tool") == "ticket_sign_off" and call.get("ticket_id") == "ticket-b" and call.get("ok") is True)
+            ],
+            "Missing ticket_sign_off outcome for ticket-b: ok=True, error=None",
+        ),
+        (
+            lambda calls: [
+                {**call, "request_version": deepcopy(calls[3]["response_version"])} if call.get("tool") == "ticket_sign_off" and call.get("ok") is True else call
+                for call in calls
+            ],
+            "recovered-sign-off",
+        ),
+    ],
+)
+def test_semantic_ticket_probe_rejects_missing_required_causality(mutate, message):
+    from tests._runtime_probe_helpers import (
+        assert_read_only_ticket_probe,
+        assert_stale_refresh_sign_off_probe,
+    )
+
+    calls = mutate(deepcopy(_semantic_probe_calls()))
+
+    if message.startswith("Missing successful ticket_get") or message == "No ticket broker calls were observed":
+        with pytest.raises(AssertionError, match=message):
+            assert_read_only_ticket_probe(calls, "ticket-a")
+        return
+
+    with pytest.raises(AssertionError, match=message):
+        assert_stale_refresh_sign_off_probe(calls, "ticket-a", "ticket-b")
+
+
+def test_semantic_ticket_probe_accepts_fresh_recovery_operation_names():
+    from tests._runtime_probe_helpers import assert_stale_refresh_sign_off_probe
+
+    calls = _semantic_probe_calls()
+
+    assert_stale_refresh_sign_off_probe(calls, "ticket-a", "ticket-b")
 
 
 def _denied_write_start_event(call_id: str, target: str) -> dict:
@@ -986,7 +1174,10 @@ else:
         from flowgency.jobs.resolution import resolve_job_request
         from flowgency.jobs.store import read_job
         from flowgency.prompts import PromptStore
-        from tests._runtime_probe_helpers import record_ticket_tool_calls
+        from tests._runtime_probe_helpers import (
+            assert_read_only_ticket_probe,
+            record_ticket_tool_calls,
+        )
 
         model = canonical_test_model(runtime.name)
         diagnostics = pin_live_runtime(monkeypatch, runtime, model=model)
@@ -1056,14 +1247,7 @@ else:
             f"{runtime.name}: non-zero exit {record.exit_code!r}; "
             f"summary={job.execution_summary!r}; {diagnostics.describe()}"
         )
-        ticket_get_calls = [call for call in calls if call["tool"] == "ticket_get"]
-        assert ticket_get_calls, (
-            f"{runtime.name}: ticket_get never reached the broker over MCP HTTP; "
-            f"observed={[call['tool'] for call in calls]}; stdout_path={job.stdout_path!r}"
-        )
-        assert all(call["ok"] for call in ticket_get_calls), (
-            f"{runtime.name}: a ticket_get call failed at the broker: {ticket_get_calls}"
-        )
+        assert_read_only_ticket_probe(calls, ref.ticket_id)
         # No plugin- or personal-config MCP server leaked in: only the disabled
         # built-in and the trusted ticket channel this run actually needed.
         assert_mcp_server_inventory(
@@ -1094,7 +1278,10 @@ else:
         from flowgency.jobs.resolution import resolve_job_request
         from flowgency.jobs.store import read_job
         from flowgency.prompts import PromptStore
-        from tests._runtime_probe_helpers import record_ticket_tool_calls
+        from tests._runtime_probe_helpers import (
+            assert_stale_refresh_sign_off_probe,
+            record_ticket_tool_calls,
+        )
 
         raw = _restricted_ticket_agent_config(raw_config, runtime.name)
         env = make_workflow_environment(tmp_path, raw)
@@ -1126,10 +1313,13 @@ else:
         injected = {"stale": False}
 
         def before_dispatch(service, registry, token, operation, payload):
+            version = payload.get("version") if isinstance(payload, dict) else None
+            ref = version.get("ref") if isinstance(version, dict) else None
             if (
                 operation == "transition_ticket"
                 and isinstance(payload, dict)
-                and payload.get("operation_id") == "complete-stale"
+                and payload.get("transition_id") == "complete"
+                and ref == ref_a.model_dump(mode="json")
                 and not injected["stale"]
             ):
                 injected["stale"] = True
@@ -1171,34 +1361,7 @@ else:
             f"stderr_path={job.stderr_path!r}; stdout_path={job.stdout_path!r}"
         )
         assert injected["stale"], f"{runtime.name}: stale transition was never forced"
-
-        stale_calls = [
-            call
-            for call in calls
-            if call["tool"] == "ticket_transition"
-            and call.get("operation_id") == "complete-stale"
-        ]
-        assert stale_calls, f"{runtime.name}: no stale transition attempt was observed"
-        assert stale_calls[-1]["ok"] is False, stale_calls
-        assert stale_calls[-1]["error_code"] == "stale-ticket", stale_calls
-
-        fresh_calls = [
-            call
-            for call in calls
-            if call["tool"] == "ticket_transition"
-            and call.get("operation_id") == "complete-fresh"
-        ]
-        assert fresh_calls, f"{runtime.name}: no fresh transition retry was observed"
-        assert fresh_calls[-1]["ok"] is True, fresh_calls
-
-        signoff_calls = [
-            call
-            for call in calls
-            if call["tool"] == "ticket_sign_off"
-            and call.get("operation_id") == "signoff-b-1"
-        ]
-        assert signoff_calls, f"{runtime.name}: no ticket_sign_off call was observed"
-        assert signoff_calls[-1]["ok"] is True, signoff_calls
+        assert_stale_refresh_sign_off_probe(calls, ref_a.ticket_id, ref_b.ticket_id)
 
         final_a = env.read(ref_a).record
         assert final_a.state_id == "done"
