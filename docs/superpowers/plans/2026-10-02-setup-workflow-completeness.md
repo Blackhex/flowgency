@@ -574,26 +574,51 @@ if a focused failure requires one, keep it local and rerun the same check.
 - Produces: a documented create-or-reuse recipe run only after approval and before the one complete revision-checked config write.
 - The canonical skill is the packaged file; repository aliases are links, not independent instruction copies.
 
-- [ ] **Step 1: Add a failing canonical-guidance regression.**
+- [ ] **Step 1: Add a failing executable-recipe regression.**
+
+The user approved this pre-flight test-strategy correction on 2026-10-03:
+execute the documented recipe and review the prose against the spec instead
+of asserting exact prose substrings. Reuse the existing recipe-extraction
+pattern and add this helper and behavior test to `tests/test_setup_skill_e2e.py`.
 
 ```python
-def test_setup_requires_selected_workflow_materialization_before_config_write():
-    skill = (
-        copilot_discovery_root() / ".github/skills/flowgency-setup/SKILL.md"
-    ).read_text(encoding="utf-8")
+def _documented_workflow_recipe():
+    from flowgency.setup_assets import copilot_discovery_root
 
-    assert "workflow_example_root" in skill
-    assert "create_candidate" in skill
-    assert "Do not overwrite an existing workflow definition" in skill
-    assert "before the single atomic config write" in skill
-    assert "Materialize only the selected approved blueprints" in skill
+    path = copilot_discovery_root() / ".github/skills/flowgency-setup/SKILL.md"
+    document = path.read_text(encoding="utf-8")
+    heading = "\n### Approved Workflow Materialization Recipe\n"
+    start = document.index(heading) + len(heading)
+    section = document[start:]
+    fence = "```python\n"
+    open_at = section.index(fence) + len(fence)
+    close_at = section.index("\n```", open_at)
+    namespace = {}
+    exec(compile(section[open_at:close_at], str(path), "exec"), namespace)
+    return namespace["materialize_approved_workflow"]
+
+
+def test_documented_recipe_creates_only_selected_blueprint(tmp_path):
+    library_root = tmp_path / "workflow-library"
+    library_root.mkdir()
+    materialize = _documented_workflow_recipe()
+
+    first = materialize(library_root, "software-delivery")
+    assert first.definition.id == "software-delivery"
+    source = first.source_path
+    initial_bytes = source.read_bytes()
+    second = materialize(library_root, "software-delivery")
+
+    assert second.definition.id == "software-delivery"
+    assert source.read_bytes() == initial_bytes
+    assert not (library_root / "research").exists()
 ```
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests/test_workflow_setup.py -k "selected_workflow_materialization" -q
+.\.venv\Scripts\python.exe -m pytest tests/test_setup_skill_e2e.py::test_documented_recipe_creates_only_selected_blueprint -q
 ```
 
-Expected: the current guidance does not contain the required source step.
+Expected: the current guidance has no executable creation recipe to run.
 
 - [ ] **Step 2: Add the explicit creation step and executable API recipe.**
 
@@ -655,45 +680,10 @@ step and that normal dashboard startup does not automatically install examples.
 - [ ] **Step 3: Rerun Step 1 immediately, then prove the recipe against real temporary storage.**
 
 Extend `tests/test_setup_skill_e2e.py`, reusing `_materialize` and `_write_config`.
-Extract the uniquely headed Python API recipe from the canonical skill and
-execute it in a fresh namespace so the test exercises the documented code,
-not a duplicate implementation. Use the same bounded fenced-block extraction
-pattern already used for templates.
-
-Add this private test helper and concrete creation/reuse test:
-
-```python
-def _documented_workflow_recipe():
-    from flowgency.setup_assets import copilot_discovery_root
-
-    path = copilot_discovery_root() / ".github/skills/flowgency-setup/SKILL.md"
-    document = path.read_text(encoding="utf-8")
-    heading = "\n### Approved Workflow Materialization Recipe\n"
-    start = document.index(heading) + len(heading)
-    section = document[start:]
-    fence = "```python\n"
-    open_at = section.index(fence) + len(fence)
-    close_at = section.index("\n```", open_at)
-    namespace = {}
-    exec(compile(section[open_at:close_at], str(path), "exec"), namespace)
-    return namespace["materialize_approved_workflow"]
-
-
-def test_documented_recipe_creates_only_selected_blueprint(tmp_path):
-    library_root = tmp_path / "workflow-library"
-    library_root.mkdir()
-    materialize = _documented_workflow_recipe()
-
-    first = materialize(library_root, "software-delivery")
-    assert first.definition.id == "software-delivery"
-    source = first.source_path
-    initial_bytes = source.read_bytes()
-    second = materialize(library_root, "software-delivery")
-
-    assert second.definition.id == "software-delivery"
-    assert source.read_bytes() == initial_bytes
-    assert not (library_root / "research").exists()
-```
+Use `_documented_workflow_recipe` from Step 1 so these tests execute the
+documented code, not a duplicate implementation. Review the skill and reference
+prose directly against the approved ordering, approval, no-overwrite, and
+validation rules; do not add source-text substring assertions.
 
 Create a customized valid existing definition and prove reuse preserves its
 bytes. Replace it with malformed source and prove the recipe raises rather
