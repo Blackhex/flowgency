@@ -12,6 +12,27 @@ import yaml
 from flowgency.setup_assets import copilot_discovery_root
 from flowgency.workflows.library import WorkflowLibrary
 
+
+def test_workflow_reference_validation_rejects_missing_source(workflow_env):
+    from flowgency.workflows.validation import validate_workflow_references
+
+    snapshot = workflow_env.store.load()
+    source = workflow_env.library.source_path("delivery")
+    source.unlink()
+    before_config = snapshot.path.read_bytes()
+
+    issues = validate_workflow_references(snapshot)
+
+    assert {issue.code for issue in issues} == {"missing-blueprint"}
+    assert {issue.scope for issue in issues} == {
+        "teams.newsletter.workflows.board-a",
+        "teams.support.workflows.board-a",
+    }
+    assert all(issue.field == "blueprint" for issue in issues)
+    assert snapshot.path.read_bytes() == before_config
+    assert not source.exists()
+
+
 REPO_ROOT = Path(__file__).parents[1]
 KB = REPO_ROOT / "kb"
 
