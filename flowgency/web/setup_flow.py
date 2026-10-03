@@ -9,6 +9,7 @@ import yaml
 from flowgency.configuration import ConfigStore, ValidationFailed
 from flowgency.integrations import BaseIntegration
 from flowgency.jobs.connected_process import connected_process_available
+from flowgency.workflows.validation import validate_workflow_references
 
 
 SetupState = Literal["waiting", "invalid", "incomplete", "ready"]
@@ -115,7 +116,8 @@ def inspect_setup_status(store: ConfigStore) -> SetupStatus:
         return SetupStatus(state="waiting")
 
     try:
-        config = store.load().config
+        snapshot = store.load()
+        config = snapshot.config
     except FileNotFoundError:
         return SetupStatus(state="waiting")
     except ValidationFailed as exc:
@@ -125,6 +127,15 @@ def inspect_setup_status(store: ConfigStore) -> SetupStatus:
 
     if not config.teams:
         return SetupStatus(state="incomplete")
+
+    issues = validate_workflow_references(snapshot)
+    if issues:
+        first = issues[0]
+        return SetupStatus(
+            state="incomplete",
+            message=f"{first.message} {first.corrective_hint}",
+        )
+
     return SetupStatus(state="ready")
 
 

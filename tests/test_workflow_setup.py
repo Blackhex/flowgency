@@ -12,6 +12,20 @@ import yaml
 
 from flowgency.setup_assets import copilot_discovery_root
 from flowgency.workflows.library import WorkflowLibrary
+from flowgency.web.dependencies import build_services
+
+
+def _semantic_tree_snapshot(root: Path) -> tuple[tuple[str, bytes], ...]:
+    if not root.exists():
+        return ()
+    rows = []
+    for path in sorted(root.rglob("*")):
+        if path.is_dir():
+            continue
+        if path.name == ".lock" or path.suffix == ".lock" or "locks" in path.parts:
+            continue
+        rows.append((path.relative_to(root).as_posix(), path.read_bytes()))
+    return tuple(rows)
 
 
 def test_workflow_reference_validation_rejects_missing_source(workflow_env):
@@ -200,6 +214,87 @@ def test_workflow_reference_validation_rejects_missing_workflow_library(workflow
         "teams.newsletter.workflows.board-a",
         "teams.support.workflows.board-a",
     }
+
+
+def test_setup_status_blocks_missing_definition_without_blocking_dashboard(
+    workflow_web_env,
+):
+    snapshot = workflow_web_env.store.load()
+    source = workflow_web_env.library.source_path("delivery")
+    original = source.read_bytes()
+    config_before = snapshot.path.read_bytes()
+    tickets_before = (
+        _semantic_tree_snapshot(workflow_web_env.root_a),
+        _semantic_tree_snapshot(workflow_web_env.root_b),
+    )
+    source.unlink()
+
+    status = workflow_web_env.client.get("/setup/status").json()
+    assert status["state"] == "incomplete"
+    assert "redirect" not in status
+    assert "Board A" in status["message"]
+    assert workflow_web_env.client.get("/newsletter/").status_code == 200
+
+    repeated = workflow_web_env.client.get("/setup/status").json()
+    assert repeated == status
+
+    inspection = build_services(snapshot.path)
+    assert inspection.startup_error is None
+
+    source.write_bytes(original)
+    ready = workflow_web_env.client.get("/setup/status").json()
+    assert ready["state"] == "ready"
+    assert ready["redirect"] == "/"
+
+    assert snapshot.path.read_bytes() == config_before
+    assert source.read_bytes() == original
+    assert _semantic_tree_snapshot(workflow_web_env.root_a) == tickets_before[0]
+    assert _semantic_tree_snapshot(workflow_web_env.root_b) == tickets_before[1]
+
+
+def test_setup_status_recovers_after_malformed_definition(workflow_web_env):
+    snapshot = workflow_web_env.store.load()
+    source = workflow_web_env.library.source_path("delivery")
+    original = source.read_bytes()
+    config_before = snapshot.path.read_bytes()
+    tickets_before = (
+        _semantic_tree_snapshot(workflow_web_env.root_a),
+        _semantic_tree_snapshot(workflow_web_env.root_b),
+    )
+    source.write_text("states: [", encoding="utf-8")
+
+    status = workflow_web_env.client.get("/setup/status").json()
+    assert status["state"] == "incomplete"
+    assert "redirect" not in status
+    assert "definition is invalid" in status["message"]
+
+    repeated = workflow_web_env.client.get("/setup/status").json()
+    assert repeated == status
+
+    source.write_bytes(original)
+    ready = workflow_web_env.client.get("/setup/status").json()
+    assert ready["state"] == "ready"
+    assert ready["redirect"] == "/"
+
+    assert snapshot.path.read_bytes() == config_before
+    assert source.read_bytes() == original
+    assert _semantic_tree_snapshot(workflow_web_env.root_a) == tickets_before[0]
+    assert _semantic_tree_snapshot(workflow_web_env.root_b) == tickets_before[1]
+
+
+def test_setup_status_accepts_configs_with_no_workflows(workflow_web_env):
+    snapshot = workflow_web_env.store.load()
+    raw = yaml.safe_load(snapshot.path.read_text(encoding="utf-8"))
+    raw["flowgency"].pop("workflow_library", None)
+    for team in raw["teams"].values():
+        team["workflows"] = {}
+    snapshot.path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
+    status = workflow_web_env.client.get("/setup/status").json()
+
+    assert status["state"] == "ready"
+    assert status["redirect"] == "/"
+    assert build_services(snapshot.path).startup_error is None
 
 
 REPO_ROOT = Path(__file__).parents[1]

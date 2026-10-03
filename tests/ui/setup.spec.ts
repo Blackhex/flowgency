@@ -266,6 +266,27 @@ test('connected setup terminal opens the dashboard when setup becomes ready', as
   await assertNoConsoleErrors(page);
 });
 
+test('setup waits for its workflow definition before opening the dashboard', async ({ page, request }) => {
+  await launchConnectedTerminal(page, request);
+
+  const missing = await request.post('/__ui/setup/ready?definition=missing');
+  expect(missing.status()).toBe(204);
+  await expect(page.locator('#status-message')).toContainText('cannot use blueprint');
+  await expect(page).toHaveURL(/\/setup\/session$/);
+  const incomplete = await (await request.get('/setup/status')).json();
+  expect(incomplete.state).toBe('incomplete');
+  expect(incomplete.redirect).toBeUndefined();
+
+  const fixed = await request.post('/__ui/setup/ready?definition=valid');
+  expect(fixed.status()).toBe(204);
+  await expect(page).toHaveURL(/\/newsletter\/$/);
+  const state = await page.evaluate(() =>
+    fetch('/setup/session/state', { cache: 'no-store' }).then((response) => response.json())
+  );
+  expect(state.state).toBe('running');
+  await assertNoConsoleErrors(page);
+});
+
 test('connected setup terminal stop ends the session', async ({ page, request }) => {
   await launchConnectedTerminal(page, request);
 

@@ -307,6 +307,27 @@ def test_validate_accepts_config_with_workflow_instance(cli_config, cli_runner):
     assert "No validation issues found." in result.stdout
 
 
+@pytest.mark.parametrize("as_json", [False, True])
+def test_validate_rejects_missing_workflow_source(cli_config, cli_runner, as_json):
+    snapshot = ConfigStore(cli_config).load()
+    source = Path(snapshot.config.flowgency.workflow_library) / "delivery" / "workflow.yaml"
+    source.unlink()
+    arguments = ["validate"] + (["--json"] if as_json else [])
+
+    result = cli_runner(*arguments, config=cli_config)
+
+    assert result.exit_code == 3
+    if as_json:
+        payload = json.loads(result.stderr)
+        assert payload["code"] == "validation-failed"
+        assert any(issue["code"] == "missing-blueprint" for issue in payload["issues"])
+    else:
+        assert "delivery" in result.stderr
+        assert "cannot use blueprint" in result.stderr
+        assert "Hint:" in result.stderr
+    assert not source.exists()
+
+
 def test_agents_json_uses_friendly_stable_fields_and_policy_parity(cli_config, cli_runner):
     result = cli_runner("agents", "--team", "newsletter", "--json", config=cli_config)
     assert result.exit_code == 0

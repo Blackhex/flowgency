@@ -313,10 +313,13 @@ def _install_ui_test_runtime() -> None:
         return JSONResponse({"data_root": str(runtime_root / "flowgency-data")})
 
     @app.post("/__ui/setup/ready", include_in_schema=False)
-    async def connected_setup_ready() -> Response:
+    async def connected_setup_ready(request: Request) -> Response:
         runtime_root = Path(os.environ["FLOWGENCY_UI_RUNTIME"])
-        raw = yaml.safe_load(FIXTURE_CONFIG.read_text(encoding="utf-8"))
-        config = _replace_runtime(raw, runtime_root)
+        definition_mode = request.query_params.get("definition")
+        if definition_mode not in {None, "missing", "valid"}:
+            raise HTTPException(status_code=400, detail="Unsupported definition mode")
+        config = _connected_setup_ready_config(runtime_root, definition_mode)
+        _prepare_connected_setup_ready(runtime_root, config, definition_mode)
         _write_runtime_config(runtime_root / "config.yaml", config)
         from flowgency.web.dependencies import build_services
 
@@ -417,6 +420,53 @@ def _clear_workflow_roots(runtime: Path, config: dict) -> None:
         if ancestor == tickets or tickets in ancestor.parents
     )
     _clear_directory_keeping(tickets, keep)
+
+
+def _connected_setup_ready_config(runtime: Path, definition_mode: str | None) -> dict:
+    raw = yaml.safe_load(FIXTURE_CONFIG.read_text(encoding="utf-8"))
+    config = _replace_runtime(raw, runtime)
+    if definition_mode is None:
+        return config
+
+    config["teams"]["newsletter"]["workflows"] = {
+        "delivery": {
+            "name": "Delivery",
+            "blueprint": "software-delivery",
+            "integration": "local",
+            "integration_config": {
+                "root": str((runtime / "tickets" / "delivery").resolve())
+            },
+        }
+    }
+    return config
+
+
+def _prepare_connected_setup_ready(runtime: Path, config: dict, definition_mode: str | None) -> None:
+    _clear_directory(runtime / "workflow-library")
+    _clear_workflow_roots(runtime, config)
+    for root in _configured_workflow_roots(config):
+        root.mkdir(parents=True, exist_ok=True)
+
+    workflow_library = runtime / "workflow-library"
+    if definition_mode is None:
+        _seed_workflow_blueprint(workflow_library, "delivery", _delivery_definition())
+        _seed_workflow_blueprint(workflow_library, "research-workflow", _research_definition())
+        return
+    if definition_mode == "missing":
+        return
+    if definition_mode == "valid":
+        from flowgency.setup_assets import workflow_example_root
+        from flowgency.workflows.library import WorkflowLibrary
+
+        packaged = WorkflowLibrary(workflow_example_root())
+        runtime_library = WorkflowLibrary(workflow_library)
+        if not runtime_library.source_path("software-delivery").exists():
+            runtime_library.create_candidate(
+                "software-delivery",
+                packaged.inspect("software-delivery").definition,
+            )
+        return
+    raise ValueError(f"Unsupported definition mode: {definition_mode}")
 
 
 

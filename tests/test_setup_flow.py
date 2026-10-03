@@ -277,6 +277,20 @@ def test_status_is_ready_only_with_a_team(tmp_path: Path, raw_config) -> None:
     assert status.state == "ready"
 
 
+def test_status_waits_for_workflow_definition(workflow_env) -> None:
+    source = workflow_env.library.source_path("delivery")
+    original = source.read_bytes()
+    source.unlink()
+
+    incomplete = inspect_setup_status(workflow_env.store)
+    assert incomplete.state == "incomplete"
+    assert "Board A" in incomplete.message
+    assert not source.exists()
+
+    source.write_bytes(original)
+    assert inspect_setup_status(workflow_env.store).state == "ready"
+
+
 class _Integration(BaseIntegration):
     def __init__(
         self,

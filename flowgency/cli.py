@@ -40,6 +40,7 @@ from flowgency.tickets.cli import register_ticket_commands
 from flowgency.tickets.models import UserTicketContext
 from flowgency.tickets.views import build_board_view
 from flowgency.web.dependencies import FlowgencyServices, build_services
+from flowgency.workflows.validation import validate_workflow_references
 
 
 def _supports_color() -> bool:
@@ -361,6 +362,13 @@ def cmd_validate(args: Namespace) -> int:
                 if key not in seen:
                     seen.add(key)
                     issues.append(issue)
+
+    snapshot = services.config_store.load()
+    for issue in validate_workflow_references(snapshot):
+        key = (issue.code, issue.field, issue.message)
+        if key not in seen:
+            seen.add(key)
+            issues.append(issue)
 
     combined = tuple(issues)
     if combined:
