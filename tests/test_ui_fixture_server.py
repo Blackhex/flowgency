@@ -142,3 +142,59 @@ def test_ui_reset_clears_durable_ticket_run_reservations_before_board_reread(mon
             assert board.status_code == 200
     finally:
         server._safe_remove_runtime(runtime)
+
+
+def test_connected_setup_ready_preserves_existing_workflow_library_and_tickets():
+    runtime, _config_path = server._prepare_runtime()
+    try:
+        server._reset_runtime_state(runtime)
+
+        research_source = runtime / "workflow-library" / "research-workflow" / "workflow.yaml"
+        research_before = research_source.read_bytes()
+
+        custom_selected = runtime / "workflow-library" / "software-delivery" / "workflow.yaml"
+        custom_selected.parent.mkdir(parents=True, exist_ok=True)
+        custom_selected.write_text(
+            yaml.safe_dump(
+                {
+                    **server._delivery_definition(),
+                    "id": "software-delivery",
+                    "name": "Customized software delivery",
+                },
+                sort_keys=False,
+                allow_unicode=True,
+            ),
+            encoding="utf-8",
+        )
+        custom_before = custom_selected.read_bytes()
+
+        seeded_ticket = (
+            runtime
+            / "tickets"
+            / "delivery"
+            / "newsletter"
+            / "delivery"
+            / "tickets"
+            / "preserve-me.md"
+        )
+        seeded_ticket.write_text("keep existing ticket contents\n", encoding="utf-8")
+        ticket_before = seeded_ticket.read_bytes()
+
+        missing_config = server._connected_setup_ready_config(runtime, "missing")
+        server._prepare_connected_setup_ready(runtime, missing_config, "missing")
+
+        assert research_source.read_bytes() == research_before
+        assert not custom_selected.exists()
+        assert seeded_ticket.read_bytes() == ticket_before
+
+        custom_selected.parent.mkdir(parents=True, exist_ok=True)
+        custom_selected.write_bytes(custom_before)
+
+        valid_config = server._connected_setup_ready_config(runtime, "valid")
+        server._prepare_connected_setup_ready(runtime, valid_config, "valid")
+
+        assert research_source.read_bytes() == research_before
+        assert custom_selected.read_bytes() == custom_before
+        assert seeded_ticket.read_bytes() == ticket_before
+    finally:
+        server._safe_remove_runtime(runtime)

@@ -284,17 +284,39 @@ def test_setup_status_recovers_after_malformed_definition(workflow_web_env):
 
 def test_setup_status_accepts_configs_with_no_workflows(workflow_web_env):
     snapshot = workflow_web_env.store.load()
+    workflow_web_env.create("No workflow fixture")
+    support_ticket = (
+        workflow_web_env.root_b
+        / "support"
+        / "board-a"
+        / "tickets"
+        / "seeded-ticket.md"
+    )
+    support_ticket.parent.mkdir(parents=True, exist_ok=True)
+    support_ticket.write_text("support ticket contents\n", encoding="utf-8")
     raw = yaml.safe_load(snapshot.path.read_text(encoding="utf-8"))
     raw["flowgency"].pop("workflow_library", None)
     for team in raw["teams"].values():
         team["workflows"] = {}
     snapshot.path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    config_before = snapshot.path.read_bytes()
+    source_before = workflow_web_env.library.source_path("delivery").read_bytes()
+    tickets_before = (
+        _semantic_tree_snapshot(workflow_web_env.root_a),
+        _semantic_tree_snapshot(workflow_web_env.root_b),
+    )
 
     status = workflow_web_env.client.get("/setup/status").json()
+    repeated = workflow_web_env.client.get("/setup/status").json()
 
     assert status["state"] == "ready"
     assert status["redirect"] == "/"
+    assert repeated == status
     assert build_services(snapshot.path).startup_error is None
+    assert snapshot.path.read_bytes() == config_before
+    assert workflow_web_env.library.source_path("delivery").read_bytes() == source_before
+    assert _semantic_tree_snapshot(workflow_web_env.root_a) == tickets_before[0]
+    assert _semantic_tree_snapshot(workflow_web_env.root_b) == tickets_before[1]
 
 
 REPO_ROOT = Path(__file__).parents[1]

@@ -442,17 +442,19 @@ def _connected_setup_ready_config(runtime: Path, definition_mode: str | None) ->
 
 
 def _prepare_connected_setup_ready(runtime: Path, config: dict, definition_mode: str | None) -> None:
-    _clear_directory(runtime / "workflow-library")
-    _clear_workflow_roots(runtime, config)
     for root in _configured_workflow_roots(config):
         root.mkdir(parents=True, exist_ok=True)
 
     workflow_library = runtime / "workflow-library"
+    selected_source = workflow_library / "software-delivery" / "workflow.yaml"
     if definition_mode is None:
-        _seed_workflow_blueprint(workflow_library, "delivery", _delivery_definition())
-        _seed_workflow_blueprint(workflow_library, "research-workflow", _research_definition())
+        if not (workflow_library / "delivery" / "workflow.yaml").exists():
+            _seed_workflow_blueprint(workflow_library, "delivery", _delivery_definition())
+        if not (workflow_library / "research-workflow" / "workflow.yaml").exists():
+            _seed_workflow_blueprint(workflow_library, "research-workflow", _research_definition())
         return
     if definition_mode == "missing":
+        selected_source.unlink(missing_ok=True)
         return
     if definition_mode == "valid":
         from flowgency.setup_assets import workflow_example_root
@@ -460,7 +462,7 @@ def _prepare_connected_setup_ready(runtime: Path, config: dict, definition_mode:
 
         packaged = WorkflowLibrary(workflow_example_root())
         runtime_library = WorkflowLibrary(workflow_library)
-        if not runtime_library.source_path("software-delivery").exists():
+        if not selected_source.exists():
             runtime_library.create_candidate(
                 "software-delivery",
                 packaged.inspect("software-delivery").definition,
