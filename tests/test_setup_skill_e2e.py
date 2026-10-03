@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import re
 
+import pytest
 import yaml
 
 from flowgency import cli
@@ -29,6 +30,22 @@ SUBSTITUTIONS = {
     "{OPTIONAL_ARGUMENT_SUMMARY}": "Optional review focus",
     "{TASK_INSTRUCTIONS}": "Review the current change set and report findings.",
 }
+
+
+def _documented_workflow_recipe():
+    from flowgency.setup_assets import copilot_discovery_root
+
+    path = copilot_discovery_root() / ".github/skills/flowgency-setup/SKILL.md"
+    document = path.read_text(encoding="utf-8")
+    heading = "\n### Approved Workflow Materialization Recipe\n"
+    start = document.index(heading) + len(heading)
+    section = document[start:]
+    fence = "```python\n"
+    open_at = section.index(fence) + len(fence)
+    close_at = section.index("\n```", open_at)
+    namespace = {}
+    exec(compile(section[open_at:close_at], str(path), "exec"), namespace)
+    return namespace["materialize_approved_workflow"]
 
 
 def _template_block(document: str, heading: str, expected_token: str) -> str:
@@ -79,7 +96,13 @@ def _materialize(tmp_path: Path) -> Path:
     return library_root
 
 
-def _write_config(tmp_path: Path) -> Path:
+def _write_config(
+    tmp_path: Path,
+    *,
+    workflow_library: Path | None = None,
+    workflow_blueprint: str | None = None,
+    ticket_root: Path | None = None,
+) -> Path:
     workspace = tmp_path / "workspace"
     team_root = tmp_path / "teams" / "reviewers"
     workspace.mkdir(parents=True, exist_ok=True)
@@ -118,6 +141,20 @@ def _write_config(tmp_path: Path) -> Path:
             }
         },
     }
+    if workflow_library is not None:
+        raw["flowgency"]["workflow_library"] = str(workflow_library)
+    if workflow_blueprint is not None:
+        assert workflow_library is not None
+        assert ticket_root is not None
+        ticket_root.mkdir(parents=True, exist_ok=True)
+        raw["teams"]["reviewers"]["workflows"] = {
+            "review-delivery": {
+                "name": "Review delivery",
+                "blueprint": workflow_blueprint,
+                "integration": "local",
+                "integration_config": {"root": str(ticket_root)},
+            }
+        }
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     return config_path
@@ -165,6 +202,114 @@ def test_validate_rejects_the_same_library_without_prompt_frontmatter(tmp_path, 
     assert exit_code == 3
     assert "Prompt markdown frontmatter is incomplete" in captured.err
     assert "Terminate the YAML frontmatter before the prompt body." in captured.err
+
+
+def test_documented_recipe_creates_only_selected_blueprint(tmp_path):
+    library_root = tmp_path / "workflow-library"
+    library_root.mkdir()
+    materialize = _documented_workflow_recipe()
+
+    first = materialize(library_root, "software-delivery")
+    assert first.definition.id == "software-delivery"
+    source = first.source_path
+    initial_bytes = source.read_bytes()
+    second = materialize(library_root, "software-delivery")
+
+    assert second.definition.id == "software-delivery"
+    assert source.read_bytes() == initial_bytes
+    assert not (library_root / "research").exists()
+
+
+def test_documented_recipe_reuses_valid_existing_definition_without_overwrite(tmp_path):
+    from flowgency.setup_assets import workflow_example_root
+    from flowgency.workflows.library import WorkflowLibrary
+
+    library_root = tmp_path / "workflow-library"
+    library_root.mkdir()
+    materialize = _documented_workflow_recipe()
+    shipped = WorkflowLibrary(workflow_example_root()).inspect("software-delivery")
+    customized = shipped.definition.model_copy(update={"name": "Customized delivery"})
+    existing = WorkflowLibrary(library_root).create_candidate(
+        "software-delivery", customized
+    )
+    initial_bytes = existing.source_path.read_bytes()
+
+    reused = materialize(library_root, "software-delivery")
+
+    assert reused.definition.id == "software-delivery"
+    assert reused.definition.name == "Customized delivery"
+    assert existing.source_path.read_bytes() == initial_bytes
+
+
+def test_documented_recipe_rejects_malformed_existing_source_without_overwrite(tmp_path):
+    library_root = tmp_path / "workflow-library"
+    source = library_root / "software-delivery" / "workflow.yaml"
+    source.parent.mkdir(parents=True)
+    source.write_text("states: [", encoding="utf-8")
+    initial_bytes = source.read_bytes()
+    materialize = _documented_workflow_recipe()
+
+    with pytest.raises(yaml.YAMLError):
+        materialize(library_root, "software-delivery")
+
+    assert source.read_bytes() == initial_bytes
+
+
+def test_documented_recipe_creates_valid_selected_blueprints_in_separate_libraries(
+    tmp_path,
+):
+    from flowgency.workflows.library import WorkflowLibrary
+
+    delivery_root = tmp_path / "delivery-library"
+    research_root = tmp_path / "research-library"
+    delivery_root.mkdir()
+    research_root.mkdir()
+    materialize = _documented_workflow_recipe()
+
+    materialize(delivery_root, "software-delivery")
+    materialize(research_root, "research")
+
+    assert WorkflowLibrary(delivery_root).inspect("software-delivery").definition.id == (
+        "software-delivery"
+    )
+    assert WorkflowLibrary(research_root).inspect("research").definition.id == "research"
+
+
+def test_documented_recipe_supports_validate_without_mutating_config_or_source(
+    tmp_path, capsys
+):
+    _materialize(tmp_path)
+    library_root = tmp_path / "workflow-library"
+    library_root.mkdir()
+    materialize = _documented_workflow_recipe()
+    created = materialize(library_root, "software-delivery")
+    config_path = _write_config(
+        tmp_path,
+        workflow_library=library_root,
+        workflow_blueprint="software-delivery",
+        ticket_root=tmp_path / "tickets" / "reviewers",
+    )
+    config_before = config_path.read_bytes()
+    source_before = created.source_path.read_bytes()
+
+    exit_code = cli.run(["--config", str(config_path), "validate"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "No validation issues found." in captured.out
+    assert config_path.read_bytes() == config_before
+    assert created.source_path.read_bytes() == source_before
+
+    created.source_path.unlink()
+    missing_config_bytes = config_path.read_bytes()
+
+    exit_code = cli.run(["--config", str(config_path), "validate"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 3
+    assert "cannot use blueprint" in captured.err
+    assert config_path.read_bytes() == missing_config_bytes
+    assert not created.source_path.exists()
 
 
 def test_both_skill_copies_expose_identical_templates():

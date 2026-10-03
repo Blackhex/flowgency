@@ -372,7 +372,36 @@ After the team is approved, ask the user whether to track work as tickets in a w
 
 Propose named workflow instances that match the team's work streams. For each proposed workflow, name a reusable blueprint from the configured `flowgency.workflow_library` or a shipped example, the display name, and ticket storage location. Derive `flowgency.workflow_library` and the ticket storage root (`integration: local`, `root: <data_root>/tickets`) from the already-approved data root; do not introduce additional path questions. Require explicit approval of the proposed workflow names, blueprints, and storage location before writing any instance.
 
-Shipped reusable blueprints — including `software-delivery` and `research` from `references/ticket-workflow-steps.md` — have stable IDs that configured instances may reference. Do not generate IDs for the user to name; generate stable hidden IDs for both custom user blueprint definitions and configured workflow instances from approved display names.
+Shipped reusable blueprints — including `software-delivery` and `research` from the package-owned examples returned by `workflow_example_root()` — have stable IDs that configured instances may reference. `references/ticket-workflow-steps.md` explains their behavior; it does not install source files. Normal dashboard startup and validation do not automatically install shipped examples. Do not generate IDs for the user to name; generate stable hidden IDs for both custom user blueprint definitions and configured workflow instances from approved display names.
+
+After workflow and path approval, materialize each selected definition in the approved canonical workflow library before the single atomic config write.
+Materialize only the selected approved blueprints.
+Do not overwrite an existing workflow definition. Inspect and reuse a valid existing definition, and stop on invalid, unsafe, unreadable, or mismatched source. Existing source is not permission to replace it with a shipped example.
+Locate shipped examples with `workflow_example_root()` and create an absent selected definition with `WorkflowLibrary.create_candidate()`. Custom definitions must match the approved transition design and pass the same domain validation.
+
+### Approved Workflow Materialization Recipe
+
+```python
+from pathlib import Path
+
+from flowgency.setup_assets import workflow_example_root
+from flowgency.workflows.library import WorkflowLibrary
+
+
+def materialize_approved_workflow(
+  library_root: Path, selected_blueprint_id: str
+):
+  destination = WorkflowLibrary(library_root)
+  source = destination.source_path(selected_blueprint_id)
+  if source.exists():
+    existing = destination.inspect(selected_blueprint_id)
+    if existing.definition.id != selected_blueprint_id:
+      raise ValueError("Existing workflow definition identity does not match")
+    return existing
+
+  example = WorkflowLibrary(workflow_example_root()).inspect(selected_blueprint_id)
+  return destination.create_candidate(selected_blueprint_id, example.definition)
+```
 
 When proposing or reviewing a custom workflow blueprint definition, ask what each transition consumes as input, what it produces as durable output, which produced values are required, and whether a transition intentionally produces no results. This applies to every transition in every blueprint; do not assume a transition must always declare an output.
 
@@ -432,7 +461,7 @@ Write every approved workspace under the team's `workspaces` list. For a new tea
 
 ## 5. Verify And Schedule
 
-Validate every blueprint, Agent Skill, and prompt document, plus config cross-reference, registered explicit integration, effective root union, complete tool override, routine prompt selection, channel, workspace, team naming, and storage path. Confirm every prompt document against the Standard Task Prompt contract in `references/templates.md` before writing the config.
+Validate every blueprint, Agent Skill, and prompt document, plus config cross-reference, registered explicit integration, effective root union, complete tool override, routine prompt selection, channel, workspace, team naming, and storage path. Confirm every prompt document against the Standard Task Prompt contract in `references/templates.md` before writing the config. Inspect the approved workflow-library destination first and materialize each selected shipped blueprint source before the config write; do not mutate config or workflow source during the later mechanical validation step.
 
 Re-read the authoritative config revision and stop on drift. Write one complete configuration atomically. Use Flowgency's revision-checked `ConfigStore.replace(expected_revision, complete_candidate)` for that single write; it initializes the approved cache, memory, durable-job, team, record, lock, and log directories. On revision drift, validation failure, or filesystem failure, stop without replacing the previous config and do not automatically remove approved directories or blueprint source. Then parse the final config from disk and confirm it is still the revision just written.
 

@@ -78,6 +78,16 @@ shipped examples such as `software-delivery` and `research`. It derives
 `flowgency.workflow_library` and the ticket storage root from the already-approved
 data root without introducing additional path questions.
 
+After workflow and path approval, setup materializes each selected approved
+blueprint in the approved canonical workflow library before the single atomic
+config write. It materializes only the selected approved blueprints, never
+overwrites an existing definition, reuses a valid existing source with the same
+ID, and stops on invalid, unsafe, unreadable, or mismatched source instead of
+replacing it. Setup locates shipped examples with `workflow_example_root()` and
+creates an absent selected definition with `WorkflowLibrary.create_candidate()`.
+Normal dashboard startup and `flowgency validate` do not automatically install
+shipped examples.
+
 Setup requires explicit approval of proposed workflow names, blueprints, and
 storage location before writing any instance. It generates stable hidden IDs for
 configured workflow instances from approved display names; no user-visible
@@ -153,12 +163,17 @@ Invoke `flowgency-setup` after the first-run page launches it from the selected 
 6. Resolves exactly one canonical config with only the supported root sections (`flowgency`, `memory`, and `teams`) and requires `flowgency.agent_library`, `flowgency.compilation_cache`, `flowgency.memory_store`, `flowgency.prompt_store`, and optionally `flowgency.workflow_library`.
 7. Writes each approved blueprint with global `AGENTS.md` source. Blueprints may contain zero or more standard Agent Skills. For each approved routine capability, writes `.agents/skills/<skill>/SKILL.md`. Do not create a placeholder skill or an empty `.agents/skills` directory for a role without approved routine capabilities.
 8. Registers explicit team-owned instances and every approved team workspace. Every instance pins a blueprint and integration; routines select scoped saved prompts and semantic memory selectors, and approved private prompts are registered for the instance when needed.
-9. Validates team naming, storage paths, integrations, cross-references, and
-   revision safety, performs one atomic config write, reparses from disk, and
-   compares saved routines and dispatch enablement with the approved choices.
-   Missing or mismatched data blocks completion without an unapproved repair
-   write. After validation, offers singleton scheduler installation only when
-   activation was approved and reports observed scheduler status independently.
+9. Inspects the approved workflow-library destination, materializes each
+   selected shipped blueprint source when needed, and then validates team
+   naming, storage paths, integrations, cross-references, and revision safety.
+10. Performs one atomic config write, reparses from disk, compares saved
+    routines and dispatch enablement with the approved choices, and runs the
+    mechanical `flowgency validate` check without mutating config or workflow
+    source. Missing or mismatched data blocks completion without an unapproved
+    repair write.
+11. Offers singleton scheduler installation only when activation was approved,
+    validation succeeded, and the observed scheduler status can be reported
+    independently.
 
 ## Result
 

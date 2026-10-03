@@ -9,6 +9,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import sysconfig
 from zipfile import ZipFile
 
 from fastapi.testclient import TestClient
@@ -250,6 +251,71 @@ def test_wheel_contains_shipped_workflow_examples(tmp_path: Path):
     with ZipFile(wheels[0]) as archive:
         names = set(archive.namelist())
         assert expected_paths <= names
+
+
+def test_wheel_contains_workflow_validation_and_setup_recipe_assets(built_wheel: Path):
+    expected = {
+        "flowgency/workflows/validation.py",
+        "flowgency/setup_assets/copilot/.github/skills/flowgency-setup/SKILL.md",
+        "flowgency/setup_assets/copilot/.github/skills/flowgency-setup/references/ticket-workflow-steps.md",
+        "flowgency/setup_assets/workflows/software-delivery/workflow.yaml",
+        "flowgency/setup_assets/workflows/research/workflow.yaml",
+    }
+
+    with ZipFile(built_wheel) as archive:
+        names = set(archive.namelist())
+        assert expected <= names
+        for name in expected:
+            assert archive.read(name) == (REPO_ROOT / name).read_bytes()
+
+
+def test_documented_workflow_recipe_runs_from_the_wheel_not_the_checkout(
+    built_wheel: Path, tmp_path: Path
+):
+    extracted = tmp_path / "site-packages"
+    with ZipFile(built_wheel) as archive:
+        archive.extractall(extracted)
+
+    deps = [sysconfig.get_paths()["purelib"], sysconfig.get_paths()["platlib"]]
+    destination = tmp_path / "workflow-library"
+    script = (
+        "from pathlib import Path\n"
+        "import sys\n"
+        f"sys.path.insert(0, {str(extracted)!r})\n"
+        f"sys.path.extend({deps!r})\n"
+        "import flowgency\n"
+        f"assert flowgency.__file__.startswith({str(extracted)!r}), flowgency.__file__\n"
+        "from flowgency.setup_assets import copilot_discovery_root\n"
+        "from flowgency.workflows.library import WorkflowLibrary\n"
+        "path = copilot_discovery_root() / '.github/skills/flowgency-setup/SKILL.md'\n"
+        "document = path.read_text(encoding='utf-8')\n"
+        "heading = '\\n### Approved Workflow Materialization Recipe\\n'\n"
+        "start = document.index(heading) + len(heading)\n"
+        "section = document[start:]\n"
+        "fence = '```python\\n'\n"
+        "open_at = section.index(fence) + len(fence)\n"
+        "close_at = section.index('\\n```', open_at)\n"
+        "namespace = {}\n"
+        "exec(compile(section[open_at:close_at], str(path), 'exec'), namespace)\n"
+        "materialize = namespace['materialize_approved_workflow']\n"
+        f"destination = Path({str(destination)!r})\n"
+        "destination.mkdir()\n"
+        "created = materialize(destination, 'software-delivery')\n"
+        "inspection = WorkflowLibrary(destination).inspect('software-delivery')\n"
+        "assert created.definition.id == 'software-delivery'\n"
+        "assert inspection.definition.id == 'software-delivery'\n"
+        "assert created.source_path.is_file()\n"
+        "assert not (destination / 'research').exists()\n"
+        "print('OK')\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-S", "-c", script],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip().endswith("OK")
 
 
 def test_wheel_contains_every_git_evidence_module_and_asset(built_wheel: Path):

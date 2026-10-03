@@ -2,6 +2,8 @@
 
 Use this reference when writing a ticket-oriented Agent Skill in the global Agent Library. The Agent Skill is selected by an instance routine; do not copy this reference into a project prompt directory.
 
+These shipped workflow examples are package-owned reference source, not an automatically installed runtime library. During setup, after workflow and path approval, materialize only the selected approved blueprint into the approved `flowgency.workflow_library` with `workflow_example_root()` and `WorkflowLibrary.create_candidate()`, or inspect and reuse an already-valid existing source with the same ID. Do not overwrite invalid, unreadable, unsafe, or mismatched existing source, and do not assume dashboard startup or `flowgency validate` will install examples for you.
+
 ## Outcome
 
 The routine discovers available tickets, claims one appropriate to its role, advances the ticket through its current workflow transition using live ticket tools, and records findings in semantic memory. Flowgency supplies the configured team workspace, projected blueprint, selected skill, runtime policy, and semantic memory snapshot.
