@@ -46,8 +46,9 @@ def validate_workflow_references(snapshot: ConfigSnapshot) -> tuple[ValidationIs
                             else None
                         )
                     except ContractError as error:
-                        code = getattr(error, "code", None) or str(error)
-                        # Map a few well-known contract codes to safe messages.
+                        code = error.code
+                        if not code:
+                            raise
                         reason = _CONTRACT_DESCRIPTIONS.get(code, "the definition is missing or unsafe")
                         failure = (code, reason)
                     except (yaml.YAMLError, ValueError):
@@ -72,7 +73,7 @@ def validate_workflow_references(snapshot: ConfigSnapshot) -> tuple[ValidationIs
                     scope=f"teams.{team_id}.workflows.{workflow_id}",
                     field="blueprint",
                     message=(
-                        f"Workflow '{getattr(workflow, 'name', blueprint_id)}' ({team_id}/{workflow_id}) "
+                        f"Workflow '{workflow.name}' ({team_id}/{workflow_id}) "
                         f"cannot use blueprint '{blueprint_id}': {reason}."
                     ),
                     corrective_hint=(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+from dataclasses import replace
 import sys
 import sysconfig
 from pathlib import Path
@@ -31,6 +32,174 @@ def test_workflow_reference_validation_rejects_missing_source(workflow_env):
     assert all(issue.field == "blueprint" for issue in issues)
     assert snapshot.path.read_bytes() == before_config
     assert not source.exists()
+
+
+def test_workflow_reference_validation_requires_contract_error_code(
+    workflow_env, monkeypatch
+):
+    from flowgency.workflows.models import ContractError
+    from flowgency.workflows.validation import validate_workflow_references
+
+    def inspect(library, blueprint_id):
+        raise ContractError("", "private-path-and-secret")
+
+    monkeypatch.setattr(WorkflowLibrary, "inspect", inspect)
+
+    with pytest.raises(ContractError) as failure:
+        validate_workflow_references(workflow_env.store.load())
+
+    assert failure.value.message == "private-path-and-secret"
+
+
+@pytest.mark.parametrize(
+    ("source_text", "expected_code"),
+    [
+        ("states: [", "invalid-workflow-definition"),
+        ("schema_version: 1\nid: delivery\n", "invalid-workflow-definition"),
+    ],
+)
+def test_workflow_reference_validation_rejects_invalid_source(
+    workflow_env, source_text, expected_code
+):
+    from flowgency.workflows.validation import validate_workflow_references
+
+    source = workflow_env.library.source_path("delivery")
+    source.write_text(source_text, encoding="utf-8")
+
+    issues = validate_workflow_references(workflow_env.store.load())
+
+    assert {issue.code for issue in issues} == {expected_code}
+
+
+def test_workflow_reference_validation_rejects_identity_mismatch(workflow_env):
+    from flowgency.workflows.validation import validate_workflow_references
+    from tests._ticket_helpers import delivery_definition
+
+    definition = delivery_definition()
+    definition["id"] = "another-delivery"
+    workflow_env.library.source_path("delivery").write_text(
+        yaml.safe_dump(definition, sort_keys=False), encoding="utf-8"
+    )
+
+    issues = validate_workflow_references(workflow_env.store.load())
+
+    assert {issue.code for issue in issues} == {"workflow-identity-mismatch"}
+
+
+def test_workflow_reference_validation_inspects_shared_blueprint_once(
+    workflow_env, monkeypatch
+):
+    from flowgency.workflows.validation import validate_workflow_references
+
+    inspected = []
+    original = WorkflowLibrary.inspect
+
+    def inspect(library, blueprint_id):
+        inspected.append(blueprint_id)
+        return original(library, blueprint_id)
+
+    monkeypatch.setattr(WorkflowLibrary, "inspect", inspect)
+
+    assert validate_workflow_references(workflow_env.store.load()) == ()
+    assert inspected == ["delivery"]
+
+
+def test_workflow_reference_validation_ignores_unused_invalid_source(workflow_env):
+    from flowgency.workflows.validation import validate_workflow_references
+
+    unused = workflow_env.library.root / "unused" / "workflow.yaml"
+    unused.parent.mkdir()
+    unused.write_text("states: [", encoding="utf-8")
+
+    assert validate_workflow_references(workflow_env.store.load()) == ()
+
+
+def test_workflow_reference_validation_accepts_no_workflows(tmp_path, raw_config):
+    from flowgency.configuration import ConfigStore
+    from flowgency.workflows.validation import validate_workflow_references
+
+    store = ConfigStore(tmp_path / "config.yaml")
+    store.create(raw_config)
+
+    assert validate_workflow_references(store.load()) == ()
+
+
+def test_workflow_reference_validation_rejects_oversized_source(workflow_env):
+    from flowgency.workflows.models import MAX_BLUEPRINT_SOURCE_BYTES
+    from flowgency.workflows.validation import validate_workflow_references
+
+    workflow_env.library.source_path("delivery").write_bytes(
+        b"x" * (MAX_BLUEPRINT_SOURCE_BYTES + 1)
+    )
+
+    issues = validate_workflow_references(workflow_env.store.load())
+
+    assert {issue.code for issue in issues} == {"source-too-large"}
+
+
+def test_workflow_reference_validation_sanitizes_read_failure(
+    workflow_env, monkeypatch
+):
+    from flowgency.workflows.validation import validate_workflow_references
+
+    source = workflow_env.library.source_path("delivery")
+    original = Path.read_bytes
+
+    def read_bytes(path):
+        if path == source:
+            raise PermissionError("private-path-and-secret")
+        return original(path)
+
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+
+    issues = validate_workflow_references(workflow_env.store.load())
+
+    assert {issue.code for issue in issues} == {"unreadable-workflow-definition"}
+    assert all("private-path-and-secret" not in issue.message for issue in issues)
+
+
+def test_workflow_reference_validation_rejects_reparse_source(
+    workflow_env, monkeypatch
+):
+    import flowgency.workflows.library as library_module
+    from flowgency.workflows.validation import validate_workflow_references
+
+    source = workflow_env.library.source_path("delivery")
+    original = library_module.is_symlink_or_reparse
+    monkeypatch.setattr(
+        library_module,
+        "is_symlink_or_reparse",
+        lambda path: path == source or original(path),
+    )
+
+    issues = validate_workflow_references(workflow_env.store.load())
+
+    assert {issue.code for issue in issues} == {"unsafe-blueprint"}
+
+
+def test_workflow_reference_validation_rejects_missing_workflow_library(workflow_env):
+    from flowgency.workflows.validation import validate_workflow_references
+
+    snapshot = workflow_env.store.load()
+    raw = yaml.safe_load(snapshot.path.read_text(encoding="utf-8"))
+    raw["flowgency"].pop("workflow_library", None)
+    config = snapshot.config.model_copy(
+        update={
+            "flowgency": snapshot.config.flowgency.model_copy(
+                update={"workflow_library": None}
+            )
+        }
+    )
+
+    issues = validate_workflow_references(
+        replace(snapshot, raw=raw, config=config)
+    )
+
+    assert {issue.code for issue in issues} == {"missing-workflow-library"}
+    assert {issue.scope for issue in issues} == {
+        "teams.newsletter.workflows.board-a",
+        "teams.support.workflows.board-a",
+    }
 
 
 REPO_ROOT = Path(__file__).parents[1]
