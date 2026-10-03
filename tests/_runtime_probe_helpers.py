@@ -21,7 +21,7 @@ from flowgency.integrations.models import (
     IntegrationRunRequest,
     ResolvedPermissionRule,
 )
-from flowgency.tickets.models import TicketVersion
+from flowgency.tickets.models import TicketRef, TicketVersion
 
 
 AI_CLI_COMMANDS = {
@@ -490,21 +490,27 @@ TICKET_TOOL_FOR_OPERATION = {
 }
 
 
+def _observed_ref(value: object) -> dict | None:
+    if not isinstance(value, dict):
+        return None
+    try:
+        ref = TicketRef.model_validate(value)
+    except ValidationError:
+        return None
+    return ref.model_dump(mode="json")
+
+
 def _observed_ticket_id(payload: object) -> str | None:
     if not isinstance(payload, dict):
         return None
-    ref = payload.get("ref")
-    if isinstance(ref, dict):
-        ticket_id = ref.get("ticket_id")
-        if isinstance(ticket_id, str):
-            return ticket_id
+    ref = _observed_ref(payload.get("ref"))
+    if ref is not None:
+        return ref["ticket_id"]
     version = payload.get("version")
     if isinstance(version, dict):
-        ref = version.get("ref")
-        if isinstance(ref, dict):
-            ticket_id = ref.get("ticket_id")
-            if isinstance(ticket_id, str):
-                return ticket_id
+        ref = _observed_ref(version.get("ref"))
+        if ref is not None:
+            return ref["ticket_id"]
     return None
 
 
@@ -540,54 +546,71 @@ def _require_nonempty_operation_id(call: dict) -> None:
     assert isinstance(operation_id, str) and operation_id.strip(), call
 
 
-def _find_probe_event(calls, start, *, tool, ticket_id, ok, error_code=None):
+def _request_ref_for_call(call: dict) -> dict | None:
+    request_ref = _observed_ref(call.get("request_ref"))
+    if request_ref is not None:
+        return request_ref
+    request_version = call.get("request_version")
+    if isinstance(request_version, dict):
+        return _observed_ref(request_version.get("ref"))
+    return None
+
+
+def _find_probe_event(calls, start, *, tool, ref, ok, error_code=None):
+    expected = ref.model_dump(mode="json")
     for index in range(start, len(calls)):
         call = calls[index]
         if (
             call.get("tool") == tool
-            and call.get("ticket_id") == ticket_id
+            and _request_ref_for_call(call) == expected
             and call.get("ok") is ok
             and (error_code is None or call.get("error_code") == error_code)
         ):
             return index, call
     raise AssertionError(
-        f"Missing {tool} outcome for {ticket_id}: ok={ok}, error={error_code}"
+        f"Missing {tool} outcome for scoped ticket: ok={ok}, error={error_code}"
     )
 
 
-def _successful_reads_between(calls, start, end, *, ticket_id):
+def _successful_reads_between(calls, start, end, *, ref):
+    expected = ref.model_dump(mode="json")
     reads = []
     for call in calls[start:end]:
         if (
             call.get("tool") == "ticket_get"
-            and call.get("ticket_id") == ticket_id
+            and _request_ref_for_call(call) == expected
             and call.get("ok") is True
         ):
             version = call.get("response_version")
             assert version, call
-            assert version.get("ref", {}).get("ticket_id") == ticket_id, call
+            assert version.get("ref") == expected, call
             reads.append(call)
     return reads
 
 
-def assert_read_only_ticket_probe(calls, ticket_id):
+def assert_read_only_ticket_probe(calls, ref):
+    expected = ref.model_dump(mode="json")
     assert calls, "No ticket broker calls were observed"
     matching_reads = [
         call
         for call in calls
         if call.get("tool") == "ticket_get"
-        and call.get("ticket_id") == ticket_id
+        and _request_ref_for_call(call) == expected
         and call.get("ok") is True
     ]
-    assert matching_reads, f"Missing successful ticket_get for {ticket_id}: {calls}"
+    assert matching_reads, f"Missing successful ticket_get for scoped ticket: {calls}"
     assert all(call.get("tool") == "ticket_get" for call in calls), calls
-    assert all(call.get("ticket_id") == ticket_id for call in calls), calls
-    assert all(call.get("ok") is True for call in calls), calls
+    assert all(
+        _request_ref_for_call(call) == expected
+        and call.get("response_version", {}).get("ref") == expected
+        and call.get("ok") is True
+        for call in calls
+    ), calls
 
 
-def assert_stale_refresh_sign_off_probe(calls, ticket_a_id, ticket_b_id):
+def assert_stale_refresh_sign_off_probe(calls, ref_a, ref_b):
     start_a_index, started_a = _find_probe_event(
-        calls, 0, tool="ticket_start_work", ticket_id=ticket_a_id, ok=True
+        calls, 0, tool="ticket_start_work", ref=ref_a, ok=True
     )
     _require_nonempty_operation_id(started_a)
 
@@ -595,40 +618,36 @@ def assert_stale_refresh_sign_off_probe(calls, ticket_a_id, ticket_b_id):
         calls,
         start_a_index + 1,
         tool="ticket_transition",
-        ticket_id=ticket_a_id,
+        ref=ref_a,
         ok=False,
         error_code="stale-ticket",
     )
     _require_nonempty_operation_id(stale)
     stale_version = stale.get("request_version")
     assert stale_version, stale
-    assert stale_version.get("ref", {}).get("ticket_id") == ticket_a_id, stale
+    assert stale_version.get("ref") == ref_a.model_dump(mode="json"), stale
 
     retry_index, retry = _find_probe_event(
-        calls, stale_index + 1, tool="ticket_transition", ticket_id=ticket_a_id, ok=True
+        calls, stale_index + 1, tool="ticket_transition", ref=ref_a, ok=True
     )
-    fresh_reads = _successful_reads_between(
-        calls, stale_index + 1, retry_index, ticket_id=ticket_a_id
-    )
+    fresh_reads = _successful_reads_between(calls, stale_index + 1, retry_index, ref=ref_a)
     assert fresh_reads, "Successful fresh read is required before completion retry"
     fresh = fresh_reads[-1]
     fresh_version = fresh["response_version"]
-    assert fresh_version.get("ref") == stale_version.get("ref"), (stale, fresh)
+    assert fresh_version.get("ref") == ref_a.model_dump(mode="json"), fresh
     assert fresh_version != stale_version, (stale, fresh)
     assert retry.get("request_version") == fresh_version, (fresh, retry)
     _require_nonempty_operation_id(retry)
 
     start_b_index, started_b = _find_probe_event(
-        calls, 0, tool="ticket_start_work", ticket_id=ticket_b_id, ok=True
+        calls, 0, tool="ticket_start_work", ref=ref_b, ok=True
     )
     _require_nonempty_operation_id(started_b)
 
     signoff_index, signed_off = _find_probe_event(
-        calls, start_b_index + 1, tool="ticket_sign_off", ticket_id=ticket_b_id, ok=True
+        calls, start_b_index + 1, tool="ticket_sign_off", ref=ref_b, ok=True
     )
-    current_reads = _successful_reads_between(
-        calls, start_b_index + 1, signoff_index, ticket_id=ticket_b_id
-    )
+    current_reads = _successful_reads_between(calls, start_b_index + 1, signoff_index, ref=ref_b)
     assert current_reads, "Successful current read is required before sign-off"
     current = current_reads[-1]
     assert signed_off.get("request_version") == current["response_version"], (current, signed_off)
@@ -698,6 +717,7 @@ def record_ticket_tool_calls(*, before_dispatch=None, after_dispatch=None):
                         "error_code": error_code,
                         "error_message": error_message,
                         "operation_id": payload.get("operation_id") if isinstance(payload, dict) else None,
+                        "request_ref": _observed_ref(payload.get("ref")) if isinstance(payload, dict) else None,
                         "request_version": _observed_version(payload.get("version")) if isinstance(payload, dict) else None,
                         "ticket_id": _observed_ticket_id(payload),
                     }
@@ -719,6 +739,7 @@ def record_ticket_tool_calls(*, before_dispatch=None, after_dispatch=None):
                     "error_code": error.get("code") if isinstance(error, dict) else None,
                     "error_message": error.get("message") if isinstance(error, dict) else None,
                     "operation_id": payload.get("operation_id") if isinstance(payload, dict) else None,
+                    "request_ref": _observed_ref(payload.get("ref")) if isinstance(payload, dict) else None,
                     "request_version": _observed_version(payload.get("version")) if isinstance(payload, dict) else None,
                     "response_version": _observed_response_version(result),
                     "ticket_id": _observed_ticket_id(payload),

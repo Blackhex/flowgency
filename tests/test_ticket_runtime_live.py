@@ -40,6 +40,7 @@ from pathlib import Path
 import pytest
 
 from flowgency.integrations import REGISTRY
+from flowgency.tickets.models import TicketRef
 from flowgency.workflows.models import ArtifactRef
 from tests._runtime_probe_helpers import (
     AI_CLI_COMMANDS,
@@ -124,6 +125,7 @@ def test_record_ticket_tool_calls_observes_live_dispatch(workflow_env):
     assert ticket_get_calls, calls
     assert start_work_calls, calls
     assert all(call["ok"] for call in ticket_get_calls)
+    assert ticket_get_calls[-1]["request_ref"] == ref.model_dump(mode="json")
     assert ticket_get_calls[-1]["response_version"] == version
     assert start_work_calls[-1]["request_version"] == version
     assert "token" not in ticket_get_calls[-1]
@@ -164,7 +166,13 @@ def _semantic_probe_calls():
         "context_digest": "context-b",
     }
     return [
-        {"tool": "ticket_get", "ticket_id": "ticket-a", "ok": True, "response_version": version_old},
+        {
+            "tool": "ticket_get",
+            "ticket_id": "ticket-a",
+            "ok": True,
+            "request_ref": ref_a,
+            "response_version": version_old,
+        },
         {
             "tool": "ticket_start_work",
             "ticket_id": "ticket-a",
@@ -180,7 +188,13 @@ def _semantic_probe_calls():
             "operation_id": "attempt-first",
             "request_version": version_old,
         },
-        {"tool": "ticket_get", "ticket_id": "ticket-a", "ok": True, "response_version": version_new},
+        {
+            "tool": "ticket_get",
+            "ticket_id": "ticket-a",
+            "ok": True,
+            "request_ref": ref_a,
+            "response_version": version_new,
+        },
         {
             "tool": "ticket_transition",
             "ticket_id": "ticket-a",
@@ -193,8 +207,15 @@ def _semantic_probe_calls():
             "ticket_id": "ticket-b",
             "ok": True,
             "operation_id": "begin-follow-up",
+            "request_version": version_b,
         },
-        {"tool": "ticket_get", "ticket_id": "ticket-b", "ok": True, "response_version": version_b},
+        {
+            "tool": "ticket_get",
+            "ticket_id": "ticket-b",
+            "ok": True,
+            "request_ref": ref_b,
+            "response_version": version_b,
+        },
         {
             "tool": "ticket_sign_off",
             "ticket_id": "ticket-b",
@@ -208,11 +229,62 @@ def _semantic_probe_calls():
 def test_read_only_ticket_probe_requires_only_successful_reads_on_the_selected_ticket():
     from tests._runtime_probe_helpers import assert_read_only_ticket_probe
 
+    ref = TicketRef.model_validate(
+        {
+            "binding_id": "binding-a",
+            "team_id": "team-a",
+            "workflow_id": "board-a",
+            "ticket_id": "ticket-a",
+        }
+    )
     calls = [
         {
             "tool": "ticket_get",
             "ticket_id": "ticket-a",
             "ok": True,
+            "request_ref": ref.model_dump(mode="json"),
+            "response_version": {
+                "ref": ref.model_dump(mode="json"),
+                "revision": 1,
+                "workflow_digest": "definition-a",
+                "context_digest": "context-a",
+            },
+        }
+    ]
+
+    assert_read_only_ticket_probe(calls, ref)
+
+
+@pytest.mark.parametrize(
+    ("field", "wrong_value"),
+    [
+        ("binding_id", "binding-z"),
+        ("team_id", "team-z"),
+        ("workflow_id", "board-z"),
+    ],
+)
+def test_read_only_ticket_probe_rejects_same_ticket_id_under_wrong_scope(field, wrong_value):
+    from tests._runtime_probe_helpers import assert_read_only_ticket_probe
+
+    ref = TicketRef.model_validate(
+        {
+            "binding_id": "binding-a",
+            "team_id": "team-a",
+            "workflow_id": "board-a",
+            "ticket_id": "ticket-a",
+        }
+    )
+    calls = [
+        {
+            "tool": "ticket_get",
+            "ticket_id": "ticket-a",
+            "ok": True,
+            "request_ref": {
+                "binding_id": "binding-a",
+                "team_id": "team-a",
+                "workflow_id": "board-a",
+                "ticket_id": "ticket-a",
+            },
             "response_version": {
                 "ref": {
                     "binding_id": "binding-a",
@@ -226,8 +298,70 @@ def test_read_only_ticket_probe_requires_only_successful_reads_on_the_selected_t
             },
         }
     ]
+    wrong_scope_calls = [
+        {
+            **calls[0],
+            "request_ref": {**calls[0]["request_ref"], field: wrong_value},
+            "response_version": {
+                **calls[0]["response_version"],
+                "ref": {**calls[0]["response_version"]["ref"], field: wrong_value},
+            },
+        }
+    ]
 
-    assert_read_only_ticket_probe(calls, "ticket-a")
+    with pytest.raises(AssertionError):
+        assert_read_only_ticket_probe(wrong_scope_calls, ref)
+
+
+@pytest.mark.parametrize(
+    ("field", "wrong_value"),
+    [
+        ("binding_id", "binding-z"),
+        ("team_id", "team-z"),
+        ("workflow_id", "board-z"),
+    ],
+)
+def test_semantic_ticket_probe_rejects_same_ticket_id_under_wrong_scope(field, wrong_value):
+    from tests._runtime_probe_helpers import assert_stale_refresh_sign_off_probe
+
+    ref_a = TicketRef.model_validate(
+        {
+            "binding_id": "binding-a",
+            "team_id": "team-a",
+            "workflow_id": "board-a",
+            "ticket_id": "ticket-a",
+        }
+    )
+    ref_b = TicketRef.model_validate(
+        {
+            "binding_id": "binding-b",
+            "team_id": "team-a",
+            "workflow_id": "board-b",
+            "ticket_id": "ticket-b",
+        }
+    )
+    calls = []
+    for call in deepcopy(_semantic_probe_calls()):
+        mutated = {**call}
+        request_version = mutated.get("request_version")
+        if isinstance(request_version, dict) and request_version.get("ref", {}).get("ticket_id") == ref_a.ticket_id:
+            mutated["request_version"] = {
+                **request_version,
+                "ref": {**request_version["ref"], field: wrong_value},
+            }
+        response_version = mutated.get("response_version")
+        if isinstance(response_version, dict) and response_version.get("ref", {}).get("ticket_id") == ref_a.ticket_id:
+            mutated["response_version"] = {
+                **response_version,
+                "ref": {**response_version["ref"], field: wrong_value},
+            }
+        request_ref = mutated.get("request_ref")
+        if isinstance(request_ref, dict) and request_ref.get("ticket_id") == ref_a.ticket_id:
+            mutated["request_ref"] = {**request_ref, field: wrong_value}
+        calls.append(mutated)
+
+    with pytest.raises(AssertionError):
+        assert_stale_refresh_sign_off_probe(calls, ref_a, ref_b)
 
 
 @pytest.mark.parametrize(
@@ -236,16 +370,26 @@ def test_read_only_ticket_probe_requires_only_successful_reads_on_the_selected_t
         (lambda calls: [], "No ticket broker calls were observed"),
         (
             lambda calls: [
-                {**call, "ticket_id": "ticket-z"} if call.get("tool") == "ticket_get" else call
+                {
+                    **call,
+                    "ticket_id": "ticket-z",
+                    "request_ref": {**call["request_ref"], "ticket_id": "ticket-z"},
+                    "response_version": {
+                        **call["response_version"],
+                        "ref": {**call["response_version"]["ref"], "ticket_id": "ticket-z"},
+                    },
+                }
+                if call.get("tool") == "ticket_get"
+                else call
                 for call in calls
             ],
-            "Missing successful ticket_get for ticket-a",
+            "Missing successful ticket_get for scoped ticket",
         ),
         (
             lambda calls: [
                 call for call in calls if not (call.get("tool") == "ticket_transition" and call.get("ok") is False)
             ],
-            "Missing ticket_transition outcome for ticket-a: ok=False, error=stale-ticket",
+            "Missing ticket_transition outcome for scoped ticket: ok=False, error=stale-ticket",
         ),
         (
             lambda calls: [
@@ -264,17 +408,25 @@ def test_read_only_ticket_probe_requires_only_successful_reads_on_the_selected_t
             lambda calls: [
                 call for call in calls if not (call.get("tool") == "ticket_start_work" and call.get("ticket_id") == "ticket-b")
             ],
-            "Missing ticket_start_work outcome for ticket-b: ok=True, error=None",
+            "Missing ticket_start_work outcome for scoped ticket: ok=True, error=None",
         ),
         (
             lambda calls: [
                 call for call in calls if not (call.get("tool") == "ticket_sign_off" and call.get("ticket_id") == "ticket-b" and call.get("ok") is True)
             ],
-            "Missing ticket_sign_off outcome for ticket-b: ok=True, error=None",
+            "Missing ticket_sign_off outcome for scoped ticket: ok=True, error=None",
         ),
         (
             lambda calls: [
-                {**call, "request_version": deepcopy(calls[3]["response_version"])} if call.get("tool") == "ticket_sign_off" and call.get("ok") is True else call
+                {
+                    **call,
+                    "request_version": {
+                        **deepcopy(calls[6]["response_version"]),
+                        "revision": deepcopy(calls[6]["response_version"])["revision"] + 1,
+                    },
+                }
+                if call.get("tool") == "ticket_sign_off" and call.get("ok") is True
+                else call
                 for call in calls
             ],
             "recovered-sign-off",
@@ -288,22 +440,230 @@ def test_semantic_ticket_probe_rejects_missing_required_causality(mutate, messag
     )
 
     calls = mutate(deepcopy(_semantic_probe_calls()))
+    ref_a = TicketRef.model_validate(
+        {
+            "binding_id": "binding-a",
+            "team_id": "team-a",
+            "workflow_id": "board-a",
+            "ticket_id": "ticket-a",
+        }
+    )
+    ref_b = TicketRef.model_validate(
+        {
+            "binding_id": "binding-b",
+            "team_id": "team-a",
+            "workflow_id": "board-b",
+            "ticket_id": "ticket-b",
+        }
+    )
 
     if message.startswith("Missing successful ticket_get") or message == "No ticket broker calls were observed":
         with pytest.raises(AssertionError, match=message):
-            assert_read_only_ticket_probe(calls, "ticket-a")
+            assert_read_only_ticket_probe(calls, ref_a)
         return
 
     with pytest.raises(AssertionError, match=message):
-        assert_stale_refresh_sign_off_probe(calls, "ticket-a", "ticket-b")
+        assert_stale_refresh_sign_off_probe(calls, ref_a, ref_b)
 
 
 def test_semantic_ticket_probe_accepts_fresh_recovery_operation_names():
     from tests._runtime_probe_helpers import assert_stale_refresh_sign_off_probe
 
+    ref_a = TicketRef.model_validate(
+        {
+            "binding_id": "binding-a",
+            "team_id": "team-a",
+            "workflow_id": "board-a",
+            "ticket_id": "ticket-a",
+        }
+    )
+    ref_b = TicketRef.model_validate(
+        {
+            "binding_id": "binding-b",
+            "team_id": "team-a",
+            "workflow_id": "board-b",
+            "ticket_id": "ticket-b",
+        }
+    )
     calls = _semantic_probe_calls()
 
-    assert_stale_refresh_sign_off_probe(calls, "ticket-a", "ticket-b")
+    assert_stale_refresh_sign_off_probe(calls, ref_a, ref_b)
+
+
+@pytest.mark.parametrize(
+    ("field", "remover"),
+    [
+        ("binding_id", lambda ref: {key: value for key, value in ref.items() if key != "binding_id"}),
+        ("team_id", lambda ref: {key: value for key, value in ref.items() if key != "team_id"}),
+        ("workflow_id", lambda ref: {key: value for key, value in ref.items() if key != "workflow_id"}),
+    ],
+)
+def test_read_only_ticket_probe_fails_closed_on_missing_scope(field, remover):
+    from tests._runtime_probe_helpers import assert_read_only_ticket_probe
+
+    ref = TicketRef.model_validate(
+        {
+            "binding_id": "binding-a",
+            "team_id": "team-a",
+            "workflow_id": "board-a",
+            "ticket_id": "ticket-a",
+        }
+    )
+    calls = [
+        {
+            "tool": "ticket_get",
+            "ticket_id": "ticket-a",
+            "ok": True,
+            "request_ref": remover(ref.model_dump(mode="json")),
+            "response_version": {
+                "ref": remover(ref.model_dump(mode="json")),
+                "revision": 1,
+                "workflow_digest": "definition-a",
+                "context_digest": "context-a",
+            },
+        }
+    ]
+
+    with pytest.raises(AssertionError):
+        assert_read_only_ticket_probe(calls, ref)
+
+
+@pytest.mark.parametrize(
+    ("field", "bad_value"),
+    [
+        ("binding_id", 42),
+        ("team_id", ["team-a"]),
+        ("workflow_id", {"id": "board-a"}),
+    ],
+)
+def test_read_only_ticket_probe_fails_closed_on_malformed_scope(field, bad_value):
+    from tests._runtime_probe_helpers import assert_read_only_ticket_probe
+
+    ref = TicketRef.model_validate(
+        {
+            "binding_id": "binding-a",
+            "team_id": "team-a",
+            "workflow_id": "board-a",
+            "ticket_id": "ticket-a",
+        }
+    )
+    mutated_ref = ref.model_dump(mode="json")
+    mutated_ref[field] = bad_value
+    calls = [
+        {
+            "tool": "ticket_get",
+            "ticket_id": "ticket-a",
+            "ok": True,
+            "request_ref": mutated_ref,
+            "response_version": {
+                "ref": mutated_ref,
+                "revision": 1,
+                "workflow_digest": "definition-a",
+                "context_digest": "context-a",
+            },
+        }
+    ]
+
+    with pytest.raises(AssertionError):
+        assert_read_only_ticket_probe(calls, ref)
+
+
+@pytest.mark.parametrize(
+    ("field", "remover"),
+    [
+        ("binding_id", lambda ref: {key: value for key, value in ref.items() if key != "binding_id"}),
+        ("team_id", lambda ref: {key: value for key, value in ref.items() if key != "team_id"}),
+        ("workflow_id", lambda ref: {key: value for key, value in ref.items() if key != "workflow_id"}),
+    ],
+)
+def test_semantic_ticket_probe_fails_closed_on_missing_scope(field, remover):
+    from tests._runtime_probe_helpers import assert_stale_refresh_sign_off_probe
+
+    ref_a = TicketRef.model_validate(
+        {
+            "binding_id": "binding-a",
+            "team_id": "team-a",
+            "workflow_id": "board-a",
+            "ticket_id": "ticket-a",
+        }
+    )
+    ref_b = TicketRef.model_validate(
+        {
+            "binding_id": "binding-b",
+            "team_id": "team-a",
+            "workflow_id": "board-b",
+            "ticket_id": "ticket-b",
+        }
+    )
+    calls = []
+    for call in deepcopy(_semantic_probe_calls()):
+        mutated = {**call}
+        request_version = mutated.get("request_version")
+        if isinstance(request_version, dict) and request_version.get("ref", {}).get("ticket_id") == ref_a.ticket_id:
+            mutated["request_version"] = {
+                **request_version,
+                "ref": remover(request_version["ref"]),
+            }
+        response_version = mutated.get("response_version")
+        if isinstance(response_version, dict) and response_version.get("ref", {}).get("ticket_id") == ref_a.ticket_id:
+            mutated["response_version"] = {
+                **response_version,
+                "ref": remover(response_version["ref"]),
+            }
+        request_ref = mutated.get("request_ref")
+        if isinstance(request_ref, dict) and request_ref.get("ticket_id") == ref_a.ticket_id:
+            mutated["request_ref"] = remover(request_ref)
+        calls.append(mutated)
+
+    with pytest.raises(AssertionError):
+        assert_stale_refresh_sign_off_probe(calls, ref_a, ref_b)
+
+
+@pytest.mark.parametrize(
+    ("field", "bad_value"),
+    [
+        ("binding_id", 42),
+        ("team_id", ["team-a"]),
+        ("workflow_id", {"id": "board-a"}),
+    ],
+)
+def test_semantic_ticket_probe_fails_closed_on_malformed_scope(field, bad_value):
+    from tests._runtime_probe_helpers import assert_stale_refresh_sign_off_probe
+
+    ref_a = TicketRef.model_validate(
+        {
+            "binding_id": "binding-a",
+            "team_id": "team-a",
+            "workflow_id": "board-a",
+            "ticket_id": "ticket-a",
+        }
+    )
+    ref_b = TicketRef.model_validate(
+        {
+            "binding_id": "binding-b",
+            "team_id": "team-a",
+            "workflow_id": "board-b",
+            "ticket_id": "ticket-b",
+        }
+    )
+    calls = []
+    for call in deepcopy(_semantic_probe_calls()):
+        mutated = {**call}
+        request_version = mutated.get("request_version")
+        if isinstance(request_version, dict) and request_version.get("ref", {}).get("ticket_id") == ref_a.ticket_id:
+            mutated_ref = {**request_version["ref"], field: bad_value}
+            mutated["request_version"] = {**request_version, "ref": mutated_ref}
+        response_version = mutated.get("response_version")
+        if isinstance(response_version, dict) and response_version.get("ref", {}).get("ticket_id") == ref_a.ticket_id:
+            mutated_ref = {**response_version["ref"], field: bad_value}
+            mutated["response_version"] = {**response_version, "ref": mutated_ref}
+        request_ref = mutated.get("request_ref")
+        if isinstance(request_ref, dict) and request_ref.get("ticket_id") == ref_a.ticket_id:
+            mutated["request_ref"] = {**request_ref, field: bad_value}
+        calls.append(mutated)
+
+    with pytest.raises(AssertionError):
+        assert_stale_refresh_sign_off_probe(calls, ref_a, ref_b)
 
 
 def _denied_write_start_event(call_id: str, target: str) -> dict:
@@ -1247,7 +1607,7 @@ else:
             f"{runtime.name}: non-zero exit {record.exit_code!r}; "
             f"summary={job.execution_summary!r}; {diagnostics.describe()}"
         )
-        assert_read_only_ticket_probe(calls, ref.ticket_id)
+        assert_read_only_ticket_probe(calls, ref)
         # No plugin- or personal-config MCP server leaked in: only the disabled
         # built-in and the trusted ticket channel this run actually needed.
         assert_mcp_server_inventory(
@@ -1361,7 +1721,7 @@ else:
             f"stderr_path={job.stderr_path!r}; stdout_path={job.stdout_path!r}"
         )
         assert injected["stale"], f"{runtime.name}: stale transition was never forced"
-        assert_stale_refresh_sign_off_probe(calls, ref_a.ticket_id, ref_b.ticket_id)
+        assert_stale_refresh_sign_off_probe(calls, ref_a, ref_b)
 
         final_a = env.read(ref_a).record
         assert final_a.state_id == "done"
