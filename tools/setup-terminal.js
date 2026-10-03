@@ -14,14 +14,33 @@ const STATE_LABELS = {
 const MAX_RETRIES = 6;
 const MAX_RETRY_DELAY_MS = 8000;
 const POLICY_CLOSE_CODE = 1008;
+const PREFERRED_TERMINAL_FONT = '"JetBrains Mono", monospace';
+const FALLBACK_TERMINAL_FONT = 'monospace';
+const TERMINAL_FONT_WAIT_MS = 2000;
 
-(() => {
+(async () => {
   const container = document.querySelector('#setup-terminal');
   const connectionStatus = document.querySelector('#terminal-connection');
   const relaunchForm = document.querySelector('#terminal-relaunch');
 
+  const terminalFontReady = typeof document.fonts?.load === 'function'
+    ? Promise.all([
+      document.fonts.load('400 13px "JetBrains Mono"'),
+      document.fonts.load('500 13px "JetBrains Mono"'),
+    ]).then((faces) => faces.every((group) => group.length > 0), () => false)
+    : Promise.resolve(false);
+
+  let fontWaitTimer = null;
+  const initialFontReady = await Promise.race([
+    terminalFontReady,
+    new Promise((resolve) => {
+      fontWaitTimer = window.setTimeout(() => resolve(false), TERMINAL_FONT_WAIT_MS);
+    }),
+  ]);
+  window.clearTimeout(fontWaitTimer);
+
   const terminal = new Terminal({
-    fontFamily: 'JetBrains Mono',
+    fontFamily: initialFontReady ? PREFERRED_TERMINAL_FONT : FALLBACK_TERMINAL_FONT,
     fontSize: 13,
     convertEol: true,
     // Without an explicit linkHandler, xterm's default OSC 8 activation
@@ -43,7 +62,6 @@ const POLICY_CLOSE_CODE = 1008;
       // fit here is not actionable and never worth surfacing to the user.
     }
   };
-  document.fonts.ready.then(fitAndResize);
   new ResizeObserver(fitAndResize).observe(container);
   window.addEventListener('resize', fitAndResize);
 
@@ -157,4 +175,10 @@ const POLICY_CLOSE_CODE = 1008;
 
   fitAndResize();
   connect();
+
+  terminalFontReady.then((loaded) => {
+    if (!loaded || initialFontReady || !container.isConnected) return;
+    terminal.options.fontFamily = PREFERRED_TERMINAL_FONT;
+    fitAndResize();
+  });
 })();

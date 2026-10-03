@@ -4,7 +4,9 @@ import path from 'node:path';
 
 import { assertNoConsoleErrors, assertNoTailwindCdnRequests, installBasePageSetup } from './layout';
 
-const evidenceRoot = path.resolve('.superpowers', 'sdd', '2026-09-23-connected-copilot-setup-terminal', 'evidence');
+const evidenceRoot = path.resolve('.superpowers', 'sdd', '2026-10-03-setup-terminal-font-metrics', 'evidence');
+const WIDE_MARKER = 'WWWWWWWW';
+const NARROW_MARKER = 'iiiiiiii';
 
 async function resetUiRuntime(request: APIRequestContext, fixture = 'default'): Promise<void> {
   const response = await request.post('/__ui/reset', { data: { fixture } });
@@ -19,7 +21,7 @@ async function connectedSetupDataRoot(request: APIRequestContext): Promise<strin
 async function launchConnectedTerminal(page: Page, request: APIRequestContext): Promise<void> {
   await resetUiRuntime(request, 'connected-setup');
   const dataRoot = await connectedSetupDataRoot(request);
-  await page.goto('/setup');
+  await page.goto('/setup', { waitUntil: 'domcontentloaded' });
   await page.getByLabel('Flowgency data root', { exact: true }).fill(dataRoot);
   await page.getByRole('button', { name: 'Continue in GitHub Copilot' }).click();
   await expect(page).toHaveURL(/\/setup\/session$/);
@@ -29,6 +31,73 @@ async function launchConnectedTerminal(page: Page, request: APIRequestContext): 
 async function captureEvidence(page: Page, name: string): Promise<void> {
   await mkdir(evidenceRoot, { recursive: true });
   await page.screenshot({ path: path.join(evidenceRoot, name), fullPage: true });
+}
+
+async function emitTerminalText(request: APIRequestContext, text: string): Promise<void> {
+  const response = await request.post('/__ui/setup/session/emit', { data: { text } });
+  expect(response.status()).toBe(204);
+}
+
+async function emitTerminalMetricMarkers(page: Page, request: APIRequestContext): Promise<void> {
+  await emitTerminalText(request, `${WIDE_MARKER}\r\n${NARROW_MARKER}\r\n`);
+  await expect(page.locator('#setup-terminal').getByText(WIDE_MARKER, { exact: true })).toBeVisible();
+  await expect(page.locator('#setup-terminal').getByText(NARROW_MARKER, { exact: true })).toBeVisible();
+}
+
+async function terminalMarkerMetrics(page: Page, marker: string, fontFamily: string): Promise<false | {
+  actualCellWidth: number;
+  expectedCellWidth: number;
+  renderedTextWidth: number;
+  screenWidth: number;
+}> {
+  return page.evaluate(({ font, text }) => {
+    const context = document.createElement('canvas').getContext('2d');
+    if (!context) return false;
+    context.font = `13px ${font}`;
+    const screen = document.querySelector<HTMLElement>('#setup-terminal .xterm-screen');
+    const target = [...document.querySelectorAll<HTMLElement>('.xterm-rows span')]
+      .find((span) => span.textContent === text);
+    if (!screen || !target) return false;
+    const renderedTextWidth = target.getBoundingClientRect().width;
+    return {
+      actualCellWidth: renderedTextWidth / text.length,
+      expectedCellWidth: context.measureText('W').width,
+      renderedTextWidth,
+      screenWidth: screen.getBoundingClientRect().width,
+    };
+  }, { font: fontFamily, text: marker });
+}
+
+async function assertTerminalMetrics(page: Page, request: APIRequestContext, expectedFontFamily: string): Promise<[number, number]> {
+  await expect.poll(async () => {
+    const wide = await terminalMarkerMetrics(page, WIDE_MARKER, expectedFontFamily);
+    const narrow = await terminalMarkerMetrics(page, NARROW_MARKER, expectedFontFamily);
+    if (!wide || !narrow) return false;
+    const writes = await (await request.get('/__ui/setup/session/writes')).json();
+    const latestSize = writes.sizes[writes.sizes.length - 1];
+    if (!latestSize) return false;
+    const cols = latestSize[1];
+    const cellWidth = (wide.actualCellWidth + narrow.actualCellWidth) / 2;
+    return Math.abs(wide.actualCellWidth - wide.expectedCellWidth) < 1
+      && Math.abs(narrow.actualCellWidth - narrow.expectedCellWidth) < 1
+      && Math.abs(wide.actualCellWidth - narrow.actualCellWidth) < 1
+      && Math.abs(cols - wide.screenWidth / cellWidth) < 1;
+  }).toBe(true);
+  const writes = await (await request.get('/__ui/setup/session/writes')).json();
+  return writes.sizes[writes.sizes.length - 1];
+}
+
+async function assertTerminalInputAndState(page: Page, request: APIRequestContext, text: string): Promise<void> {
+  await page.locator('#setup-terminal').click();
+  await page.keyboard.type(text);
+  await expect
+    .poll(async () => {
+      const writes = await (await request.get('/__ui/setup/session/writes')).json();
+      return writes.writes.join('');
+    })
+    .toContain(text);
+  const state = await page.evaluate(() => fetch('/setup/session/state', { cache: 'no-store' }).then((response) => response.json()));
+  expect(state.state).toBe('running');
 }
 
 test.afterEach(async ({ request }) => {
@@ -93,6 +162,111 @@ test('connected setup terminal forwards keyboard input as the owning browser', a
     })
     .toContain('echo hi');
 
+  await assertNoConsoleErrors(page);
+});
+
+test('setup terminal uses preferred font metrics when the terminal font is ready during startup', async ({ page, request }) => {
+  await launchConnectedTerminal(page, request);
+  await expect(page.locator('#terminal-connection')).toHaveText('Connected');
+  await emitTerminalMetricMarkers(page, request);
+  const [rows, cols] = await assertTerminalMetrics(page, request, '"JetBrains Mono"');
+  expect(rows).toBeGreaterThanOrEqual(2);
+  expect(cols).toBeGreaterThanOrEqual(20);
+  await assertTerminalInputAndState(page, request, 'font-ready');
+  await assertNoConsoleErrors(page);
+});
+
+test('late terminal font loading restores monospace metrics without resetting the session', async ({ page, request }) => {
+  let releaseFont!: () => void;
+  const heldFont = new Promise<void>((resolve) => {
+    releaseFont = resolve;
+  });
+  await page.route('https://fonts.gstatic.com/test/jetbrains-mono/normal.woff2', async (route) => {
+    await heldFont;
+    await route.fallback();
+  });
+
+  try {
+    await launchConnectedTerminal(page, request);
+    await expect(page.locator('#terminal-connection')).toHaveText('Connected');
+    await emitTerminalMetricMarkers(page, request);
+    const initial = await (await request.get('/__ui/setup/session/writes')).json();
+    const [initialRows, initialCols] = await assertTerminalMetrics(page, request, 'monospace');
+    expect(initialRows).toBeGreaterThanOrEqual(2);
+    expect(initialCols).toBeGreaterThanOrEqual(20);
+
+    releaseFont();
+    await page.evaluate(() => document.fonts.load('400 13px "JetBrains Mono"'));
+    const [rows, cols] = await assertTerminalMetrics(page, request, '"JetBrains Mono"');
+    await assertTerminalInputAndState(page, request, 'font-check');
+
+    const final = await (await request.get('/__ui/setup/session/writes')).json();
+    expect(final.sizes.length).toBeGreaterThanOrEqual(initial.sizes.length);
+    expect(rows).toBeGreaterThanOrEqual(2);
+    expect(cols).toBeGreaterThanOrEqual(20);
+    await assertNoConsoleErrors(page);
+  } finally {
+    releaseFont();
+  }
+});
+
+test('setup terminal falls back to monospace metrics when the terminal font response is empty', async ({ page, request }) => {
+  const fontWarnings: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'warning') {
+      fontWarnings.push(message.text());
+    }
+  });
+  await page.route('https://fonts.gstatic.com/test/jetbrains-mono/normal.woff2', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'font/woff2', body: '' });
+  });
+
+  await launchConnectedTerminal(page, request);
+  await expect(page.locator('#terminal-connection')).toHaveText('Connected');
+  await emitTerminalMetricMarkers(page, request);
+  const [rows, cols] = await assertTerminalMetrics(page, request, 'monospace');
+  expect(rows).toBeGreaterThanOrEqual(2);
+  expect(cols).toBeGreaterThanOrEqual(20);
+  expect(fontWarnings.every((message) => /font|decode|download|parsing|ots/i.test(message))).toBe(true);
+  await assertTerminalInputAndState(page, request, 'font-empty');
+  await assertNoConsoleErrors(page);
+});
+
+test('setup terminal falls back to monospace metrics when FontFaceSet.load is unavailable', async ({ page, request }) => {
+  await page.addInitScript(() => {
+    const prototype = Object.getPrototypeOf(document.fonts) as FontFaceSet & { load?: unknown };
+    Object.defineProperty(prototype, 'load', {
+      configurable: true,
+      value: undefined,
+    });
+  });
+
+  await launchConnectedTerminal(page, request);
+  await expect(page.locator('#terminal-connection')).toHaveText('Connected');
+  await emitTerminalMetricMarkers(page, request);
+  const [rows, cols] = await assertTerminalMetrics(page, request, 'monospace');
+  expect(rows).toBeGreaterThanOrEqual(2);
+  expect(cols).toBeGreaterThanOrEqual(20);
+  await assertTerminalInputAndState(page, request, 'font-missing-load');
+  await assertNoConsoleErrors(page);
+});
+
+test('setup terminal falls back to monospace metrics when FontFaceSet.load returns empty results', async ({ page, request }) => {
+  await page.addInitScript(() => {
+    const prototype = Object.getPrototypeOf(document.fonts) as FontFaceSet & { load?: unknown };
+    Object.defineProperty(prototype, 'load', {
+      configurable: true,
+      value: async () => [],
+    });
+  });
+
+  await launchConnectedTerminal(page, request);
+  await expect(page.locator('#terminal-connection')).toHaveText('Connected');
+  await emitTerminalMetricMarkers(page, request);
+  const [rows, cols] = await assertTerminalMetrics(page, request, 'monospace');
+  expect(rows).toBeGreaterThanOrEqual(2);
+  expect(cols).toBeGreaterThanOrEqual(20);
+  await assertTerminalInputAndState(page, request, 'font-empty-result');
   await assertNoConsoleErrors(page);
 });
 
