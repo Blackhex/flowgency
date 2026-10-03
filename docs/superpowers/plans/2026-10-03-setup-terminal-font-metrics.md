@@ -232,8 +232,13 @@ or answer its workspace question while testing.
 
 **Interfaces:**
 - Production `build_ticket_reporting_protocol` and `append_ticket_reporting_protocol` retain signatures and append-once behavior.
-- Existing `record_ticket_tool_calls` entries retain all fields and gain safe copied `request_version` / `response_version` evidence where present.
-- New test-only `assert_read_only_ticket_probe(calls, ticket_id)` and `assert_stale_refresh_sign_off_probe(calls, ticket_a_id, ticket_b_id)` assert semantic broker sequences, not fixed operation-ID names.
+- Existing `record_ticket_tool_calls` entries retain all fields and gain safe copied `request_ref`, `request_version`, and `response_version` evidence where present.
+- New test-only `assert_read_only_ticket_probe(calls, ref)` and `assert_stale_refresh_sign_off_probe(calls, ref_a, ref_b)` consume full expected `TicketRef` objects and assert semantic broker sequences, not fixed operation-ID names.
+
+User-approved review correction on 2026-10-03: the complete four-field reference
+requirement governs over the earlier ID-only example signatures. Compare
+binding, team, workflow, and ticket ID on request and response versions, and add
+same-ID/wrong-scope negatives. These are test-only interface changes.
 
 This task is explicitly approved scope expansion to resolve the blocked full
 gate. No font implementation changes, model changes, weakened markers, new
@@ -246,6 +251,9 @@ so it always runs without needing Copilot. Start with literal, hand-checked
 observer entries matching the existing event schema and minimal version copies:
 
 ```python
+from flowgency.tickets.models import TicketRef
+
+
 def test_semantic_ticket_probe_accepts_fresh_recovery_operation_names():
   ref_a = {"binding_id": "binding-a", "team_id": "team-a",
        "workflow_id": "board-a", "ticket_id": "ticket-a"}
@@ -276,7 +284,9 @@ def test_semantic_ticket_probe_accepts_fresh_recovery_operation_names():
     {"tool": "ticket_sign_off", "ticket_id": "ticket-b", "ok": True,
      "operation_id": "recovered-sign-off", "request_version": version_b},
   ]
-  assert_stale_refresh_sign_off_probe(calls, "ticket-a", "ticket-b")
+  assert_stale_refresh_sign_off_probe(
+    calls, TicketRef.model_validate(ref_a), TicketRef.model_validate(ref_b)
+  )
 ```
 
 This fixture tests the trace assertion contract, not a mocked broker. Keep the
@@ -300,59 +310,69 @@ Place them in the existing module, not a new framework. Use an ordered search
 with useful diagnostics; require successful operations on the intended ticket.
 
 ```python
-def _find_probe_event(calls, start, *, tool, ticket_id, ok, error_code=None):
+def _find_probe_event(calls, start, *, tool, ref, ok, error_code=None):
+  expected = ref.model_dump(mode="json")
   for index in range(start, len(calls)):
     call = calls[index]
+    request_ref = call.get("request_ref")
+    if request_ref is None:
+      request_ref = call.get("request_version", {}).get("ref")
     if (call.get("tool") == tool
-        and call.get("ticket_id") == ticket_id
+        and request_ref == expected
         and call.get("ok") is ok
         and (error_code is None or call.get("error_code") == error_code)):
       return index, call
-  raise AssertionError(f"Missing {tool} outcome for {ticket_id}: ok={ok}, error={error_code}")
+  raise AssertionError(f"Missing {tool} outcome for scoped ticket: ok={ok}, error={error_code}")
 
 
-def assert_read_only_ticket_probe(calls, ticket_id):
+def assert_read_only_ticket_probe(calls, ref):
+  expected = ref.model_dump(mode="json")
   assert calls, "No ticket broker calls were observed"
   assert all(call.get("tool") == "ticket_get" for call in calls), calls
-  assert all(call.get("ticket_id") == ticket_id and call.get("ok") is True
-         for call in calls), calls
+  assert all(call.get("request_ref") == expected
+         and call.get("response_version", {}).get("ref") == expected
+         and call.get("ok") is True for call in calls), calls
 
 
-def assert_stale_refresh_sign_off_probe(calls, ticket_a_id, ticket_b_id):
+def assert_stale_refresh_sign_off_probe(calls, ref_a, ref_b):
+  expected_a = ref_a.model_dump(mode="json")
+  expected_b = ref_b.model_dump(mode="json")
   start_a_index, _started_a = _find_probe_event(
-    calls, 0, tool="ticket_start_work", ticket_id=ticket_a_id, ok=True,
+    calls, 0, tool="ticket_start_work", ref=ref_a, ok=True,
   )
   stale_index, stale = _find_probe_event(
-    calls, start_a_index + 1, tool="ticket_transition", ticket_id=ticket_a_id,
+    calls, start_a_index + 1, tool="ticket_transition", ref=ref_a,
     ok=False, error_code="stale-ticket",
   )
   retry_index, retry = _find_probe_event(
-    calls, stale_index + 1, tool="ticket_transition", ticket_id=ticket_a_id, ok=True,
+    calls, stale_index + 1, tool="ticket_transition", ref=ref_a, ok=True,
   )
   fresh_reads = [call for call in calls[stale_index + 1:retry_index]
            if call.get("tool") == "ticket_get"
-           and call.get("ticket_id") == ticket_a_id
+           and call.get("request_ref") == expected_a
            and call.get("ok") is True]
   assert fresh_reads, "Successful fresh read is required before completion retry"
   fresh = fresh_reads[-1]
   assert fresh.get("response_version"), fresh
+  assert fresh["response_version"]["ref"] == expected_a, fresh
   assert fresh["response_version"] != stale.get("request_version"), (stale, fresh)
   assert retry.get("request_version") == fresh["response_version"], (fresh, retry)
   assert isinstance(retry.get("operation_id"), str) and retry["operation_id"].strip(), retry
 
   start_index, _started = _find_probe_event(
-    calls, 0, tool="ticket_start_work", ticket_id=ticket_b_id, ok=True,
+    calls, 0, tool="ticket_start_work", ref=ref_b, ok=True,
   )
   signoff_index, signed_off = _find_probe_event(
-    calls, start_index + 1, tool="ticket_sign_off", ticket_id=ticket_b_id, ok=True,
+    calls, start_index + 1, tool="ticket_sign_off", ref=ref_b, ok=True,
   )
   current_reads = [call for call in calls[start_index + 1:signoff_index]
            if call.get("tool") == "ticket_get"
-           and call.get("ticket_id") == ticket_b_id
+                     and call.get("request_ref") == expected_b
            and call.get("ok") is True]
   assert current_reads, "Successful current read is required before sign-off"
   current = current_reads[-1]
   assert current.get("response_version"), current
+  assert current["response_version"]["ref"] == expected_b, current
   assert signed_off.get("request_version") == current["response_version"], (current, signed_off)
   assert isinstance(signed_off.get("operation_id"), str) and signed_off["operation_id"].strip(), signed_off
 ```
@@ -393,6 +413,11 @@ def _observed_version(value):
        ("revision", "workflow_digest", "context_digest") if name in value},
   }
 ```
+
+Add `request_ref` to each literal read event in Step 1; mutations carry the same
+full ref through their request version. Capture real read request refs with the
+existing TicketRef validator and compare all four fields. Never derive expected
+scope from the first observed response or retain authentication payload fields.
 
 Add a real fixture/broker observation check proving captured get version and
 subsequent request version match, with no credential fields. Keep failed stale
