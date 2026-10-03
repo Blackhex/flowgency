@@ -48,6 +48,9 @@ async function terminalMarkerMetrics(page: Page, marker: string, fontFamily: str
   actualCellWidth: number;
   expectedCellWidth: number;
   renderedTextWidth: number;
+  rowCount: number;
+  rowHeight: number;
+  screenHeight: number;
   screenWidth: number;
 }> {
   return page.evaluate(({ font, text }) => {
@@ -55,14 +58,19 @@ async function terminalMarkerMetrics(page: Page, marker: string, fontFamily: str
     if (!context) return false;
     context.font = `13px ${font}`;
     const screen = document.querySelector<HTMLElement>('#setup-terminal .xterm-screen');
+    const rows = document.querySelector<HTMLElement>('#setup-terminal .xterm-rows');
     const target = [...document.querySelectorAll<HTMLElement>('.xterm-rows span')]
       .find((span) => span.textContent === text);
-    if (!screen || !target) return false;
+    const firstRow = rows?.firstElementChild;
+    if (!screen || !rows || !target || !(firstRow instanceof HTMLElement)) return false;
     const renderedTextWidth = target.getBoundingClientRect().width;
     return {
       actualCellWidth: renderedTextWidth / text.length,
       expectedCellWidth: context.measureText('W').width,
       renderedTextWidth,
+      rowCount: rows.childElementCount,
+      rowHeight: firstRow.getBoundingClientRect().height,
+      screenHeight: screen.getBoundingClientRect().height,
       screenWidth: screen.getBoundingClientRect().width,
     };
   }, { font: fontFamily, text: marker });
@@ -76,11 +84,15 @@ async function assertTerminalMetrics(page: Page, request: APIRequestContext, exp
     const writes = await (await request.get('/__ui/setup/session/writes')).json();
     const latestSize = writes.sizes[writes.sizes.length - 1];
     if (!latestSize) return false;
+    const rows = latestSize[0];
     const cols = latestSize[1];
     const cellWidth = (wide.actualCellWidth + narrow.actualCellWidth) / 2;
+    const rowHeight = (wide.rowHeight + narrow.rowHeight) / 2;
     return Math.abs(wide.actualCellWidth - wide.expectedCellWidth) < 1
       && Math.abs(narrow.actualCellWidth - narrow.expectedCellWidth) < 1
       && Math.abs(wide.actualCellWidth - narrow.actualCellWidth) < 1
+      && Math.abs(rows - wide.rowCount) < 1
+      && Math.abs(rows - wide.screenHeight / rowHeight) < 1
       && Math.abs(cols - wide.screenWidth / cellWidth) < 1;
   }).toBe(true);
   const writes = await (await request.get('/__ui/setup/session/writes')).json();
@@ -181,6 +193,12 @@ test('late terminal font loading restores monospace metrics without resetting th
   const heldFont = new Promise<void>((resolve) => {
     releaseFont = resolve;
   });
+  const socketUrls: string[] = [];
+  page.on('websocket', (socket) => {
+    if (socket.url().includes('/setup/session/ws')) {
+      socketUrls.push(socket.url());
+    }
+  });
   await page.route('https://fonts.gstatic.com/test/jetbrains-mono/normal.woff2', async (route) => {
     await heldFont;
     await route.fallback();
@@ -190,14 +208,35 @@ test('late terminal font loading restores monospace metrics without resetting th
     await launchConnectedTerminal(page, request);
     await expect(page.locator('#terminal-connection')).toHaveText('Connected');
     await emitTerminalMetricMarkers(page, request);
+    await expect.poll(() => socketUrls.length).toBe(1);
     const initial = await (await request.get('/__ui/setup/session/writes')).json();
     const [initialRows, initialCols] = await assertTerminalMetrics(page, request, 'monospace');
     expect(initialRows).toBeGreaterThanOrEqual(2);
     expect(initialCols).toBeGreaterThanOrEqual(20);
+    const terminalProbe = await page.evaluate(() => {
+      const terminal = document.querySelector<HTMLElement>('#setup-terminal .xterm');
+      const rows = document.querySelector<HTMLElement>('#setup-terminal .xterm-rows');
+      if (!terminal || !rows) return false;
+      const probe = 'late-font-terminal-probe';
+      terminal.dataset.testProbe = probe;
+      rows.dataset.testProbe = probe;
+      return probe;
+    });
+    expect(terminalProbe).toBe('late-font-terminal-probe');
 
     releaseFont();
     await page.evaluate(() => document.fonts.load('400 13px "JetBrains Mono"'));
     const [rows, cols] = await assertTerminalMetrics(page, request, '"JetBrains Mono"');
+    await expect(page.locator('#setup-terminal').getByText(WIDE_MARKER, { exact: true })).toBeVisible();
+    await expect(page.locator('#setup-terminal').getByText(NARROW_MARKER, { exact: true })).toBeVisible();
+    await expect.poll(() => socketUrls.length).toBe(1);
+    await expect.poll(() => page.evaluate(() => ({
+      terminal: document.querySelector<HTMLElement>('#setup-terminal .xterm')?.dataset.testProbe,
+      rows: document.querySelector<HTMLElement>('#setup-terminal .xterm-rows')?.dataset.testProbe,
+    }))).toEqual({
+      terminal: 'late-font-terminal-probe',
+      rows: 'late-font-terminal-probe',
+    });
     await assertTerminalInputAndState(page, request, 'font-check');
 
     const final = await (await request.get('/__ui/setup/session/writes')).json();
@@ -227,7 +266,7 @@ test('setup terminal falls back to monospace metrics when the terminal font resp
   const [rows, cols] = await assertTerminalMetrics(page, request, 'monospace');
   expect(rows).toBeGreaterThanOrEqual(2);
   expect(cols).toBeGreaterThanOrEqual(20);
-  expect(fontWarnings.every((message) => /font|decode|download|parsing|ots/i.test(message))).toBe(true);
+  expect(fontWarnings.length === 0 || fontWarnings.every((message) => /font|decode|download|parsing|ots/i.test(message))).toBe(true);
   await assertTerminalInputAndState(page, request, 'font-empty');
   await assertNoConsoleErrors(page);
 });
