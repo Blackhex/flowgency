@@ -482,7 +482,7 @@ Then run the mechanical check and stop on a non-zero exit:
 flowgency validate --config "{config_path}"
 ```
 
-A non-zero exit means the created blueprint source is invalid. Report the printed issues and correct them; do not present setup as complete.
+A non-zero exit may mean the created agent-blueprint, prompt, or workflow-definition source is invalid. Report the printed issues, stop on the failure, and correct only approved in-session source through the materialization rules; re-run validation after that, never treat an empty directory as a fix, and do not present setup as complete.
 
 Only when activation was approved, offer the singleton scheduler setup:
 
