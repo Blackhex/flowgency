@@ -974,6 +974,67 @@ test('missing selected ticket keeps its inspector and draft', async ({ page, req
   await expect(page.getByLabel('Acceptance criteria', { exact: true })).toHaveValue('Draft survives missing selection');
 });
 
+test('healthy board can show and recover from polled workflow issues', async ({ page, request }) => {
+  const response = await request.get('/newsletter/workflows/delivery/snapshot?ticket=fixture-review');
+  expect(response.ok()).toBeTruthy();
+  const board = await response.json();
+  expect(board.issues).toEqual([]);
+  const issueBoard = JSON.parse(JSON.stringify(board));
+  issueBoard.issues = [{
+    code: 'workflow-definition-unavailable',
+    field: 'workflow',
+    message: 'Definition <strong>markup</strong> unavailable',
+    hint: '<script>nope</script>Use the configured workflow source.',
+  }];
+  issueBoard.presentation.issues_html = '<p><strong>workflow-definition-unavailable</strong>: Definition &lt;strong&gt;markup&lt;/strong&gt; unavailable <span>Use the configured workflow source.</span></p>';
+  let servedIssue = false;
+  await page.route('**/newsletter/workflows/delivery/snapshot?*', async (route) => {
+    if (servedIssue) {
+      await route.fallback();
+      return;
+    }
+    servedIssue = true;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: { ETag: 'W/"issue-projection"', 'Cache-Control': 'no-cache' },
+      body: JSON.stringify(issueBoard),
+    });
+  });
+
+  await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
+  await stopPollTimer(page);
+  const htmlRequests: string[] = [];
+  page.on('request', (requestEvent) => {
+    const accepted = requestEvent.headers().accept || '';
+    if (requestEvent.method() === 'GET' && accepted.includes('text/html')) {
+      htmlRequests.push(requestEvent.url());
+    }
+  });
+  const inspectorNode = await page.getByLabel('Ticket details').elementHandle();
+  const fieldNode = await page.locator('#field-acceptance-criteria').elementHandle();
+  expect(inspectorNode).not.toBeNull();
+  expect(fieldNode).not.toBeNull();
+  await page.getByLabel('Acceptance criteria', { exact: true }).fill('Draft survives issue banner');
+
+  await forcePoll(page);
+
+  const boardIssues = page.locator('[data-board-issues]');
+  await expect(boardIssues).toBeVisible();
+  await expect(boardIssues).toContainText('workflow-definition-unavailable');
+  await expect(boardIssues).toContainText('Definition <strong>markup</strong> unavailable');
+  await expect(boardIssues.locator('script')).toHaveCount(0);
+  expect(await inspectorNode!.evaluate((node) => node.isConnected && node === document.querySelector('[aria-label="Ticket details"]'))).toBe(true);
+  expect(await fieldNode!.evaluate((node) => node.isConnected && node === document.getElementById('field-acceptance-criteria'))).toBe(true);
+  await expect(page.getByLabel('Acceptance criteria', { exact: true })).toHaveValue('Draft survives issue banner');
+
+  await forcePoll(page);
+
+  await expect(boardIssues).toBeHidden();
+  await expect(page.getByLabel('Acceptance criteria', { exact: true })).toHaveValue('Draft survives issue banner');
+  expect(htmlRequests).toEqual([]);
+});
+
 test('poll body parsed after an action cannot roll back its accepted reply', async ({ page, request }) => {
   await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
   await stopPollTimer(page);
@@ -1000,6 +1061,57 @@ test('poll body parsed after an action cannot roll back its accepted reply', asy
 
   await expect(page.getByLabel('Assigned agent', { exact: true })).toHaveValue('builder');
   expect((await detailSnapshot(request)).ticket.assignee).toBe('builder');
+});
+
+test('pending mutation completion resumes the next board snapshot application', async ({ page, request }) => {
+  const response = await request.get('/newsletter/workflows/delivery/snapshot?ticket=fixture-review');
+  expect(response.ok()).toBeTruthy();
+  const board = await response.json();
+  const heldBoard = JSON.parse(JSON.stringify(board));
+  heldBoard.name = 'Delivery while mutation pending';
+  const resumedBoard = JSON.parse(JSON.stringify(board));
+  resumedBoard.name = 'Delivery after pending mutation';
+  let snapshotCount = 0;
+  await page.route('**/newsletter/workflows/delivery/snapshot?*', async (route) => {
+    snapshotCount += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: { ETag: `W/"post-mutation-${snapshotCount}"`, 'Cache-Control': 'no-cache' },
+      body: JSON.stringify(snapshotCount === 1 ? heldBoard : resumedBoard),
+    });
+  }, { times: 2 });
+
+  await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
+  await stopPollTimer(page);
+  await page.evaluate(() => {
+    const appWindow = window as typeof window & { __releaseAssigneeMutation?: () => void; __assignmentPending?: boolean };
+    const originalFetch = window.fetch.bind(window);
+    const held = new Promise<void>((resolve) => {
+      appWindow.__releaseAssigneeMutation = resolve;
+    });
+    window.fetch = async (input, init) => {
+      if (String(input).includes('/tickets/fixture-review/assignee')) {
+        appWindow.__assignmentPending = true;
+        await held;
+      }
+      return originalFetch(input, init);
+    };
+  });
+  const mutationResponse = page.waitForResponse((eventResponse) => eventResponse.url().includes('/tickets/fixture-review/assignee') && eventResponse.request().method() === 'POST');
+  const heldSnapshotResponse = page.waitForResponse((eventResponse) => eventResponse.url().includes('/newsletter/workflows/delivery/snapshot') && eventResponse.request().method() === 'GET');
+  await page.getByLabel('Assigned agent', { exact: true }).selectOption('builder');
+  await page.waitForFunction(() => Boolean((window as typeof window & { __assignmentPending?: boolean }).__assignmentPending));
+  await page.evaluate(() => void (window as typeof window & { workflowBoardController: { refreshBoard: () => Promise<void> } }).workflowBoardController.refreshBoard());
+  expect((await heldSnapshotResponse).status()).toBe(200);
+  await expect(page.getByRole('heading', { name: 'Delivery while mutation pending' })).toHaveCount(0);
+  const resumedSnapshotResponse = page.waitForResponse((eventResponse) => eventResponse.url().includes('/newsletter/workflows/delivery/snapshot') && eventResponse.request().method() === 'GET');
+  await page.evaluate(() => (window as typeof window & { __releaseAssigneeMutation?: () => void }).__releaseAssigneeMutation?.());
+
+  expect((await mutationResponse).status()).toBe(303);
+  expect((await resumedSnapshotResponse).status()).toBe(200);
+  await expect(page.getByRole('heading', { name: 'Delivery after pending mutation' })).toBeVisible();
+  await expect(page.getByLabel('Assigned agent', { exact: true })).toHaveValue('builder');
 });
 
 test('hidden document rejects a snapshot whose body parsing finishes late', async ({ page, request }) => {

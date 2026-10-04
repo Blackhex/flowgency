@@ -13,11 +13,7 @@
     {% endfor %}
   </div>
   {% endif %}
-  {% if board.issues %}
-  <div class="workflow-issue-banner" role="status" data-board-issues>
-    {{ presentation.issues(board.issues) }}
-  </div>
-  {% endif %}
+  <div{% if board.issues %} class="workflow-issue-banner"{% else %} hidden{% endif %} role="status" data-board-issues>{% if board.issues %}{{ presentation.issues(board.issues) }}{% endif %}</div>
   <header class="workflow-board-toolbar">
     <div class="workflow-board-heading">
       <div class="workflow-board-title">
@@ -51,20 +47,20 @@
       </select>
     </form>
     <div class="workflow-board-actions">
-    <div id="workflow-refresh-status" class="workflow-refresh-status" role="status" hidden>
-      <span data-workflow-refresh-label></span>
-      <button type="button" id="workflow-refresh-button" class="workflow-icon-button" aria-label="Refresh page" title="Refresh page">
-        <i data-lucide="refresh-cw" aria-hidden="true"></i>
+      <div id="workflow-refresh-status" class="workflow-refresh-status" role="status" hidden>
+        <span data-workflow-refresh-label></span>
+        <button type="button" id="workflow-refresh-button" class="workflow-icon-button" aria-label="Refresh page" title="Refresh page">
+          <i data-lucide="refresh-cw" aria-hidden="true"></i>
+        </button>
+      </div>
+      <a href="/{{ team }}/workflows/{{ active_workflow_id }}/settings" class="workflow-link-button" aria-label="Workflow settings" title="Workflow settings">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.6 1.7a1.2 1.2 0 0 1 2.8 0l.1.5a1 1 0 0 0 .9.8l.5.1a1.2 1.2 0 0 1 .9 2l-.3.4a1 1 0 0 0 0 1.2l.3.4a1.2 1.2 0 0 1-.9 2l-.5.1a1 1 0 0 0-.9.8l-.1.5a1.2 1.2 0 0 1-2.8 0l-.1-.5a1 1 0 0 0-.9-.8l-.5-.1a1.2 1.2 0 0 1-.9-2l.3-.4a1 1 0 0 0 0-1.2l-.3-.4a1.2 1.2 0 0 1 .9-2l.5-.1a1 1 0 0 0 .9-.8zm1.4 4A1.8 1.8 0 1 0 8 9.3a1.8 1.8 0 0 0 0-3.6Z" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/></svg>
+        <span>Settings</span>
+      </a>
+      <button type="button" class="workflow-primary-button" id="workflow-new-ticket">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        <span>New ticket</span>
       </button>
-    </div>
-    <a href="/{{ team }}/workflows/{{ active_workflow_id }}/settings" class="workflow-link-button" aria-label="Workflow settings" title="Workflow settings">
-      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.6 1.7a1.2 1.2 0 0 1 2.8 0l.1.5a1 1 0 0 0 .9.8l.5.1a1.2 1.2 0 0 1 .9 2l-.3.4a1 1 0 0 0 0 1.2l.3.4a1.2 1.2 0 0 1-.9 2l-.5.1a1 1 0 0 0-.9.8l-.1.5a1.2 1.2 0 0 1-2.8 0l-.1-.5a1 1 0 0 0-.9-.8l-.5-.1a1.2 1.2 0 0 1-.9-2l.3-.4a1 1 0 0 0 0-1.2l-.3-.4a1.2 1.2 0 0 1 .9-2l.5-.1a1 1 0 0 0 .9-.8zm1.4 4A1.8 1.8 0 1 0 8 9.3a1.8 1.8 0 0 0 0-3.6Z" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/></svg>
-      <span>Settings</span>
-    </a>
-    <button type="button" class="workflow-primary-button" id="workflow-new-ticket">
-      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
-      <span>New ticket</span>
-    </button>
     </div>
   </header>
   <noscript>
