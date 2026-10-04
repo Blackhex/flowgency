@@ -229,19 +229,24 @@ worktree evidence directory.
 ### User-Approved Known-Failure Exception
 
 On 2026-10-04 the user selected proceeding with the UI fix under an explicit
-known-failure exception rather than continuing runtime diagnosis. The one
-accepted external-runtime failure is
-tests/test_ticket_runtime_live.py::test_restricted_agent_reads_ticket_over_http_without_editing[copilot].
-Its test, markers, assertions, and security checks remain intact and execute in
-every complete suite. Retain its failed receipts and disclose its actual status
-at baseline, feature validation, integrated master verification, and completion.
+known-failure exception rather than continuing runtime diagnosis. After the
+unchanged complete baseline recorded3353passed,19skipped,3failed, the user
+explicitly approved the following exact three external-runtime failures:
 
-The exception permits implementation and integration only when this is the sole
-pre-existing failure and there are no new failures or errors. The complete
-browser matrix and all behavior-scoped UI checks must pass. Do not broaden the
-exception silently if another failure occurs, nor describe a red full suite as
-green. Runtime metadata experiments are separated from this UI feature; the
-unintegrated eager-exposure change must not be bundled into it.
+- tests/test_ticket_runtime_live.py::test_restricted_agent_reads_ticket_over_http_without_editing[copilot]
+- tests/test_ticket_runtime_live.py::test_restricted_agent_refreshes_stale_transition_and_signs_off_second_ticket[copilot]
+- tests/test_ticket_runtime_live.py::test_restricted_agent_timeout_after_committed_transition_keeps_ticket_state[copilot]
+
+Their tests, markers, assertions, and security checks remain intact and execute
+in every complete suite. Retain failed receipts and disclose actual status at
+baseline, feature validation, integrated master verification, and completion.
+
+The exception permits implementation and integration only when any failures
+are confined to this exact recorded set and there are no other failures or
+errors. The complete browser matrix and all behavior-scoped UI checks must pass.
+Do not broaden the exception silently if another failure occurs, nor describe
+a red full suite as green. Runtime metadata experiments are separated from this
+UI feature; the unintegrated eager-exposure change must not be bundled into it.
 
 ## Alternatives
 
