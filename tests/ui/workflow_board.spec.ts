@@ -180,6 +180,170 @@ test('assignee selection saves without moving the ticket or losing a draft', asy
   await assertNoConsoleErrors(page);
 });
 
+test('focused assignment uses its original version and exposes a remote conflict', async ({ page, request }) => {
+  await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
+  await stopPollTimer(page);
+  await page.getByLabel('Acceptance criteria', { exact: true }).fill('Keep my local draft');
+  const original = await detailSnapshot(request);
+  await page.locator('#ticket-assignee').focus();
+  const remote = await request.post('/newsletter/workflows/delivery/tickets/fixture-review/assignee', {
+    headers: { Accept: 'application/json' },
+    form: { payload: JSON.stringify({
+      version: original.ticket.version,
+      operation_id: operationId('remote-assignment'),
+      assignee: 'researcher',
+    }) },
+  });
+  expect(remote.ok()).toBeTruthy();
+  await forcePoll(page);
+  await expect(page.locator('#ticket-assignee')).toHaveValue(original.ticket.assignee || '');
+  const posted = page.waitForRequest((requestEvent) => requestEvent.method() === 'POST' && requestEvent.url().endsWith('/fixture-review/assignee'));
+  const conflicted = page.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/fixture-review/assignee'));
+  await page.locator('#ticket-assignee').selectOption('builder');
+  const form = new URLSearchParams((await posted).postData() || '');
+  expect(JSON.parse(form.get('payload') || '{}').version).toEqual(original.ticket.version);
+  expect((await conflicted).status()).toBe(409);
+  expect((await detailSnapshot(request)).ticket.assignee).toBe('researcher');
+  await expect(page.locator('#ticket-assignee')).toHaveValue('researcher');
+  await expect(page.locator('#workflow-action-errors')).toBeVisible();
+  await expect(page.getByLabel('Acceptance criteria', { exact: true })).toHaveValue('Keep my local draft');
+
+  const refreshed = await detailSnapshot(request);
+  const retryPosted = page.waitForRequest((requestEvent) => requestEvent.method() === 'POST' && requestEvent.url().endsWith('/fixture-review/assignee'));
+  const retried = page.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/fixture-review/assignee'));
+  await page.locator('#ticket-assignee').selectOption('builder');
+  const retryForm = new URLSearchParams((await retryPosted).postData() || '');
+  expect(JSON.parse(retryForm.get('payload') || '{}').version).toEqual(refreshed.ticket.version);
+  expect((await retried).status()).toBe(303);
+  expect((await detailSnapshot(request)).ticket.assignee).toBe('builder');
+  await expect(page.locator('#ticket-assignee')).toHaveValue('builder');
+  await expect(page.locator('#workflow-action-errors')).toBeHidden();
+  await expect(page.getByLabel('Acceptance criteria', { exact: true })).toHaveValue('Keep my local draft');
+});
+
+test('remote input change before typing in a clean focused field remains a conflict', async ({ page, request }) => {
+  await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
+  await stopPollTimer(page);
+  const field = page.getByLabel('Acceptance criteria', { exact: true });
+  const originalValue = await field.inputValue();
+  const original = await detailSnapshot(request);
+
+  await field.focus();
+  const remoteUpdate = await request.post('/newsletter/workflows/delivery/tickets/fixture-review/update', {
+    headers: { Accept: 'application/json' },
+    form: { payload: JSON.stringify({
+      version: original.ticket.version,
+      operation_id: operationId('remote-before-clean-typing'),
+      patch: { field_values: { 'acceptance-criteria': 'Remote clean focused change' } },
+    }) },
+  });
+  expect(remoteUpdate.ok()).toBeTruthy();
+  await forcePoll(page);
+
+  await expect(field).toHaveValue(originalValue);
+  await field.fill('Local typing after remote clean change');
+  const conflictResponse = page.waitForResponse((response) => response.url().includes('/tickets/fixture-review/update') && response.request().method() === 'POST');
+  await page.getByRole('button', { name: 'Save inputs', exact: true }).click();
+  expect((await conflictResponse).status()).toBe(409);
+  expect((await detailSnapshot(request)).fields.find((remoteField) => remoteField.id === 'acceptance-criteria')?.value).toBe('Remote clean focused change');
+  await expect(field).toHaveValue('Local typing after remote clean change');
+});
+
+test('deferred clean focused input release applies the latest server value', async ({ page, request }) => {
+  await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
+  await stopPollTimer(page);
+  const field = page.getByLabel('Acceptance criteria', { exact: true });
+  const originalValue = await field.inputValue();
+  const original = await detailSnapshot(request);
+
+  await field.focus();
+  const remoteUpdate = await request.post('/newsletter/workflows/delivery/tickets/fixture-review/update', {
+    headers: { Accept: 'application/json' },
+    form: { payload: JSON.stringify({
+      version: original.ticket.version,
+      operation_id: operationId('deferred-clean-release'),
+      patch: { field_values: { 'acceptance-criteria': 'Released clean server value' } },
+    }) },
+  });
+  expect(remoteUpdate.ok()).toBeTruthy();
+  await forcePoll(page);
+
+  await expect(field).toHaveValue(originalValue);
+  await page.getByRole('button', { name: 'Run', exact: true }).focus();
+  await expect(field).toHaveValue('Released clean server value');
+});
+
+test('in-flight draft typing survives assignment and input replies', async ({ page, context, request }) => {
+  let releaseAssigneeResponse: () => void = () => undefined;
+  let releaseInputResponse: () => void = () => undefined;
+  const heldAssigneeResponse = new Promise<void>((resolve) => {
+    releaseAssigneeResponse = resolve;
+  });
+  const heldInputResponse = new Promise<void>((resolve) => {
+    releaseInputResponse = resolve;
+  });
+  await context.route('**/tickets/fixture-review/assignee', async (route) => {
+    const upstream = await route.fetch();
+    await heldAssigneeResponse;
+    await route.fulfill({ response: upstream });
+  }, { times: 1 });
+  await context.route('**/tickets/fixture-review/update', async (route) => {
+    const upstream = await route.fetch();
+    await heldInputResponse;
+    await route.fulfill({ response: upstream });
+  }, { times: 1 });
+
+  await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
+  const assignmentResponse = page.waitForResponse((response) => response.url().includes('/tickets/fixture-review/assignee') && response.request().method() === 'POST');
+  await page.locator('#ticket-assignee').selectOption('builder');
+  await page.getByLabel('Acceptance criteria', { exact: true }).fill('Typed while assignment response is held');
+  releaseAssigneeResponse();
+  await assignmentResponse;
+  await expect(page.getByLabel('Acceptance criteria', { exact: true })).toHaveValue('Typed while assignment response is held');
+
+  const inputResponse = page.waitForResponse((response) => response.url().includes('/tickets/fixture-review/update') && response.request().method() === 'POST');
+  await page.getByRole('button', { name: 'Save inputs', exact: true }).click();
+  await page.getByLabel('Acceptance criteria', { exact: true }).fill('Typed while input response is held');
+  releaseInputResponse();
+  await inputResponse;
+
+  await expect(page.getByLabel('Acceptance criteria', { exact: true })).toHaveValue('Typed while input response is held');
+  expect((await detailSnapshot(request)).fields.find((field) => field.id === 'acceptance-criteria')?.value).toBe('Typed while assignment response is held');
+  const followUpResponse = page.waitForResponse((response) => response.url().includes('/tickets/fixture-review/update') && response.request().method() === 'POST');
+  await page.getByRole('button', { name: 'Save inputs', exact: true }).click();
+  expect((await followUpResponse).status()).toBe(303);
+  expect((await detailSnapshot(request)).fields.find((field) => field.id === 'acceptance-criteria')?.value).toBe('Typed while input response is held');
+});
+
+test('unrelated input reply leaves the held assignee selection alone', async ({ page, context, request }) => {
+  let releaseInputResponse: () => void = () => undefined;
+  const heldInputResponse = new Promise<void>((resolve) => {
+    releaseInputResponse = resolve;
+  });
+  await context.route('**/tickets/fixture-review/update', async (route) => {
+    const upstream = await route.fetch();
+    await heldInputResponse;
+    await route.fulfill({ response: upstream });
+  }, { times: 1 });
+
+  await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
+  await page.getByLabel('Acceptance criteria', { exact: true }).fill('Submitted while assignee select is held');
+  await page.locator('#ticket-assignee').focus();
+  await page.locator('#ticket-assignee').evaluate((node) => {
+    (node as HTMLSelectElement).value = 'builder';
+  });
+  const inputResponse = page.waitForResponse((response) => response.url().includes('/tickets/fixture-review/update') && response.request().method() === 'POST');
+  const savePromise = page.evaluate(() => (window as typeof window & {
+    workflowBoardController: { saveInputs: () => Promise<void> };
+  }).workflowBoardController.saveInputs());
+  releaseInputResponse();
+  await inputResponse;
+  await savePromise;
+
+  await expect(page.locator('#ticket-assignee')).toHaveValue('builder');
+  expect((await detailSnapshot(request)).fields.find((field) => field.id === 'acceptance-criteria')?.value).toBe('Submitted while assignee select is held');
+});
+
 test('dirty inputs save after assignee save when the server field is unchanged', async ({ page }) => {
   await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
 
@@ -418,6 +582,33 @@ test('description edits save through the overview controls', async ({ page, requ
   expect(detail.ticket.description).toBe('Updated description from the browser');
   await expect(page.locator('[data-ticket-edit]')).toBeHidden();
   await expect(page.locator('[data-ticket-description-read]')).toContainText('Updated description from the browser');
+});
+
+test('edit save updates read description without page html', async ({ page, request }) => {
+  await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
+  const htmlRequests: string[] = [];
+  page.on('request', (requestEvent) => {
+    const accepted = requestEvent.headers().accept || '';
+    if (requestEvent.method() === 'GET' && accepted.includes('text/html')) {
+      htmlRequests.push(requestEvent.url());
+    }
+  });
+
+  await page.getByRole('button', { name: 'Edit ticket', exact: true }).click();
+  const saved = page.waitForResponse(
+    (response) =>
+      response.url().includes('/tickets/fixture-review/update') &&
+      response.request().method() === 'POST',
+  );
+  await page.locator('#ticket-description').fill('JSON-only description save');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  expect((await saved).status()).toBe(303);
+
+  expect(htmlRequests).toEqual([]);
+  const detail = await detailSnapshot(request);
+  expect(detail.ticket.description).toBe('JSON-only description save');
+  await expect(page.locator('[data-ticket-edit]')).toBeHidden();
+  await expect(page.locator('[data-ticket-description-read]')).toContainText('JSON-only description save');
 });
 
 test('cancelling the edit form restores confirmed title and description', async ({ page }) => {

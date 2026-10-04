@@ -23,6 +23,7 @@
       this.requestControllers = { page: null, refresh: null };
       this.pendingAction = null;
       this.actionChain = Promise.resolve();
+      this.assigneeInteraction = null;
       this.cacheElements();
       this.createView();
       this.bindEvents();
@@ -76,6 +77,21 @@
       document.addEventListener('change', (event) => {
         void this.handleChange(event);
       });
+      document.addEventListener('focusin', (event) => {
+        this.handleFocusIn(event);
+      });
+      document.addEventListener('focusout', (event) => {
+        this.handleFocusOut(event);
+      });
+      document.addEventListener('pointerdown', (event) => {
+        this.handleInteractionStart(event);
+      });
+      document.addEventListener('keydown', (event) => {
+        this.handleInteractionStart(event);
+      });
+      document.addEventListener('selectionchange', () => {
+        this.releaseInteractions();
+      });
       document.addEventListener('submit', (event) => {
         void this.handleSubmit(event);
       });
@@ -95,8 +111,17 @@
       return this.currentTicket()?.ref?.ticket_id || null;
     }
 
+    currentRefKey() {
+      const current = this.currentTicket();
+      return current?.ref && window.WorkflowBoardView?.refKey ? window.WorkflowBoardView.refKey(current.ref) : null;
+    }
+
     ticketInputs() {
       return Array.from(document.querySelectorAll('[data-ticket-input]'));
+    }
+
+    controlIsHeld(control) {
+      return control instanceof HTMLElement && control.contains(document.activeElement);
     }
 
     readControlValue(control) {
@@ -299,6 +324,7 @@
     }
 
     applyPageHtml(html, nextUrl, pageState, historyMode) {
+      this.finishAssigneeInteraction();
       const nextDocument = new DOMParser().parseFromString(html, 'text/html');
       const nextPage = nextDocument.querySelector('.workflow-board-page');
       const nextDialog = nextDocument.getElementById('workflow-ticket-dialog');
@@ -414,28 +440,16 @@
       if (!detail?.ticket || detail.ticket.ref.ticket_id !== this.currentTicketId()) {
         return false;
       }
-      const savedDraft = submittedValues ? this.cloneDraft(submittedValues) : null;
+      this.syncDraftFromInputs();
       this.ticket = detail;
       this.initial.board.selected_ticket = detail;
       if (this.view) {
         this.view.renderTicket(detail);
       }
-      if (source === 'action' && savedDraft) {
-        this.inputDraft = savedDraft;
-      }
-      if (this.dirtyFieldsStillMatchServer(detail)) {
-        this.inputDraft.baseVersion = detail.ticket.version;
-      }
-      if (source === 'action' && committedControl) {
-        for (const key of this.inputDraft.dirty) {
-          this.inputDraft.baseValues[key] = this.inputDraft.values[key];
-        }
-        this.inputDraft.dirty.clear();
-        this.inputDraft.baseVersion = detail.ticket.version;
-      }
+      this.rebaseDraft(detail, submittedValues || {});
       this.ticketDrafts.set(detail.ticket.ref.ticket_id, this.cloneDraft(this.inputDraft));
-      this.restoreDraft();
-      this.renderAssignment();
+      this.restoreDraft({ source, committedControl });
+      this.renderAssignment(source, committedControl);
       return true;
     }
 
@@ -550,8 +564,7 @@
         event.preventDefault();
         try {
           await this.saveInputs();
-          this.editingOverview = false;
-          await this.loadPage(window.location.href, 'replace', true);
+          this.setEditing(false, { focus: false });
         } catch (error) {
           this.reportActionError(error);
         }
@@ -627,7 +640,9 @@
       }
       if (target === this.assigneeSelect) {
         try {
-          await this.saveAssignee(this.assigneeSelect.value);
+          this.beginAssigneeInteraction();
+          const intent = this.assigneeInteraction;
+          await this.saveAssignee(this.assigneeSelect.value, intent);
         } catch (error) {
           this.reportActionError(error);
         }
@@ -639,6 +654,27 @@
         } catch (error) {
           this.reportActionError(error);
         }
+      }
+    }
+
+    handleFocusIn(event) {
+      if (event.target === this.assigneeSelect) {
+        this.beginAssigneeInteraction();
+      }
+    }
+
+    handleFocusOut(event) {
+      queueMicrotask(() => {
+        if (event.target === this.assigneeSelect && document.activeElement !== this.assigneeSelect && this.pendingAction !== 'assignee') {
+          this.finishAssigneeInteraction();
+        }
+        this.releaseInteractions();
+      });
+    }
+
+    handleInteractionStart(event) {
+      if (event.target === this.assigneeSelect) {
+        this.beginAssigneeInteraction();
       }
     }
 
@@ -729,6 +765,34 @@
       }
     }
 
+    beginAssigneeInteraction() {
+      const current = this.currentTicket();
+      const refKey = this.currentRefKey();
+      if (!this.assigneeInteraction && current?.version && refKey) {
+        this.assigneeInteraction = {
+          refKey,
+          version: structuredClone(current.version),
+        };
+      }
+    }
+
+    finishAssigneeInteraction() {
+      this.assigneeInteraction = null;
+    }
+
+    releaseInteractions() {
+      if (this.ticket?.ticket) {
+        this.syncDraftFromInputs();
+        this.rebaseDraft(this.ticket, {});
+        this.ticketDrafts.set(this.ticket.ticket.ref.ticket_id, this.cloneDraft(this.inputDraft));
+      }
+      this.renderAssignment('release');
+      this.restoreDraft({ source: 'release' });
+      if (this.view) {
+        this.view.flushDeferred();
+      }
+    }
+
     async postTicketAction(url, payload) {
       const response = await fetch(url, {
         method: 'POST',
@@ -756,41 +820,63 @@
       return result;
     }
 
-    saveAssignee(value) {
-      return this.enqueueAction(() => this._saveAssignee(value));
+    saveAssignee(value, intent) {
+      const captured = intent ? structuredClone(intent) : null;
+      return this.enqueueAction(() => this._saveAssignee(value, captured));
     }
 
-    async _saveAssignee(value) {
+    async _saveAssignee(value, intent) {
       const current = this.currentTicket();
-      if (!current || !current.version || !this.assigneeSelect) {
+      if (!current || !intent?.version || !this.assigneeSelect || intent.refKey !== this.currentRefKey()) {
         return;
       }
       const actionSeq = ++this.requestCounters.action;
-      const savedDraft = this.cloneDraft(this.inputDraft);
       this.pendingAction = 'assignee';
-      this.renderAssignment();
+      this.renderAssignment('action', this.assigneeSelect);
       try {
         const detail = await this.postTicketAction(this.urlFor('assignee', current.ref.ticket_id), {
-          version: current.version,
+          version: intent.version,
           operation_id: crypto.randomUUID(),
           assignee: value || null,
         });
-        if (actionSeq !== this.requestCounters.action || this.currentTicketId() !== current.ref.ticket_id) {
+        if (actionSeq !== this.requestCounters.action || this.currentTicketId() !== current.ref.ticket_id || intent.refKey !== this.currentRefKey()) {
           return;
         }
-        this.applyDetailSnapshot(detail, { source: 'action', submittedValues: savedDraft });
+        this.applyDetailSnapshot(detail, { source: 'action', committedControl: this.assigneeSelect });
         this.clearActionError();
         this.updateVisibleCard();
+      } catch (error) {
+        this.finishAssigneeInteraction();
+        if (error instanceof TicketActionError && error.payload?.code === 'version-conflict') {
+          try {
+            const response = await fetch(this.urlFor('detailSnapshot', current.ref.ticket_id), { headers: { Accept: 'application/json' } });
+            if (response.ok && actionSeq === this.requestCounters.action && this.currentTicketId() === current.ref.ticket_id) {
+              const detail = await response.json();
+              this.applyDetailSnapshot(detail, { source: 'action', committedControl: this.assigneeSelect });
+              this.updateVisibleCard();
+            }
+          } catch {
+          }
+        }
+        throw error;
       } finally {
         this.pendingAction = null;
-        this.renderAssignment();
+        this.finishAssigneeInteraction();
+        this.renderAssignment('action', this.assigneeSelect);
       }
     }
 
-    restoreDraft() {
+    restoreDraft({ source = 'poll', committedControl = null } = {}) {
       for (const area of this.ticketInputs()) {
         const key = area.getAttribute('data-ticket-input');
         if (Object.prototype.hasOwnProperty.call(this.inputDraft.values, key)) {
+          if (this.controlIsHeld(area) && committedControl !== area) {
+            continue;
+          }
+          const nextValue = this.inputDraft.values[key];
+          if (Object.is(this.readControlValue(area), nextValue)) {
+            continue;
+          }
           this.writeControlValue(area, this.inputDraft.values[key]);
         }
       }
@@ -822,6 +908,68 @@
       return true;
     }
 
+    serverValues(detail) {
+      const current = detail?.ticket || {};
+      const values = {
+        title: current.title || '',
+        description: current.description || '',
+      };
+      for (const field of detail?.fields || []) {
+        values[field.id] = field.value;
+      }
+      return values;
+    }
+
+    controlForDraftKey(key) {
+      return this.ticketInputs().find((control) => control.getAttribute('data-ticket-input') === key) || null;
+    }
+
+    rebaseDraft(detail, submittedValues = {}) {
+      const serverValues = this.serverValues(detail);
+      const keys = new Set([
+        ...Object.keys(this.inputDraft.values),
+        ...Object.keys(this.inputDraft.baseValues),
+        ...Object.keys(serverValues),
+        ...Object.keys(submittedValues),
+      ]);
+      let canAdvanceVersion = true;
+      for (const key of keys) {
+        if (!Object.prototype.hasOwnProperty.call(serverValues, key)) {
+          continue;
+        }
+        const serverValue = serverValues[key];
+        const acknowledged = Object.prototype.hasOwnProperty.call(submittedValues, key)
+          && Object.is(serverValue, submittedValues[key]);
+        if (acknowledged) {
+          this.inputDraft.baseValues[key] = serverValue;
+          if (Object.is(this.inputDraft.values[key], submittedValues[key])) {
+            this.inputDraft.values[key] = serverValue;
+            this.inputDraft.dirty.delete(key);
+          } else {
+            this.inputDraft.dirty.add(key);
+          }
+        } else if (this.inputDraft.dirty.has(key)) {
+          if (!Object.is(serverValue, this.inputDraft.baseValues[key])) {
+            canAdvanceVersion = false;
+          }
+        } else {
+          const control = this.controlForDraftKey(key);
+          if (this.controlIsHeld(control) && !Object.is(this.readControlValue(control), serverValue)) {
+            canAdvanceVersion = false;
+            continue;
+          }
+          this.inputDraft.values[key] = serverValue;
+          this.inputDraft.baseValues[key] = serverValue;
+        }
+        if (this.inputDraft.dirty.has(key) && !Object.is(serverValue, this.inputDraft.baseValues[key])) {
+          canAdvanceVersion = false;
+        }
+      }
+      if (canAdvanceVersion) {
+        this.inputDraft.baseVersion = detail.ticket.version;
+      }
+    }
+
     async saveInputs() {
       return this.enqueueAction(() => this._saveInputs());
     }
@@ -839,7 +987,9 @@
       const version = this.inputDraft.baseVersion || current.version;
       const fieldValues = {};
       const patch = {};
+      const submittedValues = {};
       for (const key of this.inputDraft.dirty) {
+        submittedValues[key] = this.inputDraft.values[key];
         if (key === 'title' || key === 'description') {
           patch[key] = this.inputDraft.values[key];
         } else {
@@ -860,7 +1010,7 @@
         if (actionSeq !== this.requestCounters.action || this.currentTicketId() !== current.ref.ticket_id) {
           return;
         }
-        this.applyDetailSnapshot(detail, { source: 'action', committedControl: 'inputs' });
+        this.applyDetailSnapshot(detail, { source: 'action', submittedValues });
         this.clearActionError();
         this.updateVisibleCard();
       } catch (error) {
@@ -893,7 +1043,7 @@
         if (actionSeq !== this.requestCounters.action || this.currentTicketId() !== current.ref.ticket_id) {
           return;
         }
-        this.applyDetailSnapshot(detail, { source: 'action', committedControl: 'run' });
+        this.applyDetailSnapshot(detail, { source: 'action' });
         this.clearActionError();
         this.updateVisibleCard();
       } finally {
@@ -902,28 +1052,27 @@
       }
     }
 
-    renderAssignment() {
+    renderAssignment(source = 'poll', committedControl = null) {
       const current = this.currentTicket();
       if (!current) {
         return;
       }
       if (this.assigneeSelect) {
-        this.assigneeSelect.value = current.assignee || '';
-        this.assigneeSelect.disabled = this.pendingAction === 'assignee' || Boolean(current.active_run_job_id) || Boolean(current.pending_run_job_id);
+        const nextAssignee = current.assignee || '';
+        const protectAssignee = this.controlIsHeld(this.assigneeSelect) && committedControl !== this.assigneeSelect;
+        if (!protectAssignee && this.assigneeSelect.value !== nextAssignee) {
+          this.assigneeSelect.value = nextAssignee;
+        }
+        const assigneeDisabled = this.pendingAction === 'assignee' || Boolean(current.active_run_job_id) || Boolean(current.pending_run_job_id);
+        if (this.assigneeSelect.disabled !== assigneeDisabled) {
+          this.assigneeSelect.disabled = assigneeDisabled;
+        }
       }
       if (this.ticketState) {
         this.ticketState.textContent = current.state_name;
       }
       if (this.titleHeading) {
         this.titleHeading.textContent = current.title || '';
-      }
-      const titleInput = document.getElementById('ticket-title');
-      if (titleInput && !this.inputDraft.dirty.has('title')) {
-        titleInput.value = current.title || '';
-      }
-      const descriptionInput = document.getElementById('ticket-description');
-      if (descriptionInput && !this.inputDraft.dirty.has('description')) {
-        descriptionInput.value = current.description || '';
       }
       if (this.saveInputsButton) {
         this.saveInputsButton.disabled = this.pendingAction === 'inputs';
