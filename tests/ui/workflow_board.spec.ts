@@ -652,35 +652,34 @@ test('polling rejects invalid scoped refs before adopting model or DOM changes',
   const cases = [
     ['missing card ref', (nextBoard: typeof board) => {
       delete nextBoard.columns[0].tickets[0].ref;
-    }],
+    }, 'invalid-card-ref'],
     ['missing card scope field', (nextBoard: typeof board) => {
       delete nextBoard.columns[0].tickets[0].ref.team_id;
-    }],
+    }, 'invalid-card-ref'],
     ['wrong-type card scope field', (nextBoard: typeof board) => {
       nextBoard.columns[0].tickets[0].ref.workflow_id = 42;
-    }],
+    }, 'invalid-card-ref'],
     ['mismatched card binding', (nextBoard: typeof board) => {
       nextBoard.columns[0].tickets[0].ref.binding_id = 'other-binding';
-    }],
+    }, 'invalid-card-ref'],
     ['mismatched card team', (nextBoard: typeof board) => {
       nextBoard.columns[0].tickets[0].ref.team_id = 'other-team';
-    }],
+    }, 'invalid-card-ref'],
     ['mismatched card workflow', (nextBoard: typeof board) => {
       nextBoard.columns[0].tickets[0].ref.workflow_id = 'other-workflow';
-    }],
+    }, 'invalid-card-ref'],
     ['missing selected ref', (nextBoard: typeof board) => {
       delete nextBoard.selected_ticket.ticket.ref;
-    }],
+    }, 'invalid-selected-ref'],
     ['mismatched selected binding', (nextBoard: typeof board) => {
       nextBoard.selected_ticket.ticket.ref.binding_id = 'other-binding';
-    }],
+    }, 'invalid-selected-ref'],
   ] as const;
 
-  for (const [label, alter] of cases) {
+  for (const [label, alter, expectedReason] of cases) {
     const nextBoard = JSON.parse(JSON.stringify(board));
+    nextBoard.name = `Rejected ${label} board`;
     nextBoard.columns[0].tickets[0].title = `Rejected ${label}`;
-    nextBoard.columns[0].count += 1;
-    nextBoard.ticket_count += 1;
     alter(nextBoard);
     let served = false;
     await page.route('**/newsletter/workflows/delivery/snapshot?*', async (route) => {
@@ -717,6 +716,17 @@ test('polling rejects invalid scoped refs before adopting model or DOM changes',
     expect(card).not.toBeNull();
     expect(inspector).not.toBeNull();
     expect(input).not.toBeNull();
+    const inspection = await page.evaluate((candidate) => {
+      const controller = (window as typeof window & {
+        workflowBoardController: { currentTicketId: () => string | null; view: { inspectBoard: (board: unknown, selectedTicketId: string | null) => { ok: boolean; reason: string } } };
+      }).workflowBoardController;
+      return {
+        base: controller.view.inspectBoard(candidate.validBoard, controller.currentTicketId()),
+        invalid: controller.view.inspectBoard(candidate.invalidBoard, controller.currentTicketId()),
+      };
+    }, { validBoard: board, invalidBoard: nextBoard });
+    expect(inspection.base).toMatchObject({ ok: true });
+    expect(inspection.invalid).toMatchObject({ ok: false, reason: expectedReason });
 
     await forcePoll(page);
 
@@ -739,7 +749,7 @@ test('polling rejects invalid scoped refs before adopting model or DOM changes',
     expect(await input!.evaluate((node) => node.isConnected && node === document.getElementById('field-acceptance-criteria'))).toBe(true);
     await expect(page.locator('#field-acceptance-criteria')).toHaveValue(`Unsaved draft for ${label}`);
     await expect(page.getByRole('link', { name: new RegExp(`Rejected ${label}`) })).toHaveCount(0);
-    await expect(page.getByText(`${nextBoard.ticket_count} tickets`, { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: `Rejected ${label} board` })).toHaveCount(0);
     await page.unroute('**/newsletter/workflows/delivery/snapshot?*');
   }
 
