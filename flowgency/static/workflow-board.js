@@ -51,10 +51,15 @@
       this.runStatusLabel = document.querySelector('[data-ticket-run-status-label]');
       this.saveInputsButton = document.getElementById('ticket-save-inputs');
       this.runButton = document.getElementById('ticket-run-button');
+      this.refreshStatus = document.getElementById('workflow-refresh-status');
+      this.refreshStatusLabel = this.refreshStatus?.querySelector('[data-workflow-refresh-label]') || null;
       this.titleHeading = document.querySelector('.workflow-ticket-title-block h2');
       this.editToggle = document.getElementById('ticket-edit-toggle');
       this.editRegion = document.querySelector('[data-ticket-edit]');
       this.readDescription = document.querySelector('[data-ticket-description-read]');
+      if (window.lucide && typeof window.lucide.createIcons === 'function') {
+        window.lucide.createIcons({ attrs: { 'aria-hidden': 'true', focusable: 'false' } });
+      }
     }
 
     createView() {
@@ -216,6 +221,24 @@
         ? error.payload
         : this.issuePayload('action-failed', error?.message || 'The workflow action failed.');
       this.renderActionError();
+    }
+
+    setRefreshStatus(kind, message) {
+      if (!this.refreshStatus || !this.refreshStatusLabel) {
+        return;
+      }
+      this.refreshStatus.dataset.refreshKind = kind;
+      this.refreshStatusLabel.textContent = message;
+      this.refreshStatus.hidden = false;
+    }
+
+    clearRefreshStatus() {
+      if (!this.refreshStatus || !this.refreshStatusLabel) {
+        return;
+      }
+      this.refreshStatus.hidden = true;
+      this.refreshStatusLabel.textContent = '';
+      delete this.refreshStatus.dataset.refreshKind;
     }
 
     renderActionError() {
@@ -420,20 +443,24 @@
 
     applyBoardSnapshot(board) {
       if (!this.view) {
-        return false;
+        return { applied: false, unavailable: false };
       }
       const selectedTicketId = this.currentTicketId();
       const inspection = this.view.inspectBoard(board, selectedTicketId);
       if (!inspection.ok) {
-        return false;
+        this.setRefreshStatus('required', 'Refresh required');
+        return { applied: false, unavailable: false };
       }
       this.board = board;
       this.initial.board = board;
       this.view.renderBoard(board, selectedTicketId);
-      if (!inspection.unavailable && board.selected_ticket?.ticket) {
+      if (inspection.unavailable) {
+        this.setRefreshStatus('unavailable', 'Ticket unavailable');
+      } else if (board.selected_ticket?.ticket) {
         this.applyDetailSnapshot(board.selected_ticket, { source: 'poll' });
+        this.clearRefreshStatus();
       }
-      return true;
+      return { applied: true, unavailable: Boolean(inspection.unavailable) };
     }
 
     applyDetailSnapshot(detail, { source = 'poll', submittedValues = null, committedControl = null } = {}) {
@@ -479,33 +506,42 @@
           signal: request.controller.signal,
         });
         const payload = response.status === 304 || !response.ok ? null : await response.json();
-        if (!this.isLatestRequest('refresh', request.seq)
-          || request.controller.signal.aborted || document.hidden
-          || this.requestCounters.page !== pageSeq
-          || this.requestCounters.action !== actionSeq || this.pendingAction
-          || this.currentSnapshotUrl().toString() !== snapshotUrl) {
+        if (!this.isCurrentRefreshRequest(request, pageSeq, actionSeq, snapshotUrl)) {
           return;
         }
         if (response.status === 304) {
+          this.clearRefreshStatus();
           return;
         }
         if (!response.ok) {
-          throw new TicketActionError(this.issuePayload('refresh-failed', 'The workflow board could not be refreshed.'));
+          this.setRefreshStatus('failed', 'Unable to refresh');
+          return;
         }
-        if (this.applyBoardSnapshot(payload)) {
+        const result = this.applyBoardSnapshot(payload);
+        if (result.applied && !result.unavailable) {
           this.etags.board = response.headers.get('etag');
         } else {
           this.etags.board = null;
         }
       } catch (error) {
-        if (error?.name !== 'AbortError') {
-          this.reportActionError(error);
+        if (error?.name !== 'AbortError' && this.isCurrentRefreshRequest(request, pageSeq, actionSeq, snapshotUrl)) {
+          this.setRefreshStatus('failed', 'Unable to refresh');
         }
       } finally {
-        if (this.isLatestRequest('refresh', request.seq)) {
+        if (this.isLatestRequest('refresh', request.seq) && !document.hidden) {
           this.scheduleRefresh();
         }
       }
+    }
+
+    isCurrentRefreshRequest(request, pageSeq, actionSeq, snapshotUrl) {
+      return this.isLatestRequest('refresh', request.seq)
+        && !request.controller.signal.aborted
+        && !document.hidden
+        && this.requestCounters.page === pageSeq
+        && this.requestCounters.action === actionSeq
+        && !this.pendingAction
+        && this.currentSnapshotUrl().toString() === snapshotUrl;
     }
 
     scheduleRefresh() {
@@ -544,6 +580,11 @@
       }
       if (target.closest('#workflow-new-ticket') && this.ticketDialog) {
         this.ticketDialog.showModal();
+        return;
+      }
+      if (target.closest('#workflow-refresh-button')) {
+        event.preventDefault();
+        window.location.reload();
         return;
       }
       if (target.closest('#workflow-close-ticket-dialog, #workflow-cancel-ticket-dialog') && this.ticketDialog) {

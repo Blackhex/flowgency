@@ -68,6 +68,33 @@ async function forcePoll(page: Page): Promise<void> {
   });
 }
 
+async function installHeldPollBody(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const probeWindow = window as typeof window & {
+      releasePollBody?: () => void;
+      pollBodyHeld?: boolean;
+    };
+    const originalFetch = window.fetch.bind(window);
+    const held = new Promise<void>((resolve) => {
+      probeWindow.releasePollBody = resolve;
+    });
+    let heldOnce = false;
+    window.fetch = async (input, init) => {
+      const response = await originalFetch(input, init);
+      if (!heldOnce && String(input).includes('/workflows/delivery/snapshot') && response.status === 200) {
+        heldOnce = true;
+        const originalJson = response.json.bind(response);
+        response.json = async () => {
+          probeWindow.pollBodyHeld = true;
+          await held;
+          return originalJson();
+        };
+      }
+      return response;
+    };
+  });
+}
+
 test.beforeEach(async ({ page, request }, testInfo) => {
   await resetUiRuntime(request);
   await installBasePageSetup(page, testInfo.project.name.endsWith('dark') ? 'dark' : 'light');
@@ -779,6 +806,254 @@ test('visible polling refresh updates server content without wiping a dirty draf
   await expect(page.locator('#ticket-description')).toHaveValue('Remote description refreshed through polling');
   await expect(localField).toHaveValue('Locally edited and not yet saved');
   await expect(localField).toBeFocused();
+});
+
+test('refresh failure preserves controls and recovers without clearing an action error', async ({ page, request }) => {
+  await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
+  await stopPollTimer(page);
+  const field = page.getByLabel('Acceptance criteria', { exact: true });
+  const fieldNode = await page.locator('#field-acceptance-criteria').elementHandle();
+  const inspectorNode = await page.getByLabel('Ticket details').elementHandle();
+  expect(fieldNode).not.toBeNull();
+  expect(inspectorNode).not.toBeNull();
+
+  await field.fill('Draft survives refresh failure');
+  const original = await detailSnapshot(request);
+  const remoteUpdate = await request.post('/newsletter/workflows/delivery/tickets/fixture-review/update', {
+    headers: { Accept: 'application/json' },
+    form: { payload: JSON.stringify({
+      version: original.ticket.version,
+      operation_id: operationId('refresh-failure-conflict'),
+      patch: { field_values: { 'acceptance-criteria': 'Remote value before stale action' } },
+    }) },
+  });
+  expect(remoteUpdate.ok()).toBeTruthy();
+  const conflictResponse = page.waitForResponse((response) => response.url().includes('/tickets/fixture-review/update') && response.request().method() === 'POST');
+  await page.getByRole('button', { name: 'Save inputs', exact: true }).click();
+  expect((await conflictResponse).status()).toBe(409);
+  await expect(page.locator('#workflow-action-errors')).toContainText('Refresh the ticket');
+
+  await page.route('**/newsletter/workflows/delivery/snapshot?*', async (route) => {
+    await route.abort('failed');
+  }, { times: 1 });
+  await forcePoll(page);
+
+  await expect(page.locator('#workflow-refresh-status')).toContainText('Unable to refresh');
+  await expect(page.locator('#workflow-action-errors')).toContainText('Refresh the ticket');
+  expect(await fieldNode!.evaluate((node) => node.isConnected && node === document.getElementById('field-acceptance-criteria'))).toBe(true);
+  expect(await inspectorNode!.evaluate((node) => node.isConnected && node === document.querySelector('[aria-label="Ticket details"]'))).toBe(true);
+  await expect(field).toHaveValue('Draft survives refresh failure');
+
+  await forcePoll(page);
+
+  await expect(page.locator('#workflow-refresh-status')).toBeHidden();
+  await expect(page.locator('#workflow-action-errors')).toContainText('Refresh the ticket');
+  await expect(field).toHaveValue('Draft survives refresh failure');
+
+  await page.route('**/newsletter/workflows/delivery/snapshot?*', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: { ETag: 'W/"task4-invalid-json"', 'Cache-Control': 'no-cache' },
+      body: '{',
+    });
+  }, { times: 1 });
+  await forcePoll(page);
+
+  await expect(page.locator('#workflow-refresh-status')).toContainText('Unable to refresh');
+  await expect(page.locator('#workflow-action-errors')).toContainText('Refresh the ticket');
+  await expect(field).toHaveValue('Draft survives refresh failure');
+
+  await forcePoll(page);
+
+  await expect(page.locator('#workflow-refresh-status')).toBeHidden();
+  await expect(page.locator('#workflow-action-errors')).toContainText('Refresh the ticket');
+  await expect(field).toHaveValue('Draft survives refresh failure');
+});
+
+test('incompatible snapshot requires explicit refresh without partial application', async ({ page, request }) => {
+  const response = await request.get('/newsletter/workflows/delivery/snapshot?ticket=fixture-review');
+  expect(response.ok()).toBeTruthy();
+  const board = await response.json();
+  const nextBoard = JSON.parse(JSON.stringify(board));
+  const editableField = nextBoard.selected_ticket.fields.find((field: { id: string; is_output: boolean; type: string }) => field.id === 'acceptance-criteria' && !field.is_output);
+  expect(editableField).toBeTruthy();
+  editableField.type = editableField.type === 'text' ? 'number' : 'text';
+  nextBoard.name = 'Rejected incompatible board title';
+  nextBoard.selected_ticket.ticket.title = 'Rejected incompatible ticket title';
+  const selectedCard = nextBoard.columns.flatMap((column: { tickets: Array<{ ref: { ticket_id: string }; title: string }> }) => column.tickets).find((ticket: { ref: { ticket_id: string }; title: string }) => ticket.ref.ticket_id === 'fixture-review');
+  expect(selectedCard).toBeTruthy();
+  selectedCard.title = 'Rejected incompatible card title';
+
+  const htmlRequests: string[] = [];
+  page.on('request', (requestEvent) => {
+    const accepted = requestEvent.headers().accept || '';
+    if (requestEvent.method() === 'GET' && accepted.includes('text/html')) {
+      htmlRequests.push(requestEvent.url());
+    }
+  });
+  await page.route('**/newsletter/workflows/delivery/snapshot?*', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: { ETag: 'W/"task4-incompatible"', 'Cache-Control': 'no-cache' },
+      body: JSON.stringify(nextBoard),
+    });
+  }, { times: 1 });
+
+  await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
+  await stopPollTimer(page);
+  htmlRequests.length = 0;
+  const previousState = await page.evaluate(() => {
+    const controller = (window as typeof window & {
+      workflowBoardController: { board: unknown; ticket: { ticket: { version: unknown } }; etags: { board: string | null } };
+      __task4BoardBefore?: unknown;
+    }).workflowBoardController;
+    (window as typeof window & { __task4BoardBefore?: unknown }).__task4BoardBefore = controller.board;
+    return { version: controller.ticket.ticket.version, etag: controller.etags.board };
+  });
+
+  await forcePoll(page);
+  await page.getByRole('button', { name: 'Run', exact: true }).focus();
+
+  const currentState = await page.evaluate(() => {
+    const controller = (window as typeof window & {
+      workflowBoardController: { board: unknown; ticket: { ticket: { version: unknown } }; etags: { board: string | null } };
+      __task4BoardBefore?: unknown;
+    }).workflowBoardController;
+    return {
+      sameBoard: controller.board === (window as typeof window & { __task4BoardBefore?: unknown }).__task4BoardBefore,
+      version: controller.ticket.ticket.version,
+      etag: controller.etags.board,
+    };
+  });
+  expect(currentState.sameBoard).toBe(true);
+  expect(currentState.version).toEqual(previousState.version);
+  expect(currentState.etag).toBeNull();
+  await expect(page.locator('#workflow-refresh-status')).toContainText('Refresh required');
+  await expect(page.getByRole('heading', { name: 'Rejected incompatible board title' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Rejected incompatible ticket title' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: /Rejected incompatible card title/ })).toHaveCount(0);
+  expect(htmlRequests).toEqual([]);
+});
+
+test('missing selected ticket keeps its inspector and draft', async ({ page, request }) => {
+  const response = await request.get('/newsletter/workflows/delivery/snapshot?ticket=fixture-review');
+  expect(response.ok()).toBeTruthy();
+  const board = await response.json();
+  const unavailableBoard = JSON.parse(JSON.stringify(board));
+  unavailableBoard.selected_ticket = { ...unavailableBoard.selected_ticket, ticket: null, fields: [] };
+  unavailableBoard.name = 'Board structure may still refresh';
+
+  await page.route('**/newsletter/workflows/delivery/snapshot?*', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: { ETag: 'W/"task4-selected-unavailable"', 'Cache-Control': 'no-cache' },
+      body: JSON.stringify(unavailableBoard),
+    });
+  }, { times: 1 });
+  await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
+  await stopPollTimer(page);
+  await page.getByLabel('Acceptance criteria', { exact: true }).fill('Draft survives missing selection');
+  const inspectorNode = await page.getByLabel('Ticket details').elementHandle();
+  const fieldNode = await page.locator('#field-acceptance-criteria').elementHandle();
+  expect(inspectorNode).not.toBeNull();
+  expect(fieldNode).not.toBeNull();
+
+  await forcePoll(page);
+
+  await expect(page.locator('#workflow-refresh-status')).toContainText('Ticket unavailable');
+  expect(await inspectorNode!.evaluate((node) => node.isConnected && node === document.querySelector('[aria-label="Ticket details"]'))).toBe(true);
+  expect(await fieldNode!.evaluate((node) => node.isConnected && node === document.getElementById('field-acceptance-criteria'))).toBe(true);
+  await expect(page.getByLabel('Acceptance criteria', { exact: true })).toHaveValue('Draft survives missing selection');
+
+  await forcePoll(page);
+
+  await expect(page.locator('#workflow-refresh-status')).toBeHidden();
+  await expect(page.getByLabel('Acceptance criteria', { exact: true })).toHaveValue('Draft survives missing selection');
+});
+
+test('poll body parsed after an action cannot roll back its accepted reply', async ({ page, request }) => {
+  await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
+  await stopPollTimer(page);
+  const response = await request.get('/newsletter/workflows/delivery/snapshot?ticket=fixture-review');
+  expect(response.ok()).toBeTruthy();
+  const staleBoard = await response.json();
+  await installHeldPollBody(page);
+  await page.route('**/newsletter/workflows/delivery/snapshot?*', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: { ETag: 'W/"task4-late-action"', 'Cache-Control': 'no-cache' },
+      body: JSON.stringify(staleBoard),
+    });
+  }, { times: 1 });
+
+  await page.evaluate(() => void (window as typeof window & { workflowBoardController: { refreshBoard: () => Promise<void> } }).workflowBoardController.refreshBoard());
+  await page.waitForFunction(() => Boolean((window as typeof window & { pollBodyHeld?: boolean }).pollBodyHeld));
+  const assignmentResponse = page.waitForResponse((eventResponse) => eventResponse.url().includes('/tickets/fixture-review/assignee') && eventResponse.request().method() === 'POST');
+  await page.getByLabel('Assigned agent', { exact: true }).selectOption('builder');
+  expect((await assignmentResponse).status()).toBe(303);
+  await expect(page.getByLabel('Assigned agent', { exact: true })).toHaveValue('builder');
+  await page.evaluate(() => (window as typeof window & { releasePollBody?: () => void }).releasePollBody?.());
+
+  await expect(page.getByLabel('Assigned agent', { exact: true })).toHaveValue('builder');
+  expect((await detailSnapshot(request)).ticket.assignee).toBe('builder');
+});
+
+test('hidden document rejects a snapshot whose body parsing finishes late', async ({ page, request }) => {
+  await page.addInitScript(() => {
+    let hidden = false;
+    Object.defineProperty(document, 'hidden', {
+      configurable: true,
+      get() {
+        return hidden;
+      },
+      set(value) {
+        hidden = Boolean(value);
+      },
+    });
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get() {
+        return hidden ? 'hidden' : 'visible';
+      },
+    });
+    (window as typeof window & { __setTestHidden?: (value: boolean) => void }).__setTestHidden = (value: boolean) => {
+      hidden = value;
+      document.dispatchEvent(new Event('visibilitychange'));
+    };
+  });
+  const response = await request.get('/newsletter/workflows/delivery/snapshot?ticket=fixture-review');
+  expect(response.ok()).toBeTruthy();
+  const staleBoard = await response.json();
+  staleBoard.name = 'Hidden late body must not apply';
+  staleBoard.selected_ticket.ticket.description = 'Hidden late body stale description';
+  await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
+  await stopPollTimer(page);
+  await installHeldPollBody(page);
+  await page.route('**/newsletter/workflows/delivery/snapshot?*', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: { ETag: 'W/"task4-late-hidden"', 'Cache-Control': 'no-cache' },
+      body: JSON.stringify(staleBoard),
+    });
+  }, { times: 1 });
+
+  await page.evaluate(() => void (window as typeof window & { workflowBoardController: { refreshBoard: () => Promise<void> } }).workflowBoardController.refreshBoard());
+  await page.waitForFunction(() => Boolean((window as typeof window & { pollBodyHeld?: boolean }).pollBodyHeld));
+  await page.evaluate(() => (window as typeof window & { __setTestHidden: (value: boolean) => void }).__setTestHidden(true));
+  await page.evaluate(() => (window as typeof window & { releasePollBody?: () => void }).releasePollBody?.());
+
+  await expect(page.getByRole('heading', { name: 'Hidden late body must not apply' })).toHaveCount(0);
+  await expect(page.locator('#ticket-description')).not.toHaveValue('Hidden late body stale description');
+  const controllerState = await page.evaluate(() => {
+    const controller = (window as typeof window & { workflowBoardController: { etags: { board: string | null } } }).workflowBoardController;
+    return { etag: controller.etags.board };
+  });
+  expect(controllerState.etag).not.toBe('W/"task4-late-hidden"');
 });
 
 test('polling keeps the assignee node and never fetches page html', async ({ page, request }) => {

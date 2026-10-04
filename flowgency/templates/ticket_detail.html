@@ -36,6 +36,12 @@
         {% endfor %}
       </select>
     </form>
+    <div id="workflow-refresh-status" class="workflow-refresh-status" role="status" hidden>
+      <span data-workflow-refresh-label></span>
+      <button type="button" id="workflow-refresh-button" class="workflow-icon-button" aria-label="Refresh page" title="Refresh page">
+        <i data-lucide="refresh-cw" aria-hidden="true"></i>
+      </button>
+    </div>
     <button type="button" class="workflow-primary-button" id="workflow-new-ticket">
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
       <span>New ticket</span>
@@ -89,6 +95,7 @@
 <script id="workflow-initial" type="application/json">{{ workflow_initial | tojson }}</script>
 {% endblock %}
 {% block page_scripts %}
+<script src="/static/lucide.min.js"></script>
 <script src="/static/workflow-board-view.js"></script>
 <script src="/static/workflow-board.js"></script>
 {% endblock %}

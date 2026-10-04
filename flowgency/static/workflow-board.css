@@ -104,6 +104,27 @@
   min-width: 0;
 }
 
+.workflow-refresh-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  max-width: 16rem;
+  color: var(--workflow-muted);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.workflow-refresh-status[hidden] {
+  display: none;
+}
+
+.workflow-refresh-status span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .workflow-board-filters input,
 .workflow-dialog input,
 .workflow-board-filters select,
@@ -820,6 +841,7 @@
   }
 
   .workflow-board-actions .workflow-link-button,
+  .workflow-board-actions .workflow-refresh-status,
   .workflow-board-actions #workflow-new-ticket {
     flex: 1 1 100%;
   }
