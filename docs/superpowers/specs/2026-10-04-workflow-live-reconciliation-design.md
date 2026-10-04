@@ -200,10 +200,11 @@ text assertions or element locators that silently resolve replacement nodes.
    Run the existing desktop/mobile headless projects without changing unrelated
    snapshots or tolerances.
 
-Follow the repository gates: obtain a clean full-suite worktree baseline before
-implementation; use focused tests while iterating; run complete Python and
-browser suites sequentially; review the change; then perform the pre-authorized
-fast-forward, master verification, publication, and owned-worktree cleanup.
+Follow the repository gates with the explicit user-approved exception below:
+record the complete worktree baseline before implementation; use focused tests
+while iterating; run complete Python and browser suites sequentially; review the
+change; then perform the pre-authorized fast-forward, master verification,
+publication, and owned-worktree cleanup.
 
 ## Baseline Investigation
 
@@ -219,11 +220,28 @@ refusal because a required tool-search tool was not supplied. This is evidence
 of the refusal, not proof of a network or authentication failure or of the
 actual tool catalog supplied to the model.
 
-The complete isolated baseline is not yet established. Keep this runtime probe
-failure as a blocker before implementation; do not skip it, loosen assertions,
-switch models, widen grants, or change transport to make this UI work appear
-green. Further runtime corrections require their own authorized scope. The
-focused test receipt is retained under the ignored worktree evidence directory.
+The complete isolated baseline is not yet established. Do not skip the runtime
+probe, loosen assertions, switch models, widen grants, or change transport to
+make this UI work appear green. Further runtime corrections require their own
+authorized scope. The focused test receipt is retained under the ignored
+worktree evidence directory.
+
+### User-Approved Known-Failure Exception
+
+On 2026-10-04 the user selected proceeding with the UI fix under an explicit
+known-failure exception rather than continuing runtime diagnosis. The one
+accepted external-runtime failure is
+tests/test_ticket_runtime_live.py::test_restricted_agent_reads_ticket_over_http_without_editing[copilot].
+Its test, markers, assertions, and security checks remain intact and execute in
+every complete suite. Retain its failed receipts and disclose its actual status
+at baseline, feature validation, integrated master verification, and completion.
+
+The exception permits implementation and integration only when this is the sole
+pre-existing failure and there are no new failures or errors. The complete
+browser matrix and all behavior-scoped UI checks must pass. Do not broaden the
+exception silently if another failure occurs, nor describe a red full suite as
+green. Runtime metadata experiments are separated from this UI feature; the
+unintegrated eager-exposure change must not be bundled into it.
 
 ## Alternatives
 
