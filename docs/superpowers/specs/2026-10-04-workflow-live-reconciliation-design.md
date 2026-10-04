@@ -2,7 +2,7 @@
 
 Date: 2026-10-04
 Branch: `feature/workflow-live-reconciliation`
-Worktree: `.worktrees/workflow-live-reconciliation/`
+Worktree: `.worktrees/workflow-ui/`
 Status: design sections approved; written specification awaiting review.
 
 ## Failure And Evidence

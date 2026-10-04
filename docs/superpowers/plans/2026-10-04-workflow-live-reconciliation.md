@@ -32,7 +32,7 @@
 
 ## Baseline Gate And Commands
 
-The worktree is `C:\Projekty\Flowgency\.worktrees\workflow-live-reconciliation`, on `feature/workflow-live-reconciliation`. Python test extras and locked npm dependencies are already installed there.
+The worktree is `C:\Projekty\Flowgency\.worktrees\workflow-ui`, on `feature/workflow-live-reconciliation`. Python test extras and locked npm dependencies are already installed there.
 
 The original global-user full run produced 3353 passed, 19 skipped, and three failures. The isolated targeted rerun fixed the two packaging failures but still failed `test_restricted_agent_reads_ticket_over_http_without_editing[copilot]`: the CLI exited zero, made no ticket broker calls, and reported that it could not load a required tool-search tool. This does not establish the actual catalog supplied to the model or a network/authentication failure. The focused receipt is `.superpowers/evidence/workflow-live-reconciliation/baseline-focused.xml`.
 
@@ -47,7 +47,7 @@ No other failure/error or browser failure is accepted. Keep every test and secur
 - [ ] Verify the already-resolved packaging environment through unchanged focused checks, without another standalone runtime retry:
 
 ```powershell
-Set-Location 'C:\Projekty\Flowgency\.worktrees\workflow-live-reconciliation'
+Set-Location 'C:\Projekty\Flowgency\.worktrees\workflow-ui'
 & .\.venv\Scripts\python.exe -m pytest tests/test_setup_assets.py::test_documented_workflow_recipe_runs_from_the_wheel_not_the_checkout tests/test_workflow_setup.py::test_installed_distribution_validates_shipped_workflow_examples -q --junitxml=.superpowers/evidence/workflow-live-reconciliation/baseline-packaging.xml
 ```
 
@@ -746,7 +746,7 @@ Inspect the diff from `master`, check the approved specification's requirements 
 - [ ] **Step 3: Run the full worktree gates sequentially and read the receipts.**
 
 ```powershell
-Set-Location 'C:\Projekty\Flowgency\.worktrees\workflow-live-reconciliation'
+Set-Location 'C:\Projekty\Flowgency\.worktrees\workflow-ui'
 & .\.venv\Scripts\python.exe -m pytest tests/ -q --junitxml=.superpowers/evidence/workflow-live-reconciliation/feature-python.xml
 ```
 
@@ -801,7 +801,7 @@ Verify the published tips match the reviewed local tips. A prompt, a partial pus
 Archive the owned evidence/receipts and required failure captures under the primary checkout's ignored `.superpowers/evidence/workflow-live-reconciliation` before removing their source. Verify copied receipts/hashes. Inventory the worktree for unknown user or runtime data; preserve it before any removal. Stop owned servers/watchers and ensure no pending terminal uses the worktree.
 
 ```powershell
-git -C 'C:\Projekty\Flowgency' worktree remove .worktrees/workflow-live-reconciliation
+git -C 'C:\Projekty\Flowgency' worktree remove .worktrees/workflow-ui
 git -C 'C:\Projekty\Flowgency' worktree prune
 ```
 
