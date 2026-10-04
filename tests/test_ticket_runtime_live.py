@@ -1347,18 +1347,38 @@ def _agent_task(ref_json: str, project_result: Path, artifact_b64: str) -> str:
 def _read_only_agent_task(ref_json: str) -> str:
     return (
         "Operate a single Flowgency workflow ticket using only the read-only "
-        'ticket_get tool exposed by the "flowgency-tickets" MCP server. Do not '
+        'flowgency-tickets-ticket_get tool exposed by the "flowgency-tickets" MCP server. Do not '
         "create, edit, or delete any file on disk, and do not call any other ticket "
         "tool or any shell, git, or write tool at any point.\n\n"
         "Ticket reference (JSON):\n"
         f"{ref_json}\n\n"
         "Steps:\n"
-        "1. Call the ticket_get tool with that exact ref to load the ticket and its "
+        "1. Call the flowgency-tickets-ticket_get tool with that exact ref to load the ticket and its "
         "current `version`.\n"
         "2. Confirm the response `ok` is true, then stop and reply with the single "
         "word DONE.\n\n"
         "Do not attempt any workspace write and do not call any mutating ticket tool."
     )
+
+
+def test_read_only_agent_task_names_the_copilot_visible_tool():
+    ref_json = json.dumps(
+        {
+            "binding_id": "fixture-binding",
+            "team_id": "newsletter",
+            "workflow_id": "board-a",
+            "ticket_id": "ticket-name-probe",
+        }
+    )
+    task = _read_only_agent_task(ref_json)
+
+    assert "flowgency-tickets-ticket_get tool" in task
+    assert "1. Call the flowgency-tickets-ticket_get tool" in task
+    assert ref_json in task
+    assert "do not call any other ticket" in task
+    assert "tool or any shell, git, or write tool at any point" in task
+    assert "Do not attempt any workspace write" in task
+    assert "do not call any mutating ticket tool" in task
 
 
 def _restricted_agent_task(
