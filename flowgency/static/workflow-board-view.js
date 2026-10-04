@@ -37,6 +37,25 @@
     return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
   }
 
+  function bindingParts(binding) {
+    return [
+      binding?.storage?.binding_id || binding?.binding_id || binding?.binding_id,
+      binding?.team_id,
+      binding?.workflow_id,
+    ];
+  }
+
+  function isScopedRef(ref, expectedBindingParts) {
+    return isPlainObject(ref)
+      && typeof ref.binding_id === 'string' && ref.binding_id.trim() !== ''
+      && typeof ref.team_id === 'string' && ref.team_id.trim() !== ''
+      && typeof ref.workflow_id === 'string' && ref.workflow_id.trim() !== ''
+      && typeof ref.ticket_id === 'string' && ref.ticket_id.trim() !== ''
+      && ref.binding_id === expectedBindingParts[0]
+      && ref.team_id === expectedBindingParts[1]
+      && ref.workflow_id === expectedBindingParts[2];
+  }
+
   function ticketId(detail) {
     return detail?.ticket?.ref?.ticket_id || null;
   }
@@ -155,11 +174,8 @@
       this.page = page;
       this.boardUrl = boardUrl;
       this.initialBoard = initialBoard;
-      this.bindingKey = JSON.stringify([
-        initialBoard?.binding?.storage?.binding_id || initialBoard?.binding?.binding_id || initialBoard?.binding_id,
-        initialBoard?.binding?.team_id,
-        initialBoard?.binding?.workflow_id,
-      ]);
+      this.bindingParts = bindingParts(initialBoard?.binding);
+      this.bindingKey = JSON.stringify(this.bindingParts);
       this.initialSelectedKey = initialBoard?.selected_ticket?.ticket ? refKey(initialBoard.selected_ticket.ticket.ref) : null;
       this.editableSignature = editableSignature(initialBoard?.selected_ticket);
       this.deferred = new Map();
@@ -192,11 +208,7 @@
       if (board.presentation?.format !== 1) {
         return { ok: false, reason: 'unsupported-presentation', unavailable: false };
       }
-      const bindingKey = JSON.stringify([
-        board?.binding?.storage?.binding_id || board?.binding?.binding_id || board?.binding_id,
-        board?.binding?.team_id,
-        board?.binding?.workflow_id,
-      ]);
+      const bindingKey = JSON.stringify(bindingParts(board?.binding));
       if (bindingKey !== this.bindingKey) {
         return { ok: false, reason: 'wrong-binding', unavailable: false };
       }
@@ -214,7 +226,10 @@
           return { ok: false, reason: 'invalid-column-count', unavailable: false };
         }
         for (const card of column.tickets) {
-          const key = refKey(card.ref || {});
+          if (!isScopedRef(card?.ref, this.bindingParts)) {
+            return { ok: false, reason: 'invalid-card-ref', unavailable: false };
+          }
+          const key = refKey(card.ref);
           if (cardKeys.has(key)) {
             return { ok: false, reason: 'duplicate-card', unavailable: false };
           }
@@ -226,6 +241,9 @@
         return { ok: true, reason: 'selected-unavailable', unavailable: true };
       }
       if (selected?.ticket) {
+        if (!isScopedRef(selected.ticket.ref, this.bindingParts)) {
+          return { ok: false, reason: 'invalid-selected-ref', unavailable: false };
+        }
         if (selected.ticket.ref.ticket_id !== selectedTicketId || refKey(selected.ticket.ref) !== this.initialSelectedKey && selectedTicketId === ticketId(this.initialBoard?.selected_ticket)) {
           return { ok: false, reason: 'wrong-selected-ticket', unavailable: false };
         }

@@ -645,6 +645,107 @@ test('polling reconciles moved and removed cards with stable keyed nodes', async
   await assertNoConsoleErrors(page);
 });
 
+test('polling rejects invalid scoped refs before adopting model or DOM changes', async ({ page, request }) => {
+  const response = await request.get('/newsletter/workflows/delivery/snapshot?ticket=fixture-review');
+  expect(response.ok()).toBeTruthy();
+  const board = await response.json();
+  const cases = [
+    ['missing card ref', (nextBoard: typeof board) => {
+      delete nextBoard.columns[0].tickets[0].ref;
+    }],
+    ['missing card scope field', (nextBoard: typeof board) => {
+      delete nextBoard.columns[0].tickets[0].ref.team_id;
+    }],
+    ['wrong-type card scope field', (nextBoard: typeof board) => {
+      nextBoard.columns[0].tickets[0].ref.workflow_id = 42;
+    }],
+    ['mismatched card binding', (nextBoard: typeof board) => {
+      nextBoard.columns[0].tickets[0].ref.binding_id = 'other-binding';
+    }],
+    ['mismatched card team', (nextBoard: typeof board) => {
+      nextBoard.columns[0].tickets[0].ref.team_id = 'other-team';
+    }],
+    ['mismatched card workflow', (nextBoard: typeof board) => {
+      nextBoard.columns[0].tickets[0].ref.workflow_id = 'other-workflow';
+    }],
+    ['missing selected ref', (nextBoard: typeof board) => {
+      delete nextBoard.selected_ticket.ticket.ref;
+    }],
+    ['mismatched selected binding', (nextBoard: typeof board) => {
+      nextBoard.selected_ticket.ticket.ref.binding_id = 'other-binding';
+    }],
+  ] as const;
+
+  for (const [label, alter] of cases) {
+    const nextBoard = JSON.parse(JSON.stringify(board));
+    nextBoard.columns[0].tickets[0].title = `Rejected ${label}`;
+    nextBoard.columns[0].count += 1;
+    nextBoard.ticket_count += 1;
+    alter(nextBoard);
+    let served = false;
+    await page.route('**/newsletter/workflows/delivery/snapshot?*', async (route) => {
+      if (served) {
+        await route.fallback();
+        return;
+      }
+      served = true;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: { ETag: `W/"invalid-ref-${label.replaceAll(' ', '-')}"`, 'Cache-Control': 'no-cache' },
+        body: JSON.stringify(nextBoard),
+      });
+    });
+
+    await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
+    await stopPollTimer(page);
+    await page.locator('#field-acceptance-criteria').fill(`Unsaved draft for ${label}`);
+    const card = await page.locator('[data-ticket-id="fixture-review"]').elementHandle();
+    const inspector = await page.getByLabel('Ticket details').elementHandle();
+    const input = await page.locator('#field-acceptance-criteria').elementHandle();
+    const controllerBefore = await page.evaluate(() => {
+      const controller = (window as typeof window & {
+        workflowBoardController: { board: unknown; ticket: { ticket: { version: unknown } }; etags: { board: string | null } };
+        __task2BoardBefore?: unknown;
+      }).workflowBoardController;
+      (window as typeof window & { __task2BoardBefore?: unknown }).__task2BoardBefore = controller.board;
+      return {
+        version: controller.ticket.ticket.version,
+        etag: controller.etags.board,
+      };
+    });
+    expect(card).not.toBeNull();
+    expect(inspector).not.toBeNull();
+    expect(input).not.toBeNull();
+
+    await forcePoll(page);
+
+    const controllerAfter = await page.evaluate(() => {
+      const controller = (window as typeof window & {
+        workflowBoardController: { board: unknown; ticket: { ticket: { version: unknown } }; etags: { board: string | null } };
+        __task2BoardBefore?: unknown;
+      }).workflowBoardController;
+      return {
+        sameBoard: controller.board === (window as typeof window & { __task2BoardBefore?: unknown }).__task2BoardBefore,
+        version: controller.ticket.ticket.version,
+        etag: controller.etags.board,
+      };
+    });
+    expect(controllerAfter.sameBoard).toBe(true);
+    expect(controllerAfter.version).toEqual(controllerBefore.version);
+    expect(controllerAfter.etag).not.toBe(`W/"invalid-ref-${label.replaceAll(' ', '-')}"`);
+    expect(await card!.evaluate((node) => node.isConnected && node === document.querySelector('[data-ticket-id="fixture-review"]'))).toBe(true);
+    expect(await inspector!.evaluate((node) => node.isConnected && node === document.querySelector('[aria-label="Ticket details"]'))).toBe(true);
+    expect(await input!.evaluate((node) => node.isConnected && node === document.getElementById('field-acceptance-criteria'))).toBe(true);
+    await expect(page.locator('#field-acceptance-criteria')).toHaveValue(`Unsaved draft for ${label}`);
+    await expect(page.getByRole('link', { name: new RegExp(`Rejected ${label}`) })).toHaveCount(0);
+    await expect(page.getByText(`${nextBoard.ticket_count} tickets`, { exact: true })).toHaveCount(0);
+    await page.unroute('**/newsletter/workflows/delivery/snapshot?*');
+  }
+
+  await assertNoConsoleErrors(page);
+});
+
 test('hidden pages pause polling and abort an in-flight refresh without extra snapshot requests', async ({ page, request }) => {
   await page.addInitScript(() => {
     let hidden = false;
