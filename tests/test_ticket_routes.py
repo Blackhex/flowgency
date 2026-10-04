@@ -13,6 +13,7 @@ from dataclasses import replace
 from flowgency.jobs.authority import JobStore
 from flowgency.jobs.store import read_job, write_job
 from flowgency.tickets.artifacts import RetainedArtifact
+from flowgency.tickets.errors import TicketConflict
 from flowgency.tickets.models import TicketEvent, TicketRef, TicketRecord
 from flowgency.tickets.storages.local import LocalTicketStorage
 from flowgency.integrations.models import RuntimeCapabilities
@@ -29,6 +30,11 @@ def workflow_initial_payload(html: str) -> dict:
     )
     assert match is not None
     return json.loads(match.group(1))
+
+
+def assert_projected_initial_board(payload: dict, team_agents: list[str]) -> None:
+    assert payload["board"]["presentation"]["format"] == 1
+    assert payload["board"]["presentation"]["agent_options"] == team_agents
 
 
 def test_user_update_cannot_set_state(workflow_web_env):
@@ -178,6 +184,44 @@ def test_create_route_rerenders_html_with_submitted_draft_on_validation_error(wo
     assert "Create draft" in response.text
     assert "Preserve this description" in response.text
     assert "Invalid value." in response.text or "Value must be an object." in response.text
+    payload = workflow_initial_payload(response.text)
+    configured = env.client.app.state.services.config_store.load()
+    assert_projected_initial_board(payload, list(configured.config.teams[env.team_id].agents))
+    assert payload["board"]["selected_ticket"] is None
+
+
+def test_create_route_rerenders_html_with_projected_initial_json_on_conflict(workflow_web_env, monkeypatch):
+    env = workflow_web_env
+
+    def raise_conflict(*args, **kwargs):
+        raise TicketConflict("create-conflict", "Create conflict")
+
+    monkeypatch.setattr(env.client.app.state.services.tickets, "create", raise_conflict)
+
+    response = env.client.post(
+        f"{env.base_path}/tickets",
+        data={
+            "payload": json.dumps(
+                {
+                    "operation_id": "create-conflict",
+                    "title": "Conflict draft",
+                    "description": "Preserve this conflicting draft",
+                    "field_values": {"summary": "hello"},
+                }
+            )
+        },
+        headers={"Accept": "text/html"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 409
+    assert "text/html" in response.headers["content-type"]
+    assert "Conflict draft" in response.text
+    assert "Preserve this conflicting draft" in response.text
+    payload = workflow_initial_payload(response.text)
+    configured = env.client.app.state.services.config_store.load()
+    assert_projected_initial_board(payload, list(configured.config.teams[env.team_id].agents))
+    assert payload["board"]["selected_ticket"] is None
 
 
 def test_create_route_accepts_progressive_form_fields_without_json_payload(workflow_web_env):

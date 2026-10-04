@@ -1,7 +1,9 @@
 {% extends "workflow_board.html" %}
+{% import "_ticket_presentation.html" as presentation with context %}
 {% block content %}
 <link rel="stylesheet" href="/static/workflow-board.css">
 <section class="workflow-board-page workflow-ticket-page">
+  <div{% if board.issues %} class="workflow-issue-banner"{% else %} hidden{% endif %} role="status" data-board-issues>{% if board.issues %}{{ presentation.issues(board.issues) }}{% endif %}</div>
   <header class="workflow-board-toolbar">
     <div class="workflow-board-heading">
       <div class="workflow-board-title">

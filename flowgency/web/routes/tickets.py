@@ -15,7 +15,7 @@ from flowgency.tickets.errors import TicketConflict, TicketForbidden, TicketNotF
 from flowgency.tickets.models import TicketOperation, TicketPatch, TicketRef, TicketVersion
 from flowgency.tickets.views import build_board_view, build_ticket_detail_view
 from flowgency.web.dependencies import FlowgencyServices, get_services
-from flowgency.web.ticket_presentation import board_snapshot_payload, ticket_snapshot_payload
+from flowgency.web.ticket_snapshots import board_snapshot_payload, ticket_snapshot_payload
 from flowgency.web.team_navigation import build_team_context
 from flowgency.web.workflow_context import require_team_and_workflow, require_ticket_jobs, require_ticket_services, user_context
 
@@ -492,7 +492,7 @@ async def _render_board_page(
             "new_ticket_draft": new_ticket_draft or {},
             "new_ticket_operation_id": _form_operation_id("ticket-create"),
             "workflow_initial": {
-                "board": board.model_dump(mode="json"),
+                "board": board_snapshot_payload(request, board, agent_options),
                 "urls": {
                     "board": f"/{team}/workflows/{workflow}",
                     "snapshot": f"/{team}/workflows/{workflow}/snapshot",

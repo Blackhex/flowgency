@@ -11,7 +11,7 @@ from starlette.concurrency import run_in_threadpool
 
 from flowgency.tickets.views import build_board_view
 from flowgency.web.dependencies import FlowgencyServices, get_services
-from flowgency.web.ticket_presentation import board_snapshot_payload
+from flowgency.web.ticket_snapshots import board_snapshot_payload
 from flowgency.web.team_navigation import build_team_context
 from flowgency.web.workflow_context import require_team_and_workflow, require_ticket_services
 
