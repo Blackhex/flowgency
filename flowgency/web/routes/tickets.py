@@ -15,6 +15,7 @@ from flowgency.tickets.errors import TicketConflict, TicketForbidden, TicketNotF
 from flowgency.tickets.models import TicketOperation, TicketPatch, TicketRef, TicketVersion
 from flowgency.tickets.views import build_board_view, build_ticket_detail_view
 from flowgency.web.dependencies import FlowgencyServices, get_services
+from flowgency.web.ticket_presentation import board_snapshot_payload, ticket_snapshot_payload
 from flowgency.web.team_navigation import build_team_context
 from flowgency.web.workflow_context import require_team_and_workflow, require_ticket_jobs, require_ticket_services, user_context
 
@@ -41,6 +42,10 @@ def _team_context(request: Request, snapshot, team_id: str) -> dict[str, Any]:
     )
     context["team_agents"] = tuple(snapshot.config.teams[team_id].agents.keys())
     return context
+
+
+def _agent_options(snapshot, team_id: str) -> tuple[str, ...]:
+    return tuple(snapshot.config.teams[team_id].agents.keys())
 
 
 def _etag(payload: dict[str, Any]) -> str:
@@ -409,6 +414,7 @@ async def _render_ticket_page(
         ticket_jobs=services.ticket_jobs,
     )
     snapshot = services.config_store.load()
+    agent_options = _agent_options(snapshot, team)
     template_context = _team_context(request, snapshot, team)
     template_context.update(
         {
@@ -425,7 +431,7 @@ async def _render_ticket_page(
                 "update": _form_operation_id("ticket-update"),
             },
             "workflow_initial": {
-                "board": board.model_dump(mode="json"),
+                "board": board_snapshot_payload(request, board, agent_options),
                 "urls": {
                     "board": f"/{team}/workflows/{workflow}",
                     "snapshot": f"/{team}/workflows/{workflow}/snapshot",
@@ -474,6 +480,7 @@ async def _render_board_page(
         ticket_jobs=services.ticket_jobs,
     )
     snapshot = services.config_store.load()
+    agent_options = _agent_options(snapshot, team)
     template_context = _team_context(request, snapshot, team)
     template_context.update(
         {
@@ -555,6 +562,7 @@ async def ticket_detail_page(
         ticket_jobs=services.ticket_jobs,
     )
     snapshot = services.config_store.load()
+    agent_options = _agent_options(snapshot, team)
     template_context = _team_context(request, snapshot, team)
     template_context.update(
         {
@@ -569,7 +577,7 @@ async def ticket_detail_page(
                 "update": _form_operation_id("ticket-update"),
             },
             "workflow_initial": {
-                "board": board.model_dump(mode="json"),
+                "board": board_snapshot_payload(request, board, agent_options),
                 "urls": {
                     "board": f"/{team}/workflows/{workflow}",
                     "snapshot": f"/{team}/workflows/{workflow}/snapshot",
@@ -608,7 +616,8 @@ async def ticket_detail_snapshot(
     )
     if detail.ticket is None and detail.issues and detail.issues[0].code == "ticket-not-found":
         raise HTTPException(status_code=404, detail="Ticket not found")
-    return _json_with_etag(request, detail.model_dump(mode="json"))
+    snapshot = services.config_store.load()
+    return _json_with_etag(request, ticket_snapshot_payload(request, detail, _agent_options(snapshot, team)))
 
 
 @router.post("/{team}/workflows/{workflow}/tickets")

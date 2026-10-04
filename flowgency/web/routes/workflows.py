@@ -11,6 +11,7 @@ from starlette.concurrency import run_in_threadpool
 
 from flowgency.tickets.views import build_board_view
 from flowgency.web.dependencies import FlowgencyServices, get_services
+from flowgency.web.ticket_presentation import board_snapshot_payload
 from flowgency.web.team_navigation import build_team_context
 from flowgency.web.workflow_context import require_team_and_workflow, require_ticket_services
 
@@ -39,6 +40,10 @@ def _team_context(request: Request, snapshot, team_id: str) -> dict[str, Any]:
     return context
 
 
+def _agent_options(snapshot, team_id: str) -> tuple[str, ...]:
+    return tuple(snapshot.config.teams[team_id].agents.keys())
+
+
 def _form_operation_id(prefix: str) -> str:
     return f"{prefix}-{uuid4().hex}"
 
@@ -48,6 +53,7 @@ def _workflow_page_context(request: Request, services: FlowgencyServices, team_i
     ticket_service = require_ticket_services(services)
     actor = require_team_and_workflow(services, team_id, workflow_id).actor
     context = _team_context(request, snapshot, team_id)
+    agent_options = _agent_options(snapshot, team_id)
     context.update(
         {
             "active": "workflow-board",
@@ -61,7 +67,7 @@ def _workflow_page_context(request: Request, services: FlowgencyServices, team_i
                 "update": _form_operation_id("ticket-update"),
             },
             "workflow_initial": {
-                "board": board.model_dump(mode="json"),
+                "board": board_snapshot_payload(request, board, agent_options),
                 "urls": {
                     "board": f"/{team_id}/workflows/{workflow_id}",
                     "snapshot": f"/{team_id}/workflows/{workflow_id}/snapshot",
@@ -141,4 +147,5 @@ async def workflow_board_snapshot(
         selected_ticket_id=selected_ticket or ticket,
         ticket_jobs=services.ticket_jobs,
     )
-    return _json_with_etag(request, view.model_dump(mode="json"))
+    snapshot = services.config_store.load()
+    return _json_with_etag(request, board_snapshot_payload(request, view, _agent_options(snapshot, team)))

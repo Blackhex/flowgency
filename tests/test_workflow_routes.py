@@ -9,6 +9,16 @@ import flowgency.jobs.submission as submission_module
 from tests._ticket_helpers import TicketRuntimeIntegration
 
 
+def workflow_initial_payload(html: str) -> dict:
+    match = re.search(
+        r'<script id="workflow-initial" type="application/json">(.*?)</script>',
+        html,
+        re.DOTALL,
+    )
+    assert match is not None
+    return json.loads(match.group(1))
+
+
 def test_workflow_board_renders_html_page(workflow_web_env):
     response = workflow_web_env.client.get(workflow_web_env.base_path)
 
@@ -16,6 +26,9 @@ def test_workflow_board_renders_html_page(workflow_web_env):
     assert "text/html" in response.headers["content-type"]
     assert "Search tickets" in response.text
     assert "New ticket" in response.text
+    payload = workflow_initial_payload(response.text)
+    assert payload["board"]["presentation"]["format"] == 1
+    assert payload["board"]["selected_ticket"] is None
 
 
 def test_workflow_board_sidebar_uses_workflow_library_links(workflow_web_env):
@@ -105,6 +118,8 @@ def test_board_snapshot_uses_deterministic_etag(workflow_web_env):
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["presentation"]["format"] == 1
+    assert payload["selected_ticket"] is None
     expected = hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
     ).hexdigest()
@@ -116,6 +131,20 @@ def test_board_snapshot_uses_deterministic_etag(workflow_web_env):
     )
 
     assert not_modified.status_code == 304
+
+
+def test_board_snapshot_without_selected_ticket_still_projects_presentation(workflow_web_env):
+    configured = workflow_web_env.client.app.state.services.config_store.load()
+    response = workflow_web_env.client.get(f"{workflow_web_env.base_path}/snapshot")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["selected_ticket"] is None
+    assert payload["presentation"] == {
+        "format": 1,
+        "agent_options": list(configured.config.teams[workflow_web_env.team_id].agents),
+        "issues_html": "",
+    }
 
 
 def test_board_snapshot_reports_invalid_definition_history(workflow_web_env):
@@ -169,6 +198,7 @@ def test_board_snapshot_keeps_readable_tickets_and_counts_when_definition_is_una
     assert payload["selected_ticket"]["ticket"]["title"] == "Alpha review"
     assert payload["selected_ticket"]["ticket"]["version"] is None
     assert payload["selected_ticket"]["ticket"]["history"][0]["kind"] == "opened"
+    assert payload["selected_ticket"]["presentation"]["format"] == 1
 
 
 def test_board_snapshot_groups_unknown_state_records_without_fabricating_a_state_column(

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% set active = "workflow-board" %}
+{% import "_ticket_presentation.html" as presentation with context %}
 {% block title %}{{ board.name }} - {{ flowgency_title }}{% endblock %}
 {% block content_container_class %}px-0 py-0{% endblock %}
 {% block content %}
@@ -13,10 +14,8 @@
   </div>
   {% endif %}
   {% if board.issues %}
-  <div class="workflow-issue-banner" role="status">
-    {% for issue in board.issues %}
-    <p><strong>{{ issue.code }}</strong>: {{ issue.message }}</p>
-    {% endfor %}
+  <div class="workflow-issue-banner" role="status" data-board-issues>
+    {{ presentation.issues(board.issues) }}
   </div>
   {% endif %}
   <header class="workflow-board-toolbar">

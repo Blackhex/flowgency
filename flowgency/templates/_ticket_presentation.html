@@ -1,0 +1,169 @@
+{% macro render_value(field_type, value, git_evidence=none) -%}
+  {%- if field_type == "artifact" and value and value.kind == "id" and git_evidence and current_ticket -%}
+    {%- set evidence_base = "/" ~ team ~ "/workflows/" ~ active_workflow_id ~ "/tickets/" ~ current_ticket.ref.ticket_id ~ "/artifacts/" ~ git_evidence.artifact_id -%}
+    <span class="workflow-evidence-links" data-git-evidence-links>
+      <a class="workflow-value-link" href="{{ evidence_base }}/diff?source=ticket">View diff</a>
+      <a class="workflow-value-link" href="{{ evidence_base }}/patch">Download patch</a>
+    </span>
+  {%- elif field_type == "artifact" and value and value.kind == "id" -%}
+    <a class="workflow-value-link" href="/{{ team }}/workflows/{{ active_workflow_id }}/artifacts/{{ value.value }}">Download retained file</a>
+  {%- elif field_type == "artifact" and value and value.kind == "url" -%}
+    <a class="workflow-value-link" href="{{ value.value }}" target="_blank" rel="noreferrer">{{ value.value }}</a>
+  {%- elif value is sameas(false) -%}
+    False
+  {%- elif value == 0 or value == 0.0 -%}
+    {{ value }}
+  {%- elif value is none or value == "" -%}
+    <span class="workflow-empty-value">Not submitted</span>
+  {%- else -%}
+    {{ value }}
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro description(detail) -%}
+  {% if detail.ticket %}{{ detail.ticket.description | ticket_markdown }}{% endif %}
+{%- endmacro %}
+
+{% macro outputs(detail) -%}
+  {% set output_fields = detail.fields | selectattr('is_output') | list %}
+  {% for field in output_fields %}
+  <div data-view-key="output:{{ field.id }}">
+    <dt>{{ field.label }}</dt>
+    <dd>{{ render_value(field.type, field.value, field.git_evidence) }}
+      {% if field.evidence_issue %}<span class="workflow-empty-value">{{ field.evidence_issue.message }}</span>{% endif %}
+    </dd>
+  </div>
+  {% endfor %}
+{%- endmacro %}
+
+{% macro requirements(detail) -%}
+  {% set transitions = detail.current_definition.transitions | selectattr('from_state', 'equalto', detail.ticket.state_id) | list if detail.ticket else [] %}
+  {% if transitions %}
+  {% for transition in transitions %}
+  <section class="workflow-ticket-section" data-view-key="transition:{{ transition.id }}">
+    <h3>{{ transition.name }}</h3>
+    {% if transition.preconditions %}
+    <p class="workflow-section-label">Current preconditions</p>
+    {% for precondition in transition.preconditions %}
+    <article class="workflow-check-row is-complete" data-view-key="precondition:{{ transition.id }}:{{ precondition.field_id }}:{{ loop.index0 }}">
+      <span class="workflow-check-indicator" aria-hidden="true"></span>
+      <div>
+        <strong>{{ precondition.field_label }}</strong>
+        <small>{{ precondition.operator }} {{ render_value(precondition.field_type, precondition.comparison) }}</small>
+      </div>
+    </article>
+    {% endfor %}
+    {% endif %}
+    {% if transition.inputs %}
+    <p class="workflow-section-label">Required inputs</p>
+    {% for field_use in transition.inputs %}
+    {% set field_row = (detail.fields | selectattr('id', 'equalto', field_use.field_id) | list | first) %}
+    <article class="workflow-check-row{% if field_row and field_row.value is not none and field_row.value != '' %} is-complete{% else %} is-pending{% endif %}" data-view-key="input:{{ transition.id }}:{{ field_use.field_id }}">
+      <span class="workflow-check-indicator" aria-hidden="true"></span>
+      <div>
+        <strong>{{ field_row.label if field_row else field_use.field_id }}</strong>
+        <small>{% if field_use.required %}Required{% else %}Optional{% endif %} · {{ render_value(field_row.type if field_row else 'text', field_row.value if field_row else none) }}</small>
+      </div>
+    </article>
+    {% endfor %}
+    {% endif %}
+    {% if transition.outputs %}
+    <p class="workflow-section-label">Required outputs</p>
+    {% for field_use in transition.outputs %}
+    {% set field_row = (detail.fields | selectattr('id', 'equalto', field_use.field_id) | list | first) %}
+    <article class="workflow-check-row{% if field_row and field_row.value is not none and field_row.value != '' %} is-complete{% else %} is-pending{% endif %}" data-view-key="required-output:{{ transition.id }}:{{ field_use.field_id }}">
+      <span class="workflow-check-indicator" aria-hidden="true"></span>
+      <div>
+        <strong>{{ field_row.label if field_row else field_use.field_id }}</strong>
+        <small>{% if field_use.required %}Required{% else %}Optional{% endif %} · {{ render_value(field_row.type if field_row else 'text', field_row.value if field_row else none) }}</small>
+      </div>
+    </article>
+    {% endfor %}
+    {% endif %}
+    {% if transition.criteria %}
+    <p class="workflow-section-label">Qualitative criteria</p>
+    {% for criterion in transition.criteria %}
+    <article class="workflow-check-row is-pending" data-view-key="criterion:{{ transition.id }}:{{ criterion.id }}">
+      <span class="workflow-check-indicator" aria-hidden="true"></span>
+      <div>
+        <strong>{{ criterion.description }}</strong>
+        <small>Awaiting evaluation against the current project</small>
+      </div>
+    </article>
+    {% endfor %}
+    {% endif %}
+    {% set assessment_ns = namespace(found=false) %}
+    {% for event in detail.history | reverse %}
+      {% if event.data.assessments %}
+        {% if not assessment_ns.found %}<p class="workflow-section-label">Recorded assessments</p>{% endif %}
+        {% set assessment_ns.found = true %}
+        {% for assessment in event.data.assessments %}
+        <article class="workflow-check-row is-complete" data-view-key="assessment:{{ transition.id }}:{{ event.id }}:{{ assessment.criterion_id }}:{{ loop.index0 }}">
+          <span class="workflow-check-indicator" aria-hidden="true"></span>
+          <div>
+            <strong>
+              {% set criteria_ns = namespace(description=assessment.criterion_id) %}
+              {% if event.data.transition_snapshot and event.data.transition_snapshot.criteria %}
+                {% for criterion in event.data.transition_snapshot.criteria %}
+                  {% if criterion.id == assessment.criterion_id %}{% set criteria_ns.description = criterion.description %}{% endif %}
+                {% endfor %}
+              {% endif %}
+              {{ criteria_ns.description }}
+            </strong>
+            <small>{{ assessment.reasoning }}</small>
+          </div>
+        </article>
+        {% endfor %}
+      {% endif %}
+    {% endfor %}
+  </section>
+  {% endfor %}
+  {% else %}
+  <p>No outgoing requirements.</p>
+  {% endif %}
+{%- endmacro %}
+
+{% macro history(detail) -%}
+  {% for event in detail.history %}
+  <article class="workflow-history-event" data-view-key="event:{{ event.id }}">
+    <strong>{{ event.summary }}</strong>
+    <p>{{ event.actor }}{% if event.at %} · {{ event.at }}{% endif %}</p>
+    {% if event.data.source_state_name or event.data.destination_state_name %}
+    <p>{{ event.data.source_state_name or event.data.transition_snapshot.from_state }} -> {{ event.data.destination_state_name or event.data.transition_snapshot.to_state }}</p>
+    {% endif %}
+    {% if event.data.effective_outputs is mapping and event.data.effective_outputs %}
+    <dl class="workflow-field-list">
+      {% for field_id, value in event.data.effective_outputs.items() %}
+      {% set field_def = event.data.transition_snapshot.field_defs[field_id] if event.data.transition_snapshot and event.data.transition_snapshot.field_defs and field_id in event.data.transition_snapshot.field_defs else none %}
+      <div data-view-key="history-output:{{ event.id }}:{{ field_id }}">
+        <dt>{{ field_def.label if field_def else field_id }}</dt>
+        <dd>{{ render_value(field_def.type if field_def else 'text', value, event.git_outputs.get(field_id)) }}</dd>
+      </div>
+      {% endfor %}
+    </dl>
+    {% endif %}
+    {% for issue in event.evidence_issues %}
+    <p class="workflow-empty-value" data-view-key="history-issue:{{ event.id }}:{{ issue.code }}:{{ loop.index0 }}">{{ issue.message }}</p>
+    {% endfor %}
+    {% if event.data.assessments %}
+    {% for assessment in event.data.assessments %}
+    <p data-view-key="history-assessment:{{ event.id }}:{{ assessment.criterion_id }}:{{ loop.index0 }}">
+      {% set criteria_ns = namespace(description=assessment.criterion_id) %}
+      {% if event.data.transition_snapshot and event.data.transition_snapshot.criteria %}
+        {% for criterion in event.data.transition_snapshot.criteria %}
+          {% if criterion.id == assessment.criterion_id %}{% set criteria_ns.description = criterion.description %}{% endif %}
+        {% endfor %}
+      {% endif %}
+      {{ criteria_ns.description }}: {{ assessment.reasoning }}
+    </p>
+    {% endfor %}
+    {% endif %}
+  </article>
+  {% endfor %}
+{%- endmacro %}
+
+{% macro issues(issues) -%}
+  {% for issue in issues %}
+  <p data-view-key="issue:{{ issue.code }}:{{ loop.index0 }}"><strong>{{ issue.code }}</strong>: {{ issue.message }}</p>
+  {% endfor %}
+{%- endmacro %}
