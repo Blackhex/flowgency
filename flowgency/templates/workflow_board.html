@@ -84,25 +84,45 @@
   <div class="workflow-board-layout{% if board.selected_ticket %} has-ticket{% endif %}">
     <section class="workflow-board-wrap" aria-label="Workflow board">
     <section class="workflow-board-columns" aria-label="Workflow board" style="--workflow-column-count: {{ board.columns|length if board.columns else 1 }};">
+      <template data-workflow-column-template>
+        <section class="workflow-column" data-column-kind="" data-column-key="" data-view-key="">
+          <header class="workflow-column-header" style="--workflow-column-color: ;">
+            <span class="workflow-column-dot" aria-hidden="true"></span>
+            <span data-column-name></span>
+            <span data-column-count></span>
+          </header>
+          <p class="workflow-empty-column">No tickets</p>
+        </section>
+      </template>
+      <template data-workflow-card-template>
+        <a class="workflow-ticket-card" href="" data-ticket-id="" data-view-key="">
+          <span class="workflow-ticket-number" data-card-number></span>
+          <strong data-card-title></strong>
+          <span class="workflow-ticket-footer">
+            <span class="workflow-ticket-meta" data-card-assignment></span>
+            <span class="workflow-ticket-status-badge" data-card-status></span>
+          </span>
+        </a>
+      </template>
       {% if not board.columns %}
       <section class="workflow-column">
         <p class="workflow-empty-column">No tickets yet.</p>
       </section>
       {% endif %}
       {% for column in board.columns %}
-      <section class="workflow-column" data-column-kind="{{ column.kind }}">
+      <section class="workflow-column" data-column-kind="{{ column.kind }}" data-column-key="{{ column.key }}" data-view-key="column:{{ column.key }}">
         <header class="workflow-column-header" style="--workflow-column-color: {{ column.color }};">
           <span class="workflow-column-dot" aria-hidden="true"></span>
-          <span>{{ column.name }}</span>
-          <span>{{ column.count }}</span>
+          <span data-column-name>{{ column.name }}</span>
+          <span data-column-count>{{ column.count }}</span>
         </header>
         {% if column.tickets %}
         {% for item in column.tickets %}
-        <a class="workflow-ticket-card{% if board.selected_ticket and board.selected_ticket.ticket and board.selected_ticket.ticket.ref.ticket_id == item.ref.ticket_id %} is-selected{% endif %}" href="/{{ team }}/workflows/{{ active_workflow_id }}?ticket={{ item.ref.ticket_id }}{% if board.query %}&query={{ board.query|urlencode }}{% endif %}{% if board.assignee %}&assignee={{ board.assignee|urlencode }}{% endif %}">
-          <span class="workflow-ticket-number">FG-{{ item.number }}</span>
-          <strong>{{ item.title }}</strong>
+        <a class="workflow-ticket-card{% if board.selected_ticket and board.selected_ticket.ticket and board.selected_ticket.ticket.ref.ticket_id == item.ref.ticket_id %} is-selected{% endif %}" href="/{{ team }}/workflows/{{ active_workflow_id }}?ticket={{ item.ref.ticket_id }}{% if board.query %}&query={{ board.query|urlencode }}{% endif %}{% if board.assignee %}&assignee={{ board.assignee|urlencode }}{% endif %}" data-ticket-id="{{ item.ref.ticket_id }}" data-view-key="card:{{ item.ref.binding_id }}:{{ item.ref.team_id }}:{{ item.ref.workflow_id }}:{{ item.ref.ticket_id }}">
+          <span class="workflow-ticket-number" data-card-number>FG-{{ item.number }}</span>
+          <strong data-card-title>{{ item.title }}</strong>
           <span class="workflow-ticket-footer">
-            <span class="workflow-ticket-meta">
+            <span class="workflow-ticket-meta" data-card-assignment>
               {% if item.assignee %}
               <span class="workflow-ticket-avatar">{{ item.assignee[:2]|upper }}</span>
               {{ item.assignee }}
@@ -111,7 +131,7 @@
               Unassigned
               {% endif %}
             </span>
-            <span class="workflow-ticket-status-badge{% if item.active_run_job_id %} is-working{% elif item.pending_run_job_id %} is-queued{% endif %}">
+            <span class="workflow-ticket-status-badge{% if item.active_run_job_id %} is-working{% elif item.pending_run_job_id %} is-queued{% endif %}" data-card-status>
               {% if item.active_run_job_id %}
               Working
               {% elif item.pending_run_job_id %}
@@ -160,5 +180,6 @@
 <script id="workflow-initial" type="application/json">{{ workflow_initial | tojson }}</script>
 {% endblock %}
 {% block page_scripts %}
+<script src="/static/workflow-board-view.js"></script>
 <script src="/static/workflow-board.js"></script>
 {% endblock %}

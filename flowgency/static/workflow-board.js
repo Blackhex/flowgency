@@ -24,6 +24,7 @@
       this.pendingAction = null;
       this.actionChain = Promise.resolve();
       this.cacheElements();
+      this.createView();
       this.bindEvents();
       this.inputDraft = this.restoreOrCreateDraft();
       this.restoreDraft();
@@ -53,6 +54,16 @@
       this.editToggle = document.getElementById('ticket-edit-toggle');
       this.editRegion = document.querySelector('[data-ticket-edit]');
       this.readDescription = document.querySelector('[data-ticket-description-read]');
+    }
+
+    createView() {
+      if (this.view) {
+        this.view.clearDeferred();
+      }
+      this.view = null;
+      if (this.page && window.WorkflowBoardView) {
+        this.view = new window.WorkflowBoardView(this.page, this.initial.urls.board, this.board);
+      }
     }
 
     bindEvents() {
@@ -221,9 +232,6 @@
     }
 
     currentSnapshotUrl() {
-      if (this.isDetailPage && this.initial.urls.detailSnapshot) {
-        return new URL(this.initial.urls.detailSnapshot, window.location.origin);
-      }
       const url = new URL(this.initial.urls.snapshot, window.location.origin);
       const query = this.searchInput ? this.searchInput.value.trim() : (this.board?.query || '');
       const assignee = this.boardAssigneeFilter ? this.boardAssigneeFilter.value : (this.board?.assignee || '');
@@ -315,6 +323,7 @@
       this.initial = JSON.parse(this.initialNode.textContent || '{}');
       this.board = this.initial.board;
       this.ticket = this.initial.board.selected_ticket;
+      this.createView();
       this.inputDraft = this.restoreOrCreateDraft();
       this.restoreDraft();
       this.selectTab(pageState.selectedTab || 'overview');
@@ -383,6 +392,53 @@
       }
     }
 
+    applyBoardSnapshot(board) {
+      if (!this.view) {
+        return false;
+      }
+      const selectedTicketId = this.currentTicketId();
+      const inspection = this.view.inspectBoard(board, selectedTicketId);
+      if (!inspection.ok) {
+        return false;
+      }
+      this.board = board;
+      this.initial.board = board;
+      this.view.renderBoard(board, selectedTicketId);
+      if (!inspection.unavailable && board.selected_ticket?.ticket) {
+        this.applyDetailSnapshot(board.selected_ticket, { source: 'poll' });
+      }
+      return true;
+    }
+
+    applyDetailSnapshot(detail, { source = 'poll', submittedValues = null, committedControl = null } = {}) {
+      if (!detail?.ticket || detail.ticket.ref.ticket_id !== this.currentTicketId()) {
+        return false;
+      }
+      const savedDraft = submittedValues ? this.cloneDraft(submittedValues) : null;
+      this.ticket = detail;
+      this.initial.board.selected_ticket = detail;
+      if (this.view) {
+        this.view.renderTicket(detail);
+      }
+      if (source === 'action' && savedDraft) {
+        this.inputDraft = savedDraft;
+      }
+      if (this.dirtyFieldsStillMatchServer(detail)) {
+        this.inputDraft.baseVersion = detail.ticket.version;
+      }
+      if (source === 'action' && committedControl) {
+        for (const key of this.inputDraft.dirty) {
+          this.inputDraft.baseValues[key] = this.inputDraft.values[key];
+        }
+        this.inputDraft.dirty.clear();
+        this.inputDraft.baseVersion = detail.ticket.version;
+      }
+      this.ticketDrafts.set(detail.ticket.ref.ticket_id, this.cloneDraft(this.inputDraft));
+      this.restoreDraft();
+      this.renderAssignment();
+      return true;
+    }
+
     async openTicket(ticketId) {
       await this.loadPage(this.currentBoardUrl(ticketId).toString(), 'push', true);
     }
@@ -395,46 +451,53 @@
       if (document.hidden) {
         return;
       }
-      const pageSeqAtStart = this.requestCounters.page;
+      const pageSeq = this.requestCounters.page;
+      const actionSeq = this.requestCounters.action;
+      const snapshotUrl = this.currentSnapshotUrl().toString();
       const request = this.beginAbortableRequest('refresh');
       try {
         const headers = { Accept: 'application/json' };
-        const etagKey = this.isDetailPage ? 'detail' : 'board';
-        if (this.etags[etagKey]) {
-          headers['If-None-Match'] = this.etags[etagKey];
+        if (this.etags.board) {
+          headers['If-None-Match'] = this.etags.board;
         }
-        const response = await fetch(this.currentSnapshotUrl(), {
+        const response = await fetch(snapshotUrl, {
           headers,
           signal: request.controller.signal,
         });
-        if (!this.isLatestRequest('refresh', request.seq)) {
-          return;
-        }
-        if (this.requestCounters.page !== pageSeqAtStart) {
-          // A newer user navigation started while this refresh was in flight. Its
-          // reload must not abort or override that newer selection with a stale URL.
-          this.scheduleRefresh();
+        const payload = response.status === 304 || !response.ok ? null : await response.json();
+        if (!this.isLatestRequest('refresh', request.seq)
+          || request.controller.signal.aborted || document.hidden
+          || this.requestCounters.page !== pageSeq
+          || this.requestCounters.action !== actionSeq || this.pendingAction
+          || this.currentSnapshotUrl().toString() !== snapshotUrl) {
           return;
         }
         if (response.status === 304) {
-          this.scheduleRefresh();
           return;
         }
         if (!response.ok) {
           throw new TicketActionError(this.issuePayload('refresh-failed', 'The workflow board could not be refreshed.'));
         }
-        this.etags[etagKey] = response.headers.get('etag');
-        await this.loadPage(window.location.href, 'replace', true);
-      } catch (error) {
-        if (error?.name === 'AbortError') {
-          return;
+        if (this.applyBoardSnapshot(payload)) {
+          this.etags.board = response.headers.get('etag');
+        } else {
+          this.etags.board = null;
         }
-        this.reportActionError(error);
-        this.scheduleRefresh();
+      } catch (error) {
+        if (error?.name !== 'AbortError') {
+          this.reportActionError(error);
+        }
+      } finally {
+        if (this.isLatestRequest('refresh', request.seq)) {
+          this.scheduleRefresh();
+        }
       }
     }
 
     scheduleRefresh() {
+      if (this.view) {
+        this.view.flushDeferred();
+      }
       clearTimeout(this.pollTimer);
       if (document.hidden) {
         return;
@@ -715,14 +778,7 @@
         if (actionSeq !== this.requestCounters.action || this.currentTicketId() !== current.ref.ticket_id) {
           return;
         }
-        this.ticket = detail;
-        this.initial.board.selected_ticket = detail;
-        this.inputDraft = savedDraft;
-        if (this.dirtyFieldsStillMatchServer(detail)) {
-          this.inputDraft.baseVersion = detail.ticket.version;
-        }
-        this.ticketDrafts.set(current.ref.ticket_id, this.cloneDraft(this.inputDraft));
-        this.restoreDraft();
+        this.applyDetailSnapshot(detail, { source: 'action', submittedValues: savedDraft });
         this.clearActionError();
         this.updateVisibleCard();
       } finally {
@@ -804,16 +860,8 @@
         if (actionSeq !== this.requestCounters.action || this.currentTicketId() !== current.ref.ticket_id) {
           return;
         }
-        this.ticket = detail;
-        this.initial.board.selected_ticket = detail;
-        for (const key of this.inputDraft.dirty) {
-          this.inputDraft.baseValues[key] = this.inputDraft.values[key];
-        }
-        this.inputDraft.dirty.clear();
-        this.inputDraft.baseVersion = detail.ticket.version;
-        this.ticketDrafts.set(current.ref.ticket_id, this.cloneDraft(this.inputDraft));
+        this.applyDetailSnapshot(detail, { source: 'action', committedControl: 'inputs' });
         this.clearActionError();
-        this.restoreDraft();
         this.updateVisibleCard();
       } catch (error) {
         this.restoreDraft();
@@ -845,8 +893,7 @@
         if (actionSeq !== this.requestCounters.action || this.currentTicketId() !== current.ref.ticket_id) {
           return;
         }
-        this.ticket = detail;
-        this.initial.board.selected_ticket = detail;
+        this.applyDetailSnapshot(detail, { source: 'action', committedControl: 'run' });
         this.clearActionError();
         this.updateVisibleCard();
       } finally {

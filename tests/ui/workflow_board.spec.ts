@@ -14,6 +14,11 @@ type DetailSnapshot = {
   fields: Array<{ id: string; value: unknown; is_output: boolean }>;
 };
 
+type PollController = {
+  pollTimer: number;
+  refreshBoard: () => Promise<void>;
+};
+
 const runtimeConfigPath = path.join(__dirname, '.runtime', 'current', 'config.yaml');
 
 function operationId(label: string): string {
@@ -40,6 +45,27 @@ async function replaceRuntimeConfigAgent(fromName: string, toName: string): Prom
 
 async function waitForWorkflowController(page: Parameters<typeof test.beforeEach>[0]['page']): Promise<void> {
   await page.waitForFunction(() => Boolean((window as typeof window & { workflowBoardController?: unknown }).workflowBoardController));
+}
+
+async function stopPollTimer(page: Page): Promise<void> {
+  await waitForWorkflowController(page);
+  await page.evaluate(() => {
+    const controller = (window as typeof window & {
+      workflowBoardController: PollController;
+    }).workflowBoardController;
+    clearTimeout(controller.pollTimer);
+  });
+}
+
+async function forcePoll(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const controller = (window as typeof window & {
+      workflowBoardController: PollController;
+    }).workflowBoardController;
+    clearTimeout(controller.pollTimer);
+    await controller.refreshBoard();
+    clearTimeout(controller.pollTimer);
+  });
 }
 
 test.beforeEach(async ({ page, request }, testInfo) => {
@@ -481,6 +507,144 @@ test('visible polling refresh updates server content without wiping a dirty draf
   await expect(localField).toBeFocused();
 });
 
+test('polling keeps the assignee node and never fetches page html', async ({ page, request }) => {
+  await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
+  await stopPollTimer(page);
+  const htmlRequests: string[] = [];
+  page.on('request', (requestEvent) => {
+    const accepted = requestEvent.headers().accept || '';
+    if (requestEvent.method() === 'GET' && accepted.includes('text/html')) {
+      htmlRequests.push(requestEvent.url());
+    }
+  });
+  const original = await page.locator('#ticket-assignee').elementHandle();
+  const unaffectedCard = await page.getByRole('link', { name: /Review the local storage contract/ }).elementHandle();
+  expect(original).not.toBeNull();
+  expect(unaffectedCard).not.toBeNull();
+  await page.locator('#ticket-assignee').focus();
+  const other = await detailSnapshot(request, 'fixture-backlog-1');
+  const changed = await request.post('/newsletter/workflows/delivery/tickets/fixture-backlog-1/update', {
+    headers: { Accept: 'application/json' },
+    form: { payload: JSON.stringify({
+      version: other.ticket.version,
+      operation_id: operationId('poll-other-card'),
+      patch: { title: 'Remote card label' },
+    }) },
+  });
+  expect(changed.ok()).toBeTruthy();
+  await forcePoll(page);
+  expect(await original!.evaluate((node) => node.isConnected && node === document.getElementById('ticket-assignee'))).toBe(true);
+  expect(await unaffectedCard!.evaluate((node) => node.isConnected)).toBe(true);
+  await expect(page.locator('#ticket-assignee')).toBeFocused();
+  await expect(page.getByRole('link', { name: /Remote card label/ })).toBeVisible();
+  expect(htmlRequests).toEqual([]);
+  const saved = page.waitForResponse((response) => response.url().includes('/tickets/fixture-review/assignee') && response.request().method() === 'POST');
+  await page.locator('#ticket-assignee').selectOption('builder');
+  expect((await saved).status()).toBe(303);
+  expect((await detailSnapshot(request)).ticket.assignee).toBe('builder');
+  await assertNoConsoleErrors(page);
+});
+
+test('expanded polling updates header totals without replacing held ticket chrome', async ({ page, request }) => {
+  await page.goto('/newsletter/workflows/delivery/tickets/fixture-review');
+  await stopPollTimer(page);
+  const htmlRequests: string[] = [];
+  page.on('request', (requestEvent) => {
+    const accepted = requestEvent.headers().accept || '';
+    if (requestEvent.method() === 'GET' && accepted.includes('text/html')) {
+      htmlRequests.push(requestEvent.url());
+    }
+  });
+  const pageHandle = await page.locator('.workflow-board-page').elementHandle();
+  const inspector = await page.getByLabel('Ticket details').elementHandle();
+  const dialog = await page.locator('#workflow-ticket-dialog').elementHandle();
+  const assigneeInput = await page.locator('#ticket-assignee').elementHandle();
+  expect(pageHandle).not.toBeNull();
+  expect(inspector).not.toBeNull();
+  expect(dialog).not.toBeNull();
+  expect(assigneeInput).not.toBeNull();
+  await page.locator('#ticket-assignee').focus();
+
+  const created = await request.post('/newsletter/workflows/delivery/tickets', {
+    headers: { Accept: 'application/json' },
+    form: { payload: JSON.stringify({
+      operation_id: operationId('expanded-header-total'),
+      title: 'Created while expanded stays stable',
+      description: 'Header totals should update from the board snapshot.',
+      field_values: {},
+    }) },
+  });
+  expect(created.ok()).toBeTruthy();
+  await forcePoll(page);
+
+  expect(await pageHandle!.evaluate((node) => node.isConnected && node === document.querySelector('.workflow-board-page'))).toBe(true);
+  expect(await inspector!.evaluate((node) => node.isConnected && node === document.querySelector('[aria-label="Ticket details"]'))).toBe(true);
+  expect(await dialog!.evaluate((node) => node.isConnected && node === document.getElementById('workflow-ticket-dialog'))).toBe(true);
+  expect(await assigneeInput!.evaluate((node) => node.isConnected && node === document.getElementById('ticket-assignee'))).toBe(true);
+  await expect(page.locator('#ticket-assignee')).toBeFocused();
+  await expect(page.getByText('9 tickets', { exact: true })).toBeVisible();
+  expect(htmlRequests).toEqual([]);
+  await assertNoConsoleErrors(page);
+});
+
+test('polling reconciles moved and removed cards with stable keyed nodes', async ({ page, request }) => {
+  const response = await request.get('/newsletter/workflows/delivery/snapshot?ticket=fixture-review');
+  expect(response.ok()).toBeTruthy();
+  const board = await response.json();
+  const nextBoard = JSON.parse(JSON.stringify(board));
+  const backlog = nextBoard.columns[0];
+  const active = nextBoard.columns[1];
+  const movedIndex = backlog.tickets.findIndex((ticket) => ticket.ref.ticket_id === 'fixture-backlog-1');
+  const removedIndex = backlog.tickets.findIndex((ticket) => ticket.ref.ticket_id === 'fixture-backlog-2');
+  expect(movedIndex).toBeGreaterThanOrEqual(0);
+  expect(removedIndex).toBeGreaterThanOrEqual(0);
+  const moved = backlog.tickets.splice(movedIndex, 1)[0];
+  const adjustedRemovedIndex = backlog.tickets.findIndex((ticket) => ticket.ref.ticket_id === 'fixture-backlog-2');
+  const removed = backlog.tickets.splice(adjustedRemovedIndex, 1)[0];
+  expect(removed.ref.ticket_id).toBe('fixture-backlog-2');
+  active.tickets.unshift(moved);
+  for (const column of nextBoard.columns) {
+    column.count = column.tickets.length;
+  }
+  nextBoard.ticket_count = nextBoard.columns.reduce((total, column) => total + column.tickets.length, 0);
+
+  let served = false;
+  await page.route('**/newsletter/workflows/delivery/snapshot?*', async (route) => {
+    if (served) {
+      await route.fallback();
+      return;
+    }
+    served = true;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: { ETag: 'W/"structural-test"', 'Cache-Control': 'no-cache' },
+      body: JSON.stringify(nextBoard),
+    });
+  });
+
+  await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
+  await stopPollTimer(page);
+  const movedCard = await page.locator('[data-ticket-id="fixture-backlog-1"]').elementHandle();
+  const removedCard = await page.locator('[data-ticket-id="fixture-backlog-2"]').elementHandle();
+  const unaffectedCard = await page.locator('[data-ticket-id="fixture-review"]').elementHandle();
+  expect(movedCard).not.toBeNull();
+  expect(removedCard).not.toBeNull();
+  expect(unaffectedCard).not.toBeNull();
+
+  await forcePoll(page);
+
+  expect(await movedCard!.evaluate((node) => node.isConnected)).toBe(true);
+  expect(await removedCard!.evaluate((node) => node.isConnected)).toBe(false);
+  expect(await unaffectedCard!.evaluate((node) => node.isConnected && node === document.querySelector('[data-ticket-id="fixture-review"]'))).toBe(true);
+  const backlogIds = await page.locator(`[data-column-key="${backlog.key}"] [data-ticket-id]`).evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-ticket-id')));
+  const activeIds = await page.locator(`[data-column-key="${active.key}"] [data-ticket-id]`).evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-ticket-id')));
+  expect(backlogIds).toEqual([]);
+  expect(activeIds).toEqual(['fixture-backlog-1', 'fixture-active-1', 'fixture-active-2']);
+  await expect(page.getByText('7 tickets', { exact: true })).toBeVisible();
+  await assertNoConsoleErrors(page);
+});
+
 test('hidden pages pause polling and abort an in-flight refresh without extra snapshot requests', async ({ page, request }) => {
   await page.addInitScript(() => {
     let hidden = false;
@@ -528,7 +692,7 @@ test('hidden pages pause polling and abort an in-flight refresh without extra sn
     let snapshotRequests = 0;
     window.fetch = async (input, init) => {
       const url = String(input);
-      if (url.includes('/tickets/fixture-review/snapshot')) {
+      if (url.includes('/newsletter/workflows/delivery/snapshot')) {
         snapshotRequests += 1;
         if (snapshotRequests === 1) {
           await held;
@@ -575,7 +739,7 @@ test('older selection and refresh responses cannot replace a newer ticket select
     await new Promise<void>((resolve) => delayedHtml.push(resolve));
     await route.fulfill({ response: upstream });
   });
-  await context.route('**/newsletter/workflows/delivery/tickets/fixture-review/snapshot', async (route) => {
+  await context.route('**/newsletter/workflows/delivery/snapshot?*ticket=fixture-review*', async (route) => {
     const upstream = await route.fetch();
     await new Promise<void>((resolve) => delayedSnapshot.push(resolve));
     await route.fulfill({ response: upstream });
