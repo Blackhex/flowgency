@@ -25,6 +25,8 @@
 - Use synchronous terminal mode for one-shot commands. If a command detaches, retain its execution ID and receipt path and resume it before doing other work.
 - Do not adjust screenshot tolerances, update unrelated baselines, skip a live probe, switch models, widen permissions, or change transport to obtain a green UI gate.
 - Commit this plan separately from both its specification and implementation. Use Conventional Commits and review each implementation task before dependent work.
+- User-approved exception on 2026-10-04: the one existing `test_restricted_agent_reads_ticket_over_http_without_editing[copilot]` failure may remain, disclosed and executed unchanged; no new failure/error or browser failure is accepted.
+- Separate the unintegrated eager-exposure metadata experiment from this UI feature; do not ship integration changes with the board refresh fix.
 
 ---
 
@@ -34,24 +36,24 @@ The worktree is `C:\Projekty\Flowgency\.worktrees\workflow-live-reconciliation`,
 
 The original global-user full run produced 3353 passed, 19 skipped, and three failures. The isolated targeted rerun fixed the two packaging failures but still failed `test_restricted_agent_reads_ticket_over_http_without_editing[copilot]`: the CLI exited zero, made no ticket broker calls, and reported that it could not load a required tool-search tool. This does not establish the actual catalog supplied to the model or a network/authentication failure. The focused receipt is `.superpowers/evidence/workflow-live-reconciliation/baseline-focused.xml`.
 
-**Do not start application edits until this gate is satisfied.** Runtime investigation or corrections are separately authorized work, not an implementation task in this UI plan. Do not repeat the same live probe indefinitely without new evidence. If a separately reviewed fix lands on `master`, rebase this documentation-only feature branch onto it before establishing the baseline.
+**The user explicitly authorized proceeding with the UI fix under a known-failure exception on 2026-10-04.** The complete baseline must run and be retained; the sole accepted failure is the unchanged `test_restricted_agent_reads_ticket_over_http_without_editing[copilot]`. No other failure/error or browser failure is accepted. Keep its test and security assertions intact, do not skip or xfail it, and never describe the full suite as green while it remains red. Runtime corrections stay outside this UI plan. Remove the unintegrated eager-exposure source delta from the UI branch before baseline; preserve its commit/evidence without discarding history. Do not repeat standalone paid probes or change models/grants/transport to obtain a green report.
 
-- [ ] Confirm the separately resolved blocker with the unchanged focused checks:
+- [ ] Verify the already-resolved packaging environment through unchanged focused checks, without another standalone runtime retry:
 
 ```powershell
 Set-Location 'C:\Projekty\Flowgency\.worktrees\workflow-live-reconciliation'
-& .\.venv\Scripts\python.exe -m pytest tests/test_setup_assets.py::test_documented_workflow_recipe_runs_from_the_wheel_not_the_checkout tests/test_workflow_setup.py::test_installed_distribution_validates_shipped_workflow_examples 'tests/test_ticket_runtime_live.py::test_restricted_agent_reads_ticket_over_http_without_editing[copilot]' -q --junitxml=.superpowers/evidence/workflow-live-reconciliation/baseline-focused.xml
+& .\.venv\Scripts\python.exe -m pytest tests/test_setup_assets.py::test_documented_workflow_recipe_runs_from_the_wheel_not_the_checkout tests/test_workflow_setup.py::test_installed_distribution_validates_shipped_workflow_examples -q --junitxml=.superpowers/evidence/workflow-live-reconciliation/baseline-packaging.xml
 ```
 
-Expected: all three pass without changed models, markers, grants, transport, or assertions. Inspect the actual exit code and receipt.
+Expected: both pass without source, marker, or assertion edits. Prior passing focused evidence may satisfy this environment check; do not repeat it merely for reassurance. The runtime test still executes in the complete suite below.
 
-- [ ] Obtain the clean full Python baseline:
+- [ ] Obtain the complete Python baseline and classify its actual result:
 
 ```powershell
 & .\.venv\Scripts\python.exe -m pytest tests/ -q --junitxml=.superpowers/evidence/workflow-live-reconciliation/baseline-python.xml
 ```
 
-Expected: exit zero, no failures or errors; retain existing justified platform/runtime skips. Starting the command is not evidence of success.
+Expected: no failure/error other than the explicitly accepted existing runtime test; retain justified existing platform/runtime skips. If the known failure occurs, retain exit1 and its receipt and report it as a failed full suite with a user-approved exception. Starting the command is not evidence of success. Any additional failure requires a new decision rather than expanding this exception.
 
 - [ ] After Python finishes, obtain the unchanged full browser baseline:
 
@@ -742,18 +744,18 @@ Set-Location 'C:\Projekty\Flowgency\.worktrees\workflow-live-reconciliation'
 & .\.venv\Scripts\python.exe -m pytest tests/ -q --junitxml=.superpowers/evidence/workflow-live-reconciliation/feature-python.xml
 ```
 
-Only after the Python command completes successfully:
+Only after Python completes and its result is classified against the exact known-failure exception:
 
 ```powershell
 $env:PLAYWRIGHT_JUNIT_OUTPUT_FILE = "$PWD\.superpowers\evidence\workflow-live-reconciliation\feature-ui.xml"
 npm run test:ui -- --reporter=list,junit
 ```
 
-Require zero errors/failures and inspect retained screenshots/traces. Confirm locked dependencies and snapshot/tolerance files have not changed unnecessarily. Record terminal handoffs if tools detach, never poll an active command, and resume its final output/receipt before continuing.
+Require zero new Python errors/failures; only the explicitly accepted existing readonly runtime failure may remain. The complete browser matrix requires zero failures. Inspect actual receipts and retained screenshots/traces, disclose the known failure without calling the full suite green, and confirm locked dependencies and snapshot/tolerance files have not changed unnecessarily. Record terminal handoffs if tools detach, never poll an active command, and resume its final output/receipt before continuing.
 
 - [ ] **Step 4: Rebase only if required, then fast-forward master.**
 
-Inspect `git status`, `git worktree list`, and both branch tips immediately before integration. If `master` advanced, rebase the feature onto `master`, resolve only understood conflicts, review the resulting diff, and rerun the full sequential worktree gates before proceeding. Do not squash or create a merge commit.
+Inspect `git status`, `git worktree list`, and both branch tips immediately before integration. If `master` advanced, rebase the feature onto `master`, resolve only understood conflicts, review the resulting diff, and rerun the full sequential worktree gates with the same narrowly recorded known-failure exception before proceeding. Do not squash or create a merge commit.
 
 Preserve primary-worktree uncommitted tracked changes with a named stash before its fast-forward, record the stash ID, and restore it afterward. Preserve ignored canonical/runtime files in place; do not include them in a blanket cleanup or stage them. If untracked user files would collide with integration, preserve those exact files explicitly rather than deleting them.
 
@@ -767,14 +769,14 @@ Restore any recorded stash without dropping it until its successful application 
 
 - [ ] **Step 5: Verify master and publish both branches.**
 
-Use the primary worktree's installed `.venv\Scripts\python.exe` from its root. If it does not exist, establish that ignored environment before this gate rather than falling back to global-user Python. Run the full master Python suite with a retained receipt; run the default-headless browser suite sequentially for the integrated UI and compare to the worktree result. Read outputs and confirm zero failures before publishing.
+Use the primary worktree's installed `.venv\Scripts\python.exe` from its root. If it does not exist, establish that ignored environment before this gate rather than falling back to global-user Python. Run the full master Python suite with a retained receipt; run the default-headless browser suite sequentially for the integrated UI and compare to the worktree result. Before publishing, require no new Python failures/errors beyond the explicitly accepted readonly runtime test and zero browser failures; disclose the known failed test and actual suite exit rather than claiming green.
 
 ```powershell
 Set-Location 'C:\Projekty\Flowgency'
 & .\.venv\Scripts\python.exe -m pytest tests/ -q --junitxml=.superpowers/evidence/workflow-live-reconciliation/master-python.xml
 ```
 
-Only after the Python gate finishes successfully, install the exact Node lockfile if necessary and run the integrated browser gate:
+Only after Python completes and its result satisfies the recorded narrow exception, install the exact Node lockfile if necessary and run the integrated browser gate:
 
 ```powershell
 $env:PLAYWRIGHT_JUNIT_OUTPUT_FILE = "$PWD\.superpowers\evidence\workflow-live-reconciliation\master-ui.xml"
@@ -817,4 +819,4 @@ State what changed, exact Python/browser gate results, review/publication status
 | Separate failures, explicit incompatible refresh, missing ticket recovery | 4 |
 | Hidden pause/abort and immediate visibility refresh | 2, 4 |
 | Navigation, filters, HTML fallback, accessibility and unchanged visuals | 1, 4, 5 |
-| Clean baseline, task reviews, full gates, integration/publication/cleanup | Baseline Gate, 1-5 |
+| Recorded baseline with explicit known-failure exception, task reviews, full gates, integration/publication/cleanup | Baseline Gate, 1-5 |
