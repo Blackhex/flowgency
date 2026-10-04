@@ -1064,7 +1064,7 @@
           this.assigneeSelect.value = nextAssignee;
         }
         const assigneeDisabled = this.pendingAction === 'assignee' || Boolean(current.active_run_job_id) || Boolean(current.pending_run_job_id);
-        if (this.assigneeSelect.disabled !== assigneeDisabled) {
+        if (!protectAssignee && this.assigneeSelect.disabled !== assigneeDisabled) {
           this.assigneeSelect.disabled = assigneeDisabled;
         }
       }

@@ -221,6 +221,89 @@ test('focused assignment uses its original version and exposes a remote conflict
   await expect(page.getByLabel('Acceptance criteria', { exact: true })).toHaveValue('Keep my local draft');
 });
 
+test('passive queued run status does not disable a held assignee select', async ({ page, request }) => {
+  await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
+  await stopPollTimer(page);
+  const assigneeSelect = page.locator('#ticket-assignee');
+  const originalNode = await assigneeSelect.elementHandle();
+  expect(originalNode).not.toBeNull();
+
+  await assigneeSelect.focus();
+  const original = await detailSnapshot(request);
+  const remoteRun = await request.post('/newsletter/workflows/delivery/tickets/fixture-review/run', {
+    headers: { Accept: 'application/json' },
+    form: { payload: JSON.stringify({
+      version: original.ticket.version,
+      operation_id: operationId('remote-run-held-assignee'),
+    }) },
+  });
+  expect(remoteRun.ok()).toBeTruthy();
+  await forcePoll(page);
+
+  expect(await originalNode!.evaluate((node) => node.isConnected && node === document.getElementById('ticket-assignee'))).toBe(true);
+  await expect(assigneeSelect).toBeFocused();
+  await expect(assigneeSelect).toBeEnabled();
+  await expect(page.locator('[data-ticket-run-status]')).toContainText('Queued');
+  await expect(page.getByRole('button', { name: 'Run', exact: true })).toBeDisabled();
+
+  await page.getByRole('button', { name: 'Save inputs', exact: true }).focus();
+  await expect(assigneeSelect).toBeDisabled();
+});
+
+test('unrelated held input reply does not disable a held assignee select', async ({ page, context, request }) => {
+  let releaseInputResponse: () => void = () => undefined;
+  const heldInputResponse = new Promise<void>((resolve) => {
+    releaseInputResponse = resolve;
+  });
+  await context.route('**/tickets/fixture-review/update', async (route) => {
+    const upstream = await route.fetch();
+    const updated = await detailSnapshot(request);
+    const remoteRun = await request.post('/newsletter/workflows/delivery/tickets/fixture-review/run', {
+      headers: { Accept: 'application/json' },
+      form: { payload: JSON.stringify({
+        version: updated.ticket.version,
+        operation_id: operationId('held-input-remote-run'),
+      }) },
+    });
+    expect(remoteRun.ok()).toBeTruthy();
+    const queued = await detailSnapshot(request);
+    await releaseInputResponse;
+    await route.fulfill({
+      status: upstream.status(),
+      headers: { ...upstream.headers(), 'content-type': 'application/json' },
+      body: JSON.stringify(queued),
+    });
+  }, { times: 1 });
+
+  await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
+  const assigneeSelect = page.locator('#ticket-assignee');
+  const originalNode = await assigneeSelect.elementHandle();
+  expect(originalNode).not.toBeNull();
+  await page.getByLabel('Acceptance criteria', { exact: true }).fill('Submitted while assignee select is held');
+  await assigneeSelect.focus();
+  await assigneeSelect.evaluate((node) => {
+    (node as HTMLSelectElement).value = 'builder';
+  });
+  const inputResponse = page.waitForResponse((response) => response.url().includes('/tickets/fixture-review/update') && response.request().method() === 'POST');
+  const savePromise = page.evaluate(() => (window as typeof window & {
+    workflowBoardController: { saveInputs: () => Promise<void> };
+  }).workflowBoardController.saveInputs());
+  releaseInputResponse();
+  await inputResponse;
+  await savePromise;
+
+  expect(await originalNode!.evaluate((node) => node.isConnected && node === document.getElementById('ticket-assignee'))).toBe(true);
+  await expect(assigneeSelect).toBeFocused();
+  await expect(assigneeSelect).toHaveValue('builder');
+  await expect(assigneeSelect).toBeEnabled();
+  await expect(page.locator('[data-ticket-run-status]')).toContainText('Queued');
+  await expect(page.getByRole('button', { name: 'Run', exact: true })).toBeDisabled();
+
+  await page.getByRole('button', { name: 'Save inputs', exact: true }).focus();
+  await expect(assigneeSelect).toBeDisabled();
+  expect((await detailSnapshot(request)).fields.find((field) => field.id === 'acceptance-criteria')?.value).toBe('Submitted while assignee select is held');
+});
+
 test('remote input change before typing in a clean focused field remains a conflict', async ({ page, request }) => {
   await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
   await stopPollTimer(page);
