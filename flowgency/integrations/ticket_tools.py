@@ -24,6 +24,7 @@ def write_copilot_ticket_config(launch: TicketToolLaunch, path: Path) -> Path:
                 "url": launch.url,
                 "headers": dict(launch.headers),
                 "tools": ["*"],
+                "deferTools": "never",
             },
         },
     }

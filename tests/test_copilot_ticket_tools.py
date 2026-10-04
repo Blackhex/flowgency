@@ -221,6 +221,7 @@ def test_write_copilot_ticket_config_writes_expected_json(tmp_path: Path):
                 "url": launch.url,
                 "headers": dict(launch.headers),
                 "tools": ["*"],
+                "deferTools": "never",
             }
         }
     }
@@ -238,6 +239,7 @@ def test_copilot_ticket_tools_use_http_config(copilot_request, monkeypatch):
     assert "flowgency-tickets" in tool_grants
     assert "fixture-only-token" not in " ".join(argv)
     assert captured["config_payload"]["mcpServers"]["flowgency-tickets"]["type"] == "http"
+    assert captured["config_payload"]["mcpServers"]["flowgency-tickets"]["deferTools"] == "never"
 
 
 def test_copilot_rejects_missing_local_network_consent_before_prompt_read_or_launch(
@@ -318,6 +320,7 @@ def test_ticket_tools_use_private_ephemeral_config_and_delete_it_on_success(
                 "url": request.ticket_tools.url,
                 "headers": dict(request.ticket_tools.headers),
                 "tools": ["*"],
+                "deferTools": "never",
             }
         }
     }
