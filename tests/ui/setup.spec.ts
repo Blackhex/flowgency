@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { assertNoConsoleErrors, assertNoTailwindCdnRequests, installBasePageSetup } from './layout';
@@ -26,6 +26,84 @@ async function launchConnectedTerminal(page: Page, request: APIRequestContext): 
   await page.getByRole('button', { name: 'Continue in GitHub Copilot' }).click();
   await expect(page).toHaveURL(/\/setup\/session$/);
   await expect(page.locator('#setup-terminal .xterm-screen')).toBeVisible();
+}
+
+type CompletionBody = {
+  scheduler_result: string;
+  limitations_acknowledged?: boolean;
+  revision?: 'current' | 'stale';
+};
+
+async function completeSetup(
+  request: APIRequestContext,
+  data: CompletionBody = { scheduler_result: 'confirmed' },
+) {
+  return request.post('/__ui/setup/session/complete', { data });
+}
+
+async function markSetupReady(request: APIRequestContext): Promise<void> {
+  const response = await request.post('/__ui/setup/ready');
+  expect(response.status()).toBe(204);
+}
+
+async function setupStatus(page: Page): Promise<Record<string, any>> {
+  return page.evaluate(() => fetch('/setup/status', { cache: 'no-store' }).then((response) => response.json()));
+}
+
+async function waitForStatusPolls(page: Page, count: number): Promise<void> {
+  for (let poll = 0; poll < count; poll += 1) {
+    await page.waitForResponse((response) => new URL(response.url()).pathname === '/setup/status');
+  }
+}
+
+function trackSetupSockets(page: Page): string[] {
+  const sockets: string[] = [];
+  page.on('websocket', (socket) => {
+    if (socket.url().includes('/setup/session/ws')) sockets.push(socket.url());
+  });
+  return sockets;
+}
+
+function trackStopRequests(page: Page): string[] {
+  const stops: string[] = [];
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname === '/setup/session/stop') stops.push(request.method());
+  });
+  return stops;
+}
+
+function trackMainFrameNavigations(page: Page): string[] {
+  const paths: string[] = [];
+  page.on('framenavigated', (frame) => {
+    if (frame === page.mainFrame()) paths.push(new URL(frame.url()).pathname);
+  });
+  return paths;
+}
+
+// The redirect destroys the document, so the pagehide handler records, while it
+// is still alive, whether the original xterm node was still the live one.
+async function trackTerminalContinuity(page: Page) {
+  await page.evaluate(() => {
+    const node = document.querySelector('#setup-terminal .xterm');
+    window.addEventListener('pagehide', () => {
+      sessionStorage.setItem('terminal-continuity', JSON.stringify({
+        connected: Boolean(node && node.isConnected),
+        same: document.querySelector('#setup-terminal .xterm') === node,
+      }));
+    });
+  });
+  const handle = await page.locator('#setup-terminal .xterm').elementHandle();
+  if (!handle) throw new Error('xterm element is not present');
+  return handle;
+}
+
+async function recordedContinuity(page: Page): Promise<unknown> {
+  return page.evaluate(() => JSON.parse(sessionStorage.getItem('terminal-continuity') ?? 'null'));
+}
+
+async function runtimeConfigBytes(request: APIRequestContext): Promise<Buffer> {
+  const dataRoot = await connectedSetupDataRoot(request);
+  return readFile(path.join(path.dirname(dataRoot), 'config.yaml'));
 }
 
 async function captureEvidence(page: Page, name: string): Promise<void> {
@@ -465,11 +543,11 @@ test('connected setup terminal warns instead of pretending truncated scrollback 
   await assertNoConsoleErrors(page);
 });
 
-test('connected setup terminal opens the dashboard when setup becomes ready', async ({ page, request }) => {
+test('connected setup terminal opens the dashboard after setup reports completion', async ({ page, request }) => {
   await launchConnectedTerminal(page, request);
 
-  const ready = await request.post('/__ui/setup/ready');
-  expect(ready.status()).toBe(204);
+  await markSetupReady(request);
+  expect((await completeSetup(request)).status()).toBe(200);
 
   await expect(page).toHaveURL(/\/newsletter\/$/);
   await expect(page.getByRole('link', { name: 'View terminal' })).toBeVisible();
@@ -492,6 +570,7 @@ test('setup waits for its workflow definition before opening the dashboard', asy
 
   const fixed = await request.post('/__ui/setup/ready?definition=valid');
   expect(fixed.status()).toBe(204);
+  expect((await completeSetup(request)).status()).toBe(200);
   await expect(page).toHaveURL(/\/newsletter\/$/);
   const state = await page.evaluate(() =>
     fetch('/setup/session/state', { cache: 'no-store' }).then((response) => response.json())
@@ -605,11 +684,11 @@ test('connected setup terminal offers Relaunch after Copilot exits, hidden while
 test('dashboard surfaces the running setup session only for its owning browser', async ({ page, request, browser }, testInfo) => {
   await launchConnectedTerminal(page, request);
 
-  const ready = await request.post('/__ui/setup/ready');
-  expect(ready.status()).toBe(204);
+  await markSetupReady(request);
+  expect((await completeSetup(request)).status()).toBe(200);
 
-  // The config is ready, but this browser's connected PTY is still owned by
-  // the server; returning to the plain /setup URL redirects through the
+  // Setup reported completion but this browser's connected PTY is still owned
+  // by the server; returning to the plain /setup URL redirects through the
   // dashboard's default team rather than back to the (now finished) form.
   await page.goto('/setup');
   await expect(page).toHaveURL(/\/newsletter\/$/);
@@ -620,13 +699,12 @@ test('dashboard surfaces the running setup session only for its owning browser',
   await captureEvidence(page, `dashboard-setup-session-${testInfo.project.name}.png`);
 
   await sessionLink.click();
-  await expect(page).toHaveURL(/\/setup\/session$/);
+  await expect(page).toHaveURL(/\/setup\/session\?view=inspection$/);
   await expect(page.locator('#setup-terminal .xterm-screen')).toBeVisible();
 
-  // A later ready poll on the session view must not carry the browser away
-  // from its terminal (Task 6's session_view no-redirect behavior).
+  // The inspection view stays on the terminal even after completion.
   await page.waitForTimeout(2000);
-  await expect(page).toHaveURL(/\/setup\/session$/);
+  await expect(page).toHaveURL(/\/setup\/session\?view=inspection$/);
 
   await page.goto('/newsletter/');
   await expect(sessionLink).toBeVisible();
@@ -643,5 +721,196 @@ test('dashboard surfaces the running setup session only for its owning browser',
   await expect(page).toHaveURL(/\/newsletter\/$/);
   await expect(page.locator('[data-setup-session]')).toHaveCount(0);
 
+  await assertNoConsoleErrors(page);
+});
+
+
+test('ready configuration does not finish an unanswered setup', async ({ page, request }) => {
+  await launchConnectedTerminal(page, request);
+  const terminal = await trackTerminalContinuity(page);
+  await markSetupReady(request);
+
+  await expect.poll(() => setupStatus(page)).toMatchObject({ state: 'ready', completion: { phase: 'pending' } });
+  expect(await setupStatus(page)).not.toHaveProperty('redirect');
+  await waitForStatusPolls(page, 2);
+  await expect(page).toHaveURL(/\/setup\/session$/);
+  expect(await terminal.evaluate((node) => node.isConnected)).toBe(true);
+
+  await page.reload();
+  await expect(page).toHaveURL(/\/setup\/session$/);
+  await expect(page.locator('#setup-terminal .xterm-screen')).toBeVisible();
+  await waitForStatusPolls(page, 1);
+  await expect(page).toHaveURL(/\/setup\/session$/);
+  expect(await setupStatus(page)).toMatchObject({ state: 'ready', completion: { phase: 'pending' } });
+  await assertNoConsoleErrors(page);
+});
+
+const completingOutcomes: CompletionBody[] = [
+  { scheduler_result: 'confirmed' },
+  { scheduler_result: 'declined' },
+  { scheduler_result: 'manual-only' },
+  { scheduler_result: 'failed', limitations_acknowledged: true },
+  { scheduler_result: 'unknown', limitations_acknowledged: true },
+];
+
+for (const outcome of completingOutcomes) {
+  test(`acknowledged completion (${outcome.scheduler_result}) redirects once and keeps the terminal`, async ({ page, request }) => {
+    const sockets = trackSetupSockets(page);
+    const stops = trackStopRequests(page);
+    await launchConnectedTerminal(page, request);
+    const terminal = await trackTerminalContinuity(page);
+    await markSetupReady(request);
+    await waitForStatusPolls(page, 1);
+    await expect(page).toHaveURL(/\/setup\/session$/);
+    const configBefore = await runtimeConfigBytes(request);
+    expect(await terminal.evaluate((node) => node.isConnected)).toBe(true);
+    const navigations = trackMainFrameNavigations(page);
+
+    const response = await completeSetup(request, outcome);
+    expect(response.status()).toBe(200);
+    expect((await response.json()).completion).toMatchObject({ phase: 'complete', redirect_allowed: true });
+
+    await expect(page).toHaveURL(/\/newsletter\/$/);
+    await page.waitForTimeout(2000);
+    expect(navigations.filter((pathname) => pathname !== '/newsletter/')).toEqual([]);
+    expect(navigations).toHaveLength(1);
+
+    expect(await recordedContinuity(page)).toEqual({ connected: true, same: true });
+    expect(sockets).toHaveLength(1);
+    expect(stops).toEqual([]);
+    expect((await runtimeConfigBytes(request)).equals(configBefore)).toBe(true);
+
+    const writes = await (await request.get('/__ui/setup/session/writes')).json();
+    expect(writes.writes.join('')).not.toContain('/exit');
+    await expect(page.getByRole('link', { name: 'View terminal' })).toBeVisible();
+    const state = await page.evaluate(() => fetch('/setup/session/state', { cache: 'no-store' }).then((r) => r.json()));
+    expect(state).toMatchObject({ state: 'running', completion: { phase: 'complete' } });
+    await assertNoConsoleErrors(page);
+  });
+}
+
+const refusedOutcomes: CompletionBody[] = [
+  { scheduler_result: 'failed' },
+  { scheduler_result: 'failed', limitations_acknowledged: false },
+  { scheduler_result: 'unknown' },
+];
+
+for (const outcome of refusedOutcomes) {
+  test(`unacknowledged scheduler ${outcome.scheduler_result} (acknowledged=${String(outcome.limitations_acknowledged)}) is refused and never redirects`, async ({ page, request }) => {
+    await launchConnectedTerminal(page, request);
+    await markSetupReady(request);
+
+    const refused = await completeSetup(request, outcome);
+    expect(refused.status()).toBe(409);
+    expect(await refused.json()).toMatchObject({ ok: false, code: 'invalid-completion' });
+
+    await waitForStatusPolls(page, 2);
+    await expect(page).toHaveURL(/\/setup\/session$/);
+    expect(await setupStatus(page)).toMatchObject({ state: 'ready', completion: { phase: 'pending' } });
+    expect(await setupStatus(page)).not.toHaveProperty('redirect');
+
+    expect((await completeSetup(request, { ...outcome, limitations_acknowledged: true })).status()).toBe(200);
+    await expect(page).toHaveURL(/\/newsletter\/$/);
+    await assertNoConsoleErrors(page);
+  });
+}
+
+test('a stale configuration revision is rejected and does not redirect', async ({ page, request }) => {
+  await launchConnectedTerminal(page, request);
+  await markSetupReady(request);
+
+  const stale = await completeSetup(request, { scheduler_result: 'confirmed', revision: 'stale' });
+  expect(stale.status()).toBe(409);
+  expect(await stale.json()).toMatchObject({ ok: false, code: 'stale' });
+
+  await waitForStatusPolls(page, 2);
+  await expect(page).toHaveURL(/\/setup\/session$/);
+  expect(await setupStatus(page)).toMatchObject({ completion: { phase: 'pending' } });
+  expect(await setupStatus(page)).not.toHaveProperty('redirect');
+  await assertNoConsoleErrors(page);
+});
+
+test('Stop never counts as completion', async ({ page, request }) => {
+  await launchConnectedTerminal(page, request);
+  await markSetupReady(request);
+
+  await page.getByRole('button', { name: 'Stop', exact: true }).click();
+  await expect(page).not.toHaveURL(/\/setup\/session/);
+
+  const status = await setupStatus(page);
+  expect(status).toMatchObject({ completion: { phase: 'cancelled' } });
+  expect(status).not.toHaveProperty('redirect');
+  expect((await completeSetup(request)).ok()).toBe(false);
+
+  await page.goto('/setup');
+  await expect(page).toHaveURL(/\/setup$/);
+  await expect(page.getByLabel('Flowgency data root', { exact: true })).toBeVisible();
+  await assertNoConsoleErrors(page);
+});
+
+test('a crash without acknowledgement keeps the terminal and never redirects', async ({ page, request }) => {
+  await launchConnectedTerminal(page, request);
+  await markSetupReady(request);
+
+  await emitTerminalText(request, 'CRASH-MARKER\r\n');
+  const eof = await request.post('/__ui/setup/session/emit', { data: { eof: true } });
+  expect(eof.status()).toBe(204);
+
+  await expect(page.locator('#terminal-connection')).toContainText('The setup session exited.');
+  await expect(page.locator('#setup-terminal').getByText('CRASH-MARKER', { exact: true })).toBeVisible();
+  await waitForStatusPolls(page, 2);
+  await expect(page).toHaveURL(/\/setup\/session$/);
+  expect(await setupStatus(page)).toMatchObject({ state: 'ready', completion: { phase: 'attention' } });
+  expect(await setupStatus(page)).not.toHaveProperty('redirect');
+  expect((await completeSetup(request)).ok()).toBe(false);
+  await waitForStatusPolls(page, 1);
+  await expect(page).toHaveURL(/\/setup\/session$/);
+  await assertNoConsoleErrors(page);
+});
+
+test('a status reply from an older launch is ignored', async ({ page, request }) => {
+  await launchConnectedTerminal(page, request);
+  const terminal = await trackTerminalContinuity(page);
+  await markSetupReady(request);
+
+  await page.route('**/setup/status', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      state: 'ready',
+      redirect: '/',
+      completion: { launch_id: '0'.repeat(32), phase: 'complete', message: 'Setup is complete.' },
+    }),
+  }));
+  await expect(page.locator('#status-message')).toContainText('A different setup launch is active');
+  await waitForStatusPolls(page, 2);
+  await expect(page).toHaveURL(/\/setup\/session$/);
+  expect(await terminal.evaluate((node) => node.isConnected)).toBe(true);
+  await page.unroute('**/setup/status');
+
+  expect((await completeSetup(request)).status()).toBe(200);
+  await expect(page).toHaveURL(/\/newsletter\/$/);
+  await assertNoConsoleErrors(page);
+});
+
+test('the inspection view stays put after completion while the plain session view redirects', async ({ page, request }) => {
+  await launchConnectedTerminal(page, request);
+  await page.goto('/setup/session?view=inspection');
+  await expect(page.locator('#setup-terminal .xterm-screen')).toBeVisible();
+  await expect(page.locator('#status-message')).toHaveAttribute('data-setup-view', 'inspection');
+  await markSetupReady(request);
+  expect((await completeSetup(request)).status()).toBe(200);
+
+  await waitForStatusPolls(page, 2);
+  await expect(page).toHaveURL(/\/setup\/session\?view=inspection$/);
+  expect(await setupStatus(page)).toMatchObject({ redirect: '/', completion: { phase: 'complete' } });
+
+  await page.reload();
+  await expect(page.locator('#setup-terminal .xterm-screen')).toBeVisible();
+  await waitForStatusPolls(page, 2);
+  await expect(page).toHaveURL(/\/setup\/session\?view=inspection$/);
+
+  await page.goto('/setup/session');
+  await expect(page).toHaveURL(/\/newsletter\/$/);
   await assertNoConsoleErrors(page);
 });

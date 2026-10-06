@@ -55,6 +55,12 @@ SUPPORTED_UI_FIXTURES = frozenset(
 # Small enough that a browser test can exceed it deliberately (via the emit
 # endpoint below) without pushing megabytes through a fake PTY queue.
 CONNECTED_SETUP_REPLAY_LIMIT = 4096
+COMPLETION_FIXTURE_SCHEDULER_RESULTS = frozenset(
+    {"manual-only", "inactive", "declined", "confirmed", "failed", "unknown"}
+)
+COMPLETION_FIXTURE_REVISIONS = frozenset({"current", "stale"})
+COMPLETION_FIXTURE_KEYS = frozenset({"scheduler_result", "limitations_acknowledged", "revision"})
+STALE_REVISION = "0" * 64
 GIT_EVIDENCE_TICKET_ID = "fixture-git-evidence"
 GIT_EVIDENCE_REF = "refs/heads/main"
 GIT_EVIDENCE_INDEX = "fixture-index"
@@ -264,6 +270,76 @@ async def _reset_connected_setup_runtime(fixture: str) -> None:
     )
 
 
+def _completion_fixture_body(payload: object) -> tuple[str, bool, str]:
+    """Validate the closed completion-fixture schema; raise ``ValueError`` on anything else."""
+    if not isinstance(payload, dict):
+        raise ValueError("Completion payload must be an object")
+    unexpected = set(payload) - COMPLETION_FIXTURE_KEYS
+    if unexpected:
+        raise ValueError(f"Unsupported completion field: {sorted(unexpected)[0]}")
+    scheduler_result = payload.get("scheduler_result")
+    if scheduler_result not in COMPLETION_FIXTURE_SCHEDULER_RESULTS:
+        raise ValueError("scheduler_result is required and must be a known scheduler outcome")
+    acknowledged = payload.get("limitations_acknowledged", False)
+    if not isinstance(acknowledged, bool):
+        raise ValueError("limitations_acknowledged must be a boolean")
+    revision = payload.get("revision", "current")
+    if revision not in COMPLETION_FIXTURE_REVISIONS:
+        raise ValueError("revision must be 'current' or 'stale'")
+    return scheduler_result, acknowledged, revision
+
+
+async def _complete_connected_setup(request: Request) -> Response:
+    """Report completion for the prepared attempt through the real callback.
+
+    The capability token never leaves this process: the report is sent over
+    loopback HTTP to the real ``/setup/session/completion`` route, so the
+    bearer, peer, schema, revision and readiness checks all run for real.
+    """
+    import asyncio
+
+    from flowgency.app import app
+    from flowgency.configuration.store import ConfigStore
+    from flowgency.web.setup_completion import (
+        SetupCompletionClientError,
+        SetupCompletionCommand,
+        completion_environment,
+        submit_completion,
+    )
+
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Completion payload must be valid JSON") from exc
+    try:
+        scheduler_result, acknowledged, revision = _completion_fixture_body(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    attempt = getattr(app.state.setup_sessions, "_completion", None)
+    if attempt is None:
+        raise HTTPException(status_code=404, detail="No prepared setup completion attempt")
+    reported_revision = (
+        STALE_REVISION if revision == "stale" else ConfigStore(attempt.config_path).load().revision
+    )
+    # model_construct skips client-side validation so the server's own refusal is exercised.
+    command = SetupCompletionCommand.model_construct(
+        launch_id=attempt.launch_id,
+        revision=reported_revision,
+        scheduler_result=scheduler_result,
+        all_questions_answered=True,
+        summary_delivered=True,
+        limitations_acknowledged=acknowledged,
+    )
+    try:
+        result = await asyncio.to_thread(
+            submit_completion, command, completion_environment(attempt.launch)
+        )
+    except SetupCompletionClientError as error:
+        return JSONResponse({"ok": False, "code": error.code}, status_code=409)
+    return JSONResponse({"ok": True, "completion": result["completion"]})
+
+
 def _install_ui_test_runtime() -> None:
     global _REAL_COPILOT_INTEGRATION
     import flowgency.jobs.submission as submission_module
@@ -336,6 +412,10 @@ def _install_ui_test_runtime() -> None:
                 "sizes": [list(size) for size in _CURRENT_FAKE_PROCESS.sizes],
             }
         )
+
+    @app.post("/__ui/setup/session/complete", include_in_schema=False)
+    async def connected_setup_session_complete(request: Request) -> Response:
+        return await _complete_connected_setup(request)
 
     @app.post("/__ui/setup/session/emit", include_in_schema=False)
     async def connected_setup_session_emit(request: Request) -> Response:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import threading
 
+import pytest
 from fastapi.testclient import TestClient
 import yaml
 
@@ -196,5 +197,51 @@ def test_connected_setup_ready_preserves_existing_workflow_library_and_tickets()
         assert research_source.read_bytes() == research_before
         assert custom_selected.read_bytes() == custom_before
         assert seeded_ticket.read_bytes() == ticket_before
+    finally:
+        server._safe_remove_runtime(runtime)
+
+
+def test_completion_fixture_body_accepts_only_the_closed_schema():
+    assert server._completion_fixture_body({"scheduler_result": "declined"}) == (
+        "declined", False, "current"
+    )
+    assert server._completion_fixture_body(
+        {"scheduler_result": "failed", "limitations_acknowledged": True, "revision": "stale"}
+    ) == ("failed", True, "stale")
+
+    rejected = [
+        None,
+        [],
+        {},
+        {"scheduler_result": "bogus"},
+        {"scheduler_result": "confirmed", "token": "x"},
+        {"scheduler_result": "confirmed", "launch_id": "0" * 32},
+        {"scheduler_result": "confirmed", "all_questions_answered": False},
+        {"scheduler_result": "confirmed", "limitations_acknowledged": "yes"},
+        {"scheduler_result": "confirmed", "limitations_acknowledged": 1},
+        {"scheduler_result": "confirmed", "revision": "abc"},
+    ]
+    for payload in rejected:
+        with pytest.raises(ValueError):
+            server._completion_fixture_body(payload)
+
+
+def test_completion_fixture_endpoint_rejects_invalid_bodies_without_an_attempt(monkeypatch):
+    import flowgency.app as app_mod
+
+    runtime, config_path = server._prepare_runtime()
+    try:
+        monkeypatch.setenv("FLOWGENCY_CONFIG", str(config_path))
+        monkeypatch.setenv("FLOWGENCY_UI_RUNTIME", str(runtime))
+        monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
+        server._install_ui_test_runtime()
+        app_mod.refresh_services()
+
+        with TestClient(app_mod.app) as client:
+            path = "/__ui/setup/session/complete"
+            assert client.post(path, json={"scheduler_result": "bogus"}).status_code == 400
+            assert client.post(path, json={"scheduler_result": "confirmed", "x": 1}).status_code == 400
+            assert client.post(path, content=b"not json").status_code == 400
+            assert client.post(path, json={"scheduler_result": "confirmed"}).status_code == 404
     finally:
         server._safe_remove_runtime(runtime)
