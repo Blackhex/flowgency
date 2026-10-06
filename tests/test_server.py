@@ -1,6 +1,7 @@
 """Tests for web server startup and reload configuration."""
 
 import re
+import shutil
 import threading
 from dataclasses import replace
 from pathlib import Path
@@ -2016,6 +2017,20 @@ def test_validate_current_completion_refuses_a_missing_instance_prompt_without_w
 
     assert raised.value.code == "not-ready"
     assert _tree_bytes(prompt_root) == before
+
+
+def test_validate_current_completion_refuses_a_missing_prompt_store_root_without_creating_it(tmp_path, raw_config):
+    from flowgency.web.setup_completion import SetupCompletionUnavailable, validate_current_completion
+
+    config_path, revision = _instance_prompt_config(tmp_path, raw_config, write_prompt=True)
+    prompt_root = tmp_path / "prompts"
+    shutil.rmtree(prompt_root)
+
+    with pytest.raises(SetupCompletionUnavailable) as raised:
+        validate_current_completion(config_path, revision)
+
+    assert raised.value.code == "not-ready"
+    assert not prompt_root.exists()
 
 
 def test_validate_current_completion_refuses_an_invalid_instance_prompt(tmp_path, raw_config):

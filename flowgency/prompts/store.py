@@ -412,6 +412,8 @@ class ReadOnlyPromptStore(PromptStore):
     """
 
     def read(self, team: str, instance: str, name: str) -> StoredPrompt:
+        if not os.path.lexists(self.root):
+            raise PromptNotFoundError(f"prompt store not found: {self.root}")
         stored, _payload = self._load_prompt_locked(team, instance, name)
         return stored
 
