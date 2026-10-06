@@ -806,3 +806,53 @@ def test_setup_docs_distinguish_schedules_activation_and_scheduler():
         assert phrase in guide
     assert "Schedule approval does not enable automatic execution" in readme
     assert "Installing the scheduler does not create routines" in readme
+
+
+def _completion_section() -> str:
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    return " ".join(skill.split("## 6. Acknowledge Guided Completion", 1)[1].split())
+
+
+def test_setup_finishes_with_explicit_acknowledgement_in_the_required_order():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    assert skill.count("## 6. Acknowledge Guided Completion") == 1
+    verify = " ".join(skill.split("## 5. Verify And Schedule", 1)[1].split("## 6.", 1)[0].split())
+    section = _completion_section()
+
+    assert verify.index("flowgency validate --config") < verify.index("Report singleton scheduler status")
+    ordered = [
+        "Resolve every required question and settle the approved operations.",
+        "Validate the saved canonical revision and approved source.",
+        "Report scheduler status; obtain explicit acknowledgement of failed or unknown status.",
+        "Deliver the final summary without another unresolved setup question.",
+        "Run `flowgency setup finish` for that revision and observed scheduler result.",
+        "Do not declare browser completion if the acknowledgement fails.",
+    ]
+    positions = [section.index(step) for step in ordered]
+    assert positions == sorted(positions)
+
+
+def test_setup_finish_command_uses_saved_revision_and_manual_mode_omits_it():
+    section = _completion_section()
+
+    assert (
+        "flowgency setup finish --revision <saved-config-revision> --scheduler-result "
+        "<observed-scheduler-result> --all-questions-answered --summary-delivered"
+    ) in section
+    assert "ConfigStore(config_path).load().revision" in section
+    assert "64-character lowercase SHA-256" in section
+    assert "never a file timestamp" in section
+    assert "FLOWGENCY_SETUP_ORIGIN" in section
+    assert "omit this command" in section
+    assert "existing final summary" in section
+    for result in ("manual-only", "inactive", "declined", "confirmed", "failed", "unknown"):
+        assert f"`{result}`" in section
+    assert "--acknowledged-limitations" in section
+
+
+def test_setup_finish_adds_no_extra_write_or_source_repair():
+    section = _completion_section()
+
+    assert "Do not write the config again" in section
+    assert "do not repair missing workflow or blueprint source" in section
+    assert "Never print or store the `FLOWGENCY_SETUP_TOKEN` value" in section

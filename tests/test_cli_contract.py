@@ -19,6 +19,7 @@ from flowgency.jobs import JobHandle, JobSubmissionError
 from flowgency.memory import resolve_memory_selector
 from flowgency.tickets.models import TicketOperation, UserTicketContext
 from flowgency.web.dependencies import build_services
+from flowgency.web.setup_completion import SetupCompletionClientError
 from flowgency.web.validation import collect_validation_issues
 from tests._ticket_helpers import delivery_definition
 from tests._team_helpers import apply_team_paths, create_team_environment
@@ -637,3 +638,205 @@ def test_old_group_scoped_route_returns_404(tmp_path, monkeypatch):
 
     client, _ = _config_only_client(tmp_path, monkeypatch)
     assert client.get("/admin/groups/newsletter", follow_redirects=False).status_code == 404
+
+
+_SETUP_TOKEN = "completion-test-capability"
+_FINISH_ARGS = (
+    "setup", "finish", "--revision", "b" * 64, "--scheduler-result", "declined",
+    "--all-questions-answered", "--summary-delivered",
+)
+
+
+@pytest.fixture
+def setup_launch_env(monkeypatch):
+    monkeypatch.setenv("FLOWGENCY_SETUP_ORIGIN", "http://127.0.0.1:8500")
+    monkeypatch.setenv("FLOWGENCY_SETUP_TOKEN", _SETUP_TOKEN)
+    monkeypatch.setenv("FLOWGENCY_SETUP_LAUNCH_ID", "a" * 32)
+
+
+def _assert_no_token(result):
+    assert _SETUP_TOKEN not in result.stdout + result.stderr
+
+
+def test_setup_finish_sends_launch_bound_completion(cli_runner, monkeypatch, setup_launch_env):
+    captured_commands = []
+
+    def submit(command, environment):
+        captured_commands.append(command)
+        assert environment["FLOWGENCY_SETUP_TOKEN"] == _SETUP_TOKEN
+        return {"ok": True, "completion": {"phase": "complete"}}
+
+    monkeypatch.setattr(cli, "submit_completion", submit)
+    result = cli_runner(*_FINISH_ARGS)
+
+    assert result.exit_code == 0
+    assert captured_commands[0].scheduler_result == "declined"
+    assert captured_commands[0].launch_id == "a" * 32
+    assert captured_commands[0].revision == "b" * 64
+    assert captured_commands[0].limitations_acknowledged is False
+    assert "complete" in result.stdout
+    _assert_no_token(result)
+
+
+def test_setup_finish_passes_only_the_named_variables(cli_runner, monkeypatch, setup_launch_env):
+    seen = {}
+    monkeypatch.setenv("UNRELATED_SECRET", "must-not-travel")
+    monkeypatch.setattr(
+        cli, "submit_completion",
+        lambda command, environment: seen.update(environment) or {"ok": True, "completion": {}},
+    )
+
+    assert cli_runner(*_FINISH_ARGS).exit_code == 0
+    assert set(seen) == {
+        "FLOWGENCY_SETUP_ORIGIN", "FLOWGENCY_SETUP_TOKEN", "FLOWGENCY_SETUP_LAUNCH_ID",
+    }
+
+
+@pytest.mark.parametrize("result_name", ["failed", "unknown"])
+def test_setup_finish_acknowledged_limitation_is_sent(
+    cli_runner, monkeypatch, setup_launch_env, result_name
+):
+    captured = []
+    monkeypatch.setattr(
+        cli, "submit_completion",
+        lambda command, environment: captured.append(command) or {"ok": True, "completion": {}},
+    )
+
+    result = cli_runner(
+        "setup", "finish", "--revision", "b" * 64, "--scheduler-result", result_name,
+        "--all-questions-answered", "--summary-delivered", "--acknowledged-limitations",
+    )
+
+    assert result.exit_code == 0
+    assert captured[0].scheduler_result == result_name
+    assert captured[0].limitations_acknowledged is True
+
+
+@pytest.mark.parametrize("result_name", ["failed", "unknown"])
+def test_setup_finish_requires_acknowledgement_for_failed_or_unknown(
+    cli_runner, monkeypatch, setup_launch_env, result_name
+):
+    monkeypatch.setattr(
+        cli, "submit_completion",
+        lambda *a: pytest.fail("must not call the callback"),
+    )
+
+    result = cli_runner(
+        "setup", "finish", "--revision", "b" * 64, "--scheduler-result", result_name,
+        "--all-questions-answered", "--summary-delivered",
+    )
+
+    assert result.exit_code == 3
+    assert "acknowledg" in result.stderr.lower()
+    _assert_no_token(result)
+
+
+def test_setup_finish_without_launch_context_fails_without_calling_callback(
+    cli_runner, monkeypatch
+):
+    for name in ("FLOWGENCY_SETUP_ORIGIN", "FLOWGENCY_SETUP_TOKEN", "FLOWGENCY_SETUP_LAUNCH_ID"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(
+        cli, "submit_completion",
+        lambda *a: pytest.fail("must not call the callback"),
+    )
+
+    result = cli_runner(*_FINISH_ARGS)
+
+    assert result.exit_code == 3
+    assert "FLOWGENCY_SETUP" in result.stderr
+
+
+def test_setup_finish_rejects_partial_launch_context(cli_runner, monkeypatch, setup_launch_env):
+    monkeypatch.delenv("FLOWGENCY_SETUP_LAUNCH_ID")
+    monkeypatch.setattr(
+        cli, "submit_completion",
+        lambda *a: pytest.fail("must not call the callback"),
+    )
+
+    result = cli_runner(*_FINISH_ARGS)
+
+    assert result.exit_code == 3
+    _assert_no_token(result)
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ("setup", "finish", "--scheduler-result", "declined",
+         "--all-questions-answered", "--summary-delivered"),
+        ("setup", "finish", "--revision", "b" * 64,
+         "--all-questions-answered", "--summary-delivered"),
+        ("setup", "finish", "--revision", "b" * 64, "--scheduler-result", "declined",
+         "--summary-delivered"),
+        ("setup", "finish", "--revision", "b" * 64, "--scheduler-result", "declined",
+         "--all-questions-answered"),
+        ("setup", "finish", "--revision", "b" * 64, "--scheduler-result", "running",
+         "--all-questions-answered", "--summary-delivered"),
+        ("setup", "finish", "--revision", "b" * 64, "--scheduler-result", "declined",
+         "--all-questions-answered", "true", "--summary-delivered"),
+    ],
+)
+def test_setup_finish_rejects_missing_or_invalid_flags(
+    cli_runner, monkeypatch, setup_launch_env, arguments
+):
+    monkeypatch.setattr(
+        cli, "submit_completion",
+        lambda *a: pytest.fail("must not call the callback"),
+    )
+
+    assert cli_runner(*arguments).exit_code == 2
+
+
+@pytest.mark.parametrize("revision", ["", "b" * 63, "B" * 64, "not-a-revision"])
+def test_setup_finish_rejects_malformed_revision(
+    cli_runner, monkeypatch, setup_launch_env, revision
+):
+    monkeypatch.setattr(
+        cli, "submit_completion",
+        lambda *a: pytest.fail("must not call the callback"),
+    )
+
+    result = cli_runner(
+        "setup", "finish", "--revision", revision, "--scheduler-result", "declined",
+        "--all-questions-answered", "--summary-delivered",
+    )
+
+    assert result.exit_code == 3
+    _assert_no_token(result)
+
+
+@pytest.mark.parametrize(
+    "code, expected_exit",
+    [
+        ("stale", 1), ("not-ready", 1), ("unavailable", 1), ("invalid-credentials", 1),
+        ("forbidden", 1), ("invalid-completion", 1), ("payload-too-large", 1),
+        ("timeout", 1), ("redirect", 1), ("response-too-large", 1),
+        ("unreachable", 1), ("invalid-response", 1),
+        ("invalid-origin", 3), ("invalid-context", 3), ("missing-context", 3),
+    ],
+)
+def test_setup_finish_reports_callback_failures_safely(
+    cli_runner, monkeypatch, setup_launch_env, code, expected_exit
+):
+    def refuse(command, environment):
+        raise SetupCompletionClientError(code)
+
+    monkeypatch.setattr(cli, "submit_completion", refuse)
+    result = cli_runner(*_FINISH_ARGS)
+
+    assert result.exit_code == expected_exit
+    assert result.stdout == ""
+    assert "Traceback" not in result.stderr
+    _assert_no_token(result)
+
+
+def test_setup_finish_json_failure_shape(cli_runner, monkeypatch, setup_launch_env):
+    def refuse(command, environment):
+        raise SetupCompletionClientError("stale")
+
+    monkeypatch.setattr(cli, "submit_completion", refuse)
+    result = cli_runner(*_FINISH_ARGS, "--json")
+
+    assert result.exit_code == 1
+    assert json.loads(result.stderr)["code"] == "stale"

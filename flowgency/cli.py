@@ -11,9 +11,10 @@ import json
 import os
 from pathlib import Path
 import sys
-from typing import Any
+from typing import Any, get_args
 
 import yaml
+from pydantic import ValidationError
 
 from flowgency.cli_output import ExitCode, render_error
 from flowgency.blueprints import BlueprintLibrary
@@ -40,6 +41,12 @@ from flowgency.tickets.cli import register_ticket_commands
 from flowgency.tickets.models import UserTicketContext
 from flowgency.tickets.views import build_board_view
 from flowgency.web.dependencies import FlowgencyServices, build_services
+from flowgency.web.setup_completion import (
+    SchedulerResult,
+    SetupCompletionClientError,
+    SetupCompletionCommand,
+    submit_completion,
+)
 from flowgency.web.validation import collect_validation_issues
 
 
@@ -810,6 +817,60 @@ def _cmd_dispatch_inner(args: Namespace) -> int:
     return 0
 
 
+_SETUP_CONTEXT_VARIABLES = (
+    "FLOWGENCY_SETUP_ORIGIN",
+    "FLOWGENCY_SETUP_TOKEN",
+    "FLOWGENCY_SETUP_LAUNCH_ID",
+)
+_SETUP_CONTEXT_ERRORS = frozenset({"missing-context", "invalid-context", "invalid-origin"})
+_COMPLETION_PHASES = frozenset({"pending", "acknowledged", "complete", "attention", "cancelled"})
+
+
+def cmd_setup_finish(args: Namespace) -> int:
+    environment = {name: os.environ[name] for name in _SETUP_CONTEXT_VARIABLES if os.environ.get(name)}
+    if len(environment) != len(_SETUP_CONTEXT_VARIABLES):
+        raise _validation_failure(
+            "missing-context",
+            "Flowgency setup launch context is not available.",
+            scope="setup",
+            field="environment",
+            hint="Run this only from a Flowgency-launched guided setup session that sets "
+            "the FLOWGENCY_SETUP_* variables; manual setup omits this command.",
+        )
+    try:
+        command = SetupCompletionCommand(
+            launch_id=environment["FLOWGENCY_SETUP_LAUNCH_ID"],
+            revision=args.revision,
+            scheduler_result=args.scheduler_result,
+            all_questions_answered=args.all_questions_answered,
+            summary_delivered=args.summary_delivered,
+            limitations_acknowledged=args.acknowledged_limitations,
+        )
+    except ValidationError as error:
+        issues = tuple(
+            _issue(
+                "invalid-completion",
+                "setup",
+                ".".join(str(part) for part in item["loc"]) or "completion",
+                item["msg"].removeprefix("Value error, "),
+                "Correct the completion arguments and try again.",
+            )
+            for item in error.errors(include_input=False, include_url=False)
+        )
+        raise CliFailure(
+            ExitCode.VALIDATION, "invalid-completion", "Setup completion report is invalid", issues
+        ) from None
+    try:
+        result = submit_completion(command, environment)
+    except SetupCompletionClientError as error:
+        exit_code = ExitCode.VALIDATION if error.code in _SETUP_CONTEXT_ERRORS else ExitCode.OPERATIONAL_FAILURE
+        raise CliFailure(exit_code, error.code, error.message) from None
+    phase = (result.get("completion") or {}).get("phase")
+    suffix = f" (phase: {phase})" if phase in _COMPLETION_PHASES else ""
+    print(f"Setup completion acknowledged{suffix}.")
+    return 0
+
+
 def _add_config(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--config", default=argparse.SUPPRESS, help="Path to canonical config.yaml")
 
@@ -843,6 +904,19 @@ def build_parser() -> argparse.ArgumentParser:
     _add_config(validate)
     validate.add_argument("--json", action="store_true")
     validate.set_defaults(handler=cmd_validate)
+
+    setup = subparsers.add_parser("setup", help="Report guided setup progress to Flowgency")
+    setup_subparsers = setup.add_subparsers(dest="setup_command", required=True)
+    finish = setup_subparsers.add_parser(
+        "finish", help="Acknowledge a finished guided setup session"
+    )
+    finish.add_argument("--revision", required=True, help="Saved config revision (64-character SHA-256)")
+    finish.add_argument("--scheduler-result", required=True, choices=get_args(SchedulerResult))
+    finish.add_argument("--all-questions-answered", required=True, action="store_true")
+    finish.add_argument("--summary-delivered", required=True, action="store_true")
+    finish.add_argument("--acknowledged-limitations", action="store_true")
+    finish.add_argument("--json", action="store_true")
+    finish.set_defaults(handler=cmd_setup_finish)
 
     register_ticket_commands(subparsers)
 

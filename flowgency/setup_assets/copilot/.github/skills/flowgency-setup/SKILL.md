@@ -512,3 +512,24 @@ Dispatch enabled is not proof that the platform scheduler is installed or
 running.
 
 Report the Flowgency data root, effective storage paths, blueprint keys, instance IDs, routines, semantic memory scopes/channels, authoritative config path, and scheduler status.
+
+## 6. Acknowledge Guided Completion
+
+A Flowgency-launched guided session finishes only after an explicit acknowledgement; a saved or valid config, an idle terminal, or a zero exit code does not complete it. Finish in this order:
+
+1. Resolve every required question and settle the approved operations.
+2. Validate the saved canonical revision and approved source.
+3. Report scheduler status; obtain explicit acknowledgement of failed or unknown status.
+4. Deliver the final summary without another unresolved setup question.
+5. Run `flowgency setup finish` for that revision and observed scheduler result.
+6. Do not declare browser completion if the acknowledgement fails.
+
+Run the acknowledgement only when the launch environment provides `FLOWGENCY_SETUP_ORIGIN`, `FLOWGENCY_SETUP_TOKEN`, and `FLOWGENCY_SETUP_LAUNCH_ID`. Without them (manual use of this skill), omit this command and keep the existing final summary behavior.
+
+```text
+flowgency setup finish --revision <saved-config-revision> --scheduler-result <observed-scheduler-result> --all-questions-answered --summary-delivered
+```
+
+`<saved-config-revision>` is the 64-character lowercase SHA-256 revision of the config just saved, read as `ConfigStore(config_path).load().revision` from the authoritative config on disk, never a file timestamp or a guessed value. `<observed-scheduler-result>` is exactly one of `manual-only`, `inactive`, `declined`, `confirmed`, `failed`, or `unknown`, matching the scheduling result and status observed in Section 5. Pass `--acknowledged-limitations` only after the user explicitly acknowledged a `failed` or `unknown` scheduler status; it is required for those two results.
+
+Pass `--all-questions-answered` and `--summary-delivered` only when both are true. Do not write the config again, do not repair missing workflow or blueprint source, and do not change saved dispatch settings to obtain the acknowledgement. If the command is refused or fails, report the printed error, do not declare browser completion, and re-run only after correcting the cause. Never print or store the `FLOWGENCY_SETUP_TOKEN` value.
