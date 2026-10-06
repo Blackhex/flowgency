@@ -840,3 +840,16 @@ def test_setup_finish_json_failure_shape(cli_runner, monkeypatch, setup_launch_e
 
     assert result.exit_code == 1
     assert json.loads(result.stderr)["code"] == "stale"
+
+
+def test_setup_finish_json_success_shape(cli_runner, monkeypatch, setup_launch_env):
+    monkeypatch.setattr(
+        cli, "submit_completion",
+        lambda command, environment: {"ok": True, "completion": {"phase": "complete"}},
+    )
+
+    result = cli_runner(*_FINISH_ARGS, "--json")
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {"ok": True, "completion": {"phase": "complete"}}
+    _assert_no_token(result)

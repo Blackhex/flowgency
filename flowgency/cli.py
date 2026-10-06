@@ -865,9 +865,12 @@ def cmd_setup_finish(args: Namespace) -> int:
     except SetupCompletionClientError as error:
         exit_code = ExitCode.VALIDATION if error.code in _SETUP_CONTEXT_ERRORS else ExitCode.OPERATIONAL_FAILURE
         raise CliFailure(exit_code, error.code, error.message) from None
-    phase = (result.get("completion") or {}).get("phase")
-    suffix = f" (phase: {phase})" if phase in _COMPLETION_PHASES else ""
-    print(f"Setup completion acknowledged{suffix}.")
+    if args.json:
+        _print_json(result)
+    else:
+        phase = (result.get("completion") or {}).get("phase")
+        suffix = f" (phase: {phase})" if phase in _COMPLETION_PHASES else ""
+        print(f"Setup completion acknowledged{suffix}.")
     return 0
 
 
