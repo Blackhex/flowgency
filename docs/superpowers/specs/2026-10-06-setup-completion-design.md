@@ -3,7 +3,7 @@
 Date: 2026-10-06
 Branch: `feature/setup-completion`
 Worktree: `.worktrees/setup-done/`
-Status: design sections approved; written specification awaiting user review.
+Status: written specification approved on 2026-10-06; implementation not started.
 
 ## Problem And Evidence
 
