@@ -14,6 +14,9 @@ Two locks keep that promise:
 * ``_state_lock`` guards only the fan-out, ownership and snapshot state and is
   never held across blocking PTY I/O.
 
+Each session's ``write_lock`` serializes whole PTY input writes (user input and
+the completion ``/exit``). It is taken before ``_state_lock``, never the reverse.
+
 The reader's end-of-stream path finalizes using ``_state_lock`` alone and relies
 on the process layer's idempotent Stop, so it can never invert against a Stop
 that holds ``_lifecycle_lock``.
@@ -214,6 +217,7 @@ class _Session:
         self.finalized = False
         self.eof_seen = False
         self.input_count = 0
+        self.write_lock = asyncio.Lock()
         self.replay_limit = replay_limit
         self.client_limit = client_limit
         self._now = now
@@ -380,35 +384,50 @@ class SetupSessionManager:
             return self._decide(attempt, validated_revision, True)
 
     async def request_completion_exit(self, launch_id: str) -> bool:
-        """Send ``/exit`` at most once, only at an adapter-verified safe boundary."""
+        """Send ``/exit`` at most once, only at an adapter-verified safe boundary.
+
+        Writes are ordered with user input by the session write lock: input that
+        finished (or was in flight) after acknowledgement refuses the exit, and
+        input arriving once the exit is claimed is refused.
+        """
         async with self._state_lock:
-            attempt = self._completion
-            if attempt is None or attempt.cancelled or attempt.unexpected_failure:
-                return False
-            if not hmac.compare_digest(
-                launch_id.encode("utf-8"), attempt.launch_id.encode("utf-8")
-            ):
-                return False
-            session = attempt.session
-            if (
-                attempt.acknowledgement is None
-                or session is None
-                or session.process is None
-                or session.state != "running"
-                or session.eof_seen
-                or session.finalized
-            ):
-                return False
-            if attempt.exit_requested:
-                return True
-            adapter = self._exit_adapter
-            if not adapter.capability().supported or adapter.boundary() != "safe":
-                return False
-            if session.input_count != attempt.input_count_at_acknowledgement:
-                return False
-            attempt.exit_requested = True
-            process = session.process
-        await asyncio.to_thread(process.write, _EXIT_COMMAND)
+            current = self._completion
+            session = None if current is None else current.session
+        if session is None:
+            return False
+        async with session.write_lock:
+            async with self._state_lock:
+                attempt = self._completion
+                if attempt is None or attempt.session is not session:
+                    return False
+                if attempt.cancelled or attempt.unexpected_failure:
+                    return False
+                if not hmac.compare_digest(
+                    launch_id.encode("utf-8"), attempt.launch_id.encode("utf-8")
+                ):
+                    return False
+                if (
+                    attempt.acknowledgement is None
+                    or session.process is None
+                    or session.state != "running"
+                    or session.eof_seen
+                    or session.finalized
+                ):
+                    return False
+                if attempt.exit_requested:
+                    return True
+                adapter = self._exit_adapter
+                if not adapter.capability().supported or adapter.boundary() != "safe":
+                    return False
+                if session.input_count != attempt.input_count_at_acknowledgement:
+                    return False
+                attempt.exit_requested = True
+                process = session.process
+            try:
+                await asyncio.to_thread(process.write, _EXIT_COMMAND)
+            except BaseException:
+                attempt.exit_requested = False
+                raise
         return True
 
     def completion_decision(
@@ -695,16 +714,24 @@ class SetupSessionManager:
     async def send_input(self, owner: str, connection_id: str, data: bytes) -> None:
         async with self._state_lock:
             session = self._require_owned(owner)
-            if session._writer != connection_id:
-                raise SetupSessionConflict("Another connection controls setup input")
-            if session.state != "running" or session.eof_seen or session.process is None:
-                raise SetupSessionConflict("The setup session is not accepting input")
-            if len(data) > _MAX_INPUT_BYTES:
-                raise ValueError("Setup input exceeds 64 KiB")
-            process = session.process
-            session._last_activity = self._now()
-            session.input_count += 1
-        await asyncio.to_thread(process.write, bytes(data))
+        async with session.write_lock:
+            async with self._state_lock:
+                session = self._require_owned(owner)
+                if session._writer != connection_id:
+                    raise SetupSessionConflict("Another connection controls setup input")
+                if session.state != "running" or session.eof_seen or session.process is None:
+                    raise SetupSessionConflict("The setup session is not accepting input")
+                if len(data) > _MAX_INPUT_BYTES:
+                    raise ValueError("Setup input exceeds 64 KiB")
+                attempt = self._completion
+                if attempt is not None and attempt.session is session and attempt.exit_requested:
+                    raise SetupSessionConflict("The setup session is exiting")
+                process = session.process
+                session._last_activity = self._now()
+            try:
+                await asyncio.to_thread(process.write, bytes(data))
+            finally:
+                session.input_count += 1
 
     async def resize(self, owner: str, connection_id: str, rows: int, cols: int) -> None:
         async with self._state_lock:
