@@ -255,6 +255,122 @@ def test_completion_reattach_reuses_credential_and_rejects_other_selection(tmp_p
     asyncio.run(exercise())
 
 
+def _prepare(manager: SetupSessionManager, owner: str, integration: str, root: Path):
+    return manager.prepare_completion(
+        owner, integration, root, root / "config.yaml", "http://127.0.0.1:8500"
+    )
+
+
+def test_completion_owner_supersedes_unbound_attempt_on_other_selection(tmp_path: Path):
+    async def exercise():
+        manager = SetupSessionManager(process_factory=lambda launch: FakeProcess(), sweep_interval=0)
+        try:
+            old = await _prepare(manager, "owner", "codex", tmp_path)
+            for integration, root in (("copilot", tmp_path), ("codex", tmp_path / "elsewhere")):
+                new = await _prepare(manager, "owner", integration, root)
+                assert new.launch_id != old.launch_id
+                assert new.token != old.token
+                with pytest.raises(SetupSessionConflict):
+                    await manager.acknowledge_completion(
+                        old.token, _completion_command(old.launch_id), _REVISION
+                    )
+                with pytest.raises(SetupSessionConflict):
+                    manager.require_completion_token(old.token)
+                assert manager.require_completion_token(new.token) == new.launch_id
+                old = new
+            decision = await manager.acknowledge_completion(
+                new.token, _completion_command(new.launch_id), _REVISION
+            )
+            assert decision.redirect_allowed is True
+        finally:
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_completion_other_owner_is_rejected_while_unbound_attempt_is_live(tmp_path: Path):
+    async def exercise():
+        manager = SetupSessionManager(process_factory=lambda launch: FakeProcess(), sweep_interval=0)
+        try:
+            first = await _prepare(manager, "owner", "codex", tmp_path)
+            with pytest.raises(SetupSessionConflict):
+                await _prepare(manager, "other", "codex", tmp_path)
+            with pytest.raises(SetupSessionConflict):
+                await _prepare(manager, "other", "copilot", tmp_path / "elsewhere")
+            assert manager.require_completion_token(first.token) == first.launch_id
+        finally:
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_completion_unbound_attempt_expires_after_max_lifetime(tmp_path: Path):
+    async def exercise():
+        clock = [100.0]
+        manager = SetupSessionManager(
+            process_factory=lambda launch: FakeProcess(),
+            now=lambda: clock[0], max_lifetime=60.0, sweep_interval=0,
+        )
+        try:
+            old = await _prepare(manager, "owner", "codex", tmp_path)
+            clock[0] += 60.0
+            with pytest.raises(SetupSessionConflict):
+                await _prepare(manager, "other", "codex", tmp_path)
+            clock[0] += 0.5
+            new = await _prepare(manager, "other", "copilot", tmp_path / "elsewhere")
+            assert new.launch_id != old.launch_id
+            with pytest.raises(SetupSessionConflict):
+                await manager.acknowledge_completion(
+                    old.token, _completion_command(old.launch_id), _REVISION
+                )
+            assert manager.require_completion_token(new.token) == new.launch_id
+        finally:
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("acknowledge_first", [False, True])
+def test_completion_running_attempt_is_not_superseded_by_other_selection(
+    tmp_path: Path, acknowledge_first
+):
+    async def exercise():
+        manager = SetupSessionManager(process_factory=lambda launch: FakeProcess(), sweep_interval=0)
+        try:
+            running = await _connected_completion(manager, tmp_path)
+            if acknowledge_first:
+                await manager.acknowledge_completion(
+                    running.token, _completion_command(running.launch_id), _REVISION
+                )
+            with pytest.raises(SetupSessionConflict):
+                await _prepare(manager, "owner", "codex", tmp_path)
+            launch = RuntimeLaunch(("codex",), tmp_path, {}, "connected")
+            with pytest.raises(SetupSessionConflict, match="Stop the running setup session"):
+                await manager.start("owner", "codex", launch, "fallback")
+            assert manager.require_completion_token(running.token) == running.launch_id
+        finally:
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_completion_start_for_other_selection_supersedes_unbound_attempt(tmp_path: Path):
+    async def exercise():
+        manager = SetupSessionManager(process_factory=lambda launch: FakeProcess(), sweep_interval=0)
+        try:
+            old = await _prepare(manager, "owner", "codex", tmp_path)
+            launch = RuntimeLaunch(("copilot",), tmp_path, {}, "connected")
+            await manager.start("owner", "copilot", launch, "fallback")
+            with pytest.raises(SetupSessionConflict):
+                await manager.acknowledge_completion(
+                    old.token, _completion_command(old.launch_id), _REVISION
+                )
+        finally:
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
 def test_completion_replacement_attempt_rejects_old_token(tmp_path: Path):
     async def exercise():
         processes = []

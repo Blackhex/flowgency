@@ -277,11 +277,12 @@ class SetupSessionManager:
                 raise SetupSessionConflict("Setup is shutting down")
             attempt = self._completion
             if attempt is not None and self._holds_slot(attempt):
-                if attempt.owner != owner or attempt.selection() != (
+                if attempt.owner == owner and attempt.selection() == (
                     integration_name, data_root, config_path
                 ):
+                    return attempt.launch
+                if not self._supersedable(attempt, owner):
                     raise SetupSessionConflict("Another setup launch owns the setup session")
-                return attempt.launch
             session = self._session
             if session is not None:
                 if session.state == "failed":
@@ -379,8 +380,19 @@ class SetupSessionManager:
             or attempt.integration_name != integration_name
             or attempt.data_root != data_root
         ):
-            raise SetupSessionConflict("Another setup launch owns the setup session")
+            if not self._supersedable(attempt, owner):
+                raise SetupSessionConflict("Another setup launch owns the setup session")
+            self._completion = None
+            return None
         return attempt if attempt.session is None else None
+
+    @staticmethod
+    def _supersedable(attempt: _CompletionAttempt, owner: str) -> bool:
+        return (
+            attempt.owner == owner
+            and attempt.session is None
+            and attempt.acknowledgement is None
+        )
 
     def _end_attempt(self, session: _Session, *, failed: bool) -> None:
         attempt = self._completion
