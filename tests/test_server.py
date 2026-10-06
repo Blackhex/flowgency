@@ -1970,6 +1970,69 @@ def test_validate_current_completion_is_read_only_and_returns_rechecked_revision
         assert not Path(raw["flowgency"][key]).exists()
 
 
+def _tree_bytes(root: Path) -> dict[str, bytes | None]:
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes() if path.is_file() else None
+        for path in sorted(root.rglob("*"))
+    }
+
+
+def _instance_prompt_config(tmp_path: Path, raw_config: dict, *, write_prompt: bool) -> tuple[Path, str]:
+    import hashlib
+
+    raw = _materialize_ready_config(tmp_path, raw_config)
+    raw["teams"]["newsletter"]["agents"][0]["prompts"] = ["local-triage"]
+    if write_prompt:
+        prompt = tmp_path / "prompts" / "newsletter" / "builder" / "local-triage.prompt.md"
+        prompt.parent.mkdir(parents=True)
+        prompt.write_bytes(b"---\nname: local-triage\ndescription: Triage.\n---\n\nTriage it.\n")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    return config_path, hashlib.sha256(config_path.read_bytes()).hexdigest()
+
+
+def test_validate_current_completion_leaves_an_existing_prompt_store_untouched(tmp_path, raw_config):
+    from flowgency.web.setup_completion import validate_current_completion
+
+    config_path, revision = _instance_prompt_config(tmp_path, raw_config, write_prompt=True)
+    prompt_root = tmp_path / "prompts"
+    before = _tree_bytes(prompt_root)
+
+    assert validate_current_completion(config_path, revision) == revision
+
+    assert _tree_bytes(prompt_root) == before
+    assert not (prompt_root / ".locks").exists()
+
+
+def test_validate_current_completion_refuses_a_missing_instance_prompt_without_writing(tmp_path, raw_config):
+    from flowgency.web.setup_completion import SetupCompletionUnavailable, validate_current_completion
+
+    config_path, revision = _instance_prompt_config(tmp_path, raw_config, write_prompt=False)
+    prompt_root = tmp_path / "prompts"
+    before = _tree_bytes(prompt_root)
+
+    with pytest.raises(SetupCompletionUnavailable) as raised:
+        validate_current_completion(config_path, revision)
+
+    assert raised.value.code == "not-ready"
+    assert _tree_bytes(prompt_root) == before
+
+
+def test_validate_current_completion_refuses_an_invalid_instance_prompt(tmp_path, raw_config):
+    from flowgency.web.setup_completion import SetupCompletionUnavailable, validate_current_completion
+
+    config_path, revision = _instance_prompt_config(tmp_path, raw_config, write_prompt=True)
+    prompt = tmp_path / "prompts" / "newsletter" / "builder" / "local-triage.prompt.md"
+    prompt.write_bytes(b"---\nname: local-triage\n")
+    before = _tree_bytes(tmp_path / "prompts")
+
+    with pytest.raises(SetupCompletionUnavailable) as raised:
+        validate_current_completion(config_path, revision)
+
+    assert raised.value.code == "not-ready"
+    assert _tree_bytes(tmp_path / "prompts") == before
+
+
 def test_validate_current_completion_rejects_stale_missing_and_unready_sources(tmp_path, raw_config):
     import hashlib
     from flowgency.web.setup_completion import (

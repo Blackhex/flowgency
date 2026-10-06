@@ -338,7 +338,7 @@ class SetupSessionManager:
                 except asyncio.CancelledError:
                     # Keep the lock until the worker thread ends so checks never overlap.
                     while not check.done():
-                        with contextlib.suppress(BaseException):
+                        with contextlib.suppress(asyncio.CancelledError, Exception):
                             await asyncio.shield(check)
                     if not check.cancelled():
                         check.exception()

@@ -19,7 +19,8 @@ from flowgency.blueprints import BlueprintLibrary
 from flowgency.configuration import ConfigStore, ValidationFailed
 from flowgency.configuration.paths import validate_resolved_paths
 from flowgency.integrations import REGISTRY
-from flowgency.prompts import PromptStore, validate_prompt_catalogs
+from flowgency.prompts import validate_prompt_catalogs
+from flowgency.prompts.store import ReadOnlyPromptStore
 from flowgency.web.dependencies import FlowgencyServices
 from flowgency.web.validation import collect_validation_issues
 
@@ -105,13 +106,6 @@ def _require_ready(config_store: ConfigStore, snapshot) -> None:
     if not config.teams or validate_resolved_paths(config):
         raise SetupCompletionUnavailable("not-ready")
     flowgency = config.flowgency
-    prompt_root = Path(flowgency.prompt_store)
-    uses_instance_prompts = any(
-        agent.prompts for team in config.teams.values() for agent in team.agents.values()
-    )
-    # Reading an instance prompt takes a lock that would create a missing store.
-    if uses_instance_prompts and not prompt_root.is_dir():
-        raise SetupCompletionUnavailable("not-ready")
     library = BlueprintLibrary(Path(flowgency.agent_library))
     services = FlowgencyServices(
         config_path=snapshot.path,
@@ -123,7 +117,9 @@ def _require_ready(config_store: ConfigStore, snapshot) -> None:
         job_store=None,
         instances=None,
         integrations=REGISTRY,
-        prompt_issues=validate_prompt_catalogs(snapshot, library, PromptStore(prompt_root)),
+        prompt_issues=validate_prompt_catalogs(
+            snapshot, library, ReadOnlyPromptStore(Path(flowgency.prompt_store))
+        ),
     )
     if collect_validation_issues(services, snapshot):
         raise SetupCompletionUnavailable("not-ready")

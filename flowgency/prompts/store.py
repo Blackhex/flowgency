@@ -404,6 +404,18 @@ class PromptStore:
         return namespace_path
 
 
+class ReadOnlyPromptStore(PromptStore):
+    """Reads prompts without taking locks or creating anything under the root.
+
+    Writers replace files atomically, so an unlocked read sees either the old
+    or the new document, never a torn one.
+    """
+
+    def read(self, team: str, instance: str, name: str) -> StoredPrompt:
+        stored, _payload = self._load_prompt_locked(team, instance, name)
+        return stored
+
+
 def _validate_registered(
     registered: tuple[tuple[str, str], ...],
 ) -> tuple[tuple[str, str], ...]:
