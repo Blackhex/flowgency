@@ -78,7 +78,7 @@
           <p class="text-sm text-amber-900">Interactive setup can use this computer's server-user access to files and tools.</p>
         </div>
 
-        <p id="status-message" class="text-sm text-gray-500" aria-live="polite">
+        <p id="status-message" class="text-sm text-gray-500" aria-live="polite" data-setup-view="{{ 'inspection' if inspection_view else 'waiting' }}" data-launch-id="{{ completion_launch_id }}">
           {% if status_message %}
           {{ status_message }}
           {% else %}
@@ -124,7 +124,7 @@
 
         <div class="rounded-xl border border-flowgency-200 bg-flowgency-50 p-4 space-y-2">
           <div class="text-sm font-semibold text-flowgency-900">Waiting for setup to complete…</div>
-          <p id="status-message" class="text-sm text-flowgency-900">
+          <p id="status-message" class="text-sm text-flowgency-900" data-setup-view="{{ 'inspection' if inspection_view else 'waiting' }}" data-launch-id="{{ completion_launch_id }}">
             {% if status_message %}
             {{ status_message }}
             {% else %}
@@ -340,30 +340,43 @@
       }
 
       if (statusMessage) {
-        const terminalElement = document.getElementById("setup-terminal");
-        const sessionView = !!(terminalElement && terminalElement.dataset.sessionView === "true");
-        const preserveSessionView = sessionView && {{ 'true' if status_state == 'ready' else 'false' }};
+        const inspectionView = statusMessage.dataset.setupView === "inspection";
+        const launchId = statusMessage.dataset.launchId || "";
         const defaultMessages = {
           waiting: "We’ll keep checking for a complete configuration.",
           invalid: "Setup wrote an invalid configuration. Fix the setup session, then wait for the next refresh.",
           incomplete: "Setup is not finished yet. Complete the configuration in the launched session.",
         };
         let pollTimer = null;
+        let readInFlight = false;
 
         const pollStatus = async () => {
+          if (readInFlight) {
+            return;
+          }
+          readInFlight = true;
           let shouldScheduleNextPoll = true;
           try {
             const response = await fetch("/setup/status", { cache: "no-store" });
             const payload = await response.json();
-            if (payload.state === "ready" && payload.redirect && !preserveSessionView) {
+            const completion = payload.completion || null;
+            if ((completion ? completion.launch_id || "" : "") !== launchId) {
+              statusMessage.textContent = "A different setup launch is active. Reload this page to follow it.";
+              return;
+            }
+            if (payload.state === "ready" && payload.redirect && !inspectionView) {
               shouldScheduleNextPoll = false;
               window.location.assign(payload.redirect);
               return;
             }
-            statusMessage.textContent = payload.message || defaultMessages[payload.state] || "";
+            statusMessage.textContent = payload.message
+              || (completion && completion.message)
+              || defaultMessages[payload.state]
+              || "";
           } catch (error) {
             statusMessage.textContent = "Status check failed. Retrying.";
           } finally {
+            readInFlight = false;
             if (shouldScheduleNextPoll) {
               pollTimer = window.setTimeout(pollStatus, 1500);
             }

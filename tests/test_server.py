@@ -978,8 +978,13 @@ def test_setup_session_view_and_status_stay_ready_while_session_runs(
             encoding="utf-8",
         )
 
-        assert client.get("/setup/status").json() == {"state": "ready", "redirect": "/"}
+        status = client.get("/setup/status").json()
+        assert status["state"] == "ready"
+        assert status["completion"]["phase"] == "pending"
+        assert "redirect" not in status
+        assert client.get("/setup", follow_redirects=False).headers["location"] == "/setup/session"
         assert client.get("/setup/session").status_code == 200
+        assert process.running is True
 
         stop = client.post(
             "/setup/session/stop",
@@ -2170,3 +2175,186 @@ def test_completion_origin_is_normalized_to_a_literal_loopback_address(
 
         assert response.status_code == 303
         assert launches[0].env["FLOWGENCY_SETUP_ORIGIN"] == expected
+
+
+def _wait_for_session_state(session, expected: str) -> None:
+    for _ in range(500):
+        if session.client.get("/setup/session/state").json()["state"] == expected:
+            return
+        threading.Event().wait(0.01)
+    raise AssertionError(f"setup session never reached {expected}")
+
+
+def _stranger_client() -> TestClient:
+    return TestClient(app_mod.app, base_url=_LOCAL_BASE_URL, client=("127.0.0.1", 50060))
+
+
+def test_ready_config_without_setup_attempt_still_opens_the_dashboard(
+    tmp_path, monkeypatch, raw_config
+):
+    config_path = _configure_missing_config(tmp_path, monkeypatch)
+    config_path.write_text(
+        yaml.safe_dump(_materialize_ready_config(tmp_path, raw_config), sort_keys=False),
+        encoding="utf-8",
+    )
+    with _local_client() as client:
+        assert client.get("/setup/status").json() == {"state": "ready", "redirect": "/"}
+        assert client.get("/setup", follow_redirects=False).headers["location"] == "/"
+
+
+def test_acknowledged_completion_permits_status_and_entry_redirect(completion_session, raw_config):
+    session = completion_session
+    revision = session.write_ready_config(raw_config)
+    assert session.post(session.command(revision)).status_code == 200
+
+    status = session.client.get("/setup/status").json()
+
+    assert status["state"] == "ready"
+    assert status["redirect"] == "/"
+    assert status["completion"]["launch_id"] == session.launch_id
+    assert status["completion"]["phase"] == "complete"
+    assert set(status["completion"]) == {"launch_id", "phase", "message"}
+    assert session.token not in str(status)
+    assert session.client.get("/setup", follow_redirects=False).headers["location"] == "/"
+    assert session.process.running is True
+
+
+def test_session_state_reports_the_non_secret_completion_presentation(completion_session, raw_config):
+    session = completion_session
+
+    pending = session.client.get("/setup/session/state").json()
+    assert pending["completion"]["phase"] == "pending"
+    assert pending["completion"]["launch_id"] == session.launch_id
+
+    assert session.post(session.command(session.write_ready_config(raw_config))).status_code == 200
+    done = session.client.get("/setup/session/state")
+
+    assert done.json()["completion"]["phase"] == "complete"
+    assert set(done.json()["completion"]) == {"launch_id", "phase", "message"}
+    assert session.token not in done.text
+
+
+def test_acknowledged_revision_drift_blocks_redirect_again(completion_session, raw_config):
+    session = completion_session
+    revision = session.write_ready_config(raw_config)
+    assert session.post(session.command(revision)).status_code == 200
+    session.config_path.write_text(
+        session.config_path.read_text(encoding="utf-8") + "\n# edited after acknowledgement\n",
+        encoding="utf-8",
+    )
+
+    status = session.client.get("/setup/status").json()
+
+    assert status["state"] == "ready"
+    assert status["completion"]["phase"] == "pending"
+    assert "redirect" not in status
+    assert session.client.get("/setup", follow_redirects=False).headers["location"] == "/setup/session"
+
+
+def test_invalid_config_after_acknowledgement_never_redirects(completion_session, raw_config):
+    session = completion_session
+    revision = session.write_ready_config(raw_config)
+    assert session.post(session.command(revision)).status_code == 200
+    session.config_path.write_text("schema_version: [", encoding="utf-8")
+
+    status = session.client.get("/setup/status").json()
+
+    assert status["state"] != "ready"
+    assert "redirect" not in status
+    assert status["completion"]["phase"] == "pending"
+
+
+def test_explicit_stop_never_counts_as_completion_but_stop_response_is_unchanged(
+    completion_session, raw_config
+):
+    session = completion_session
+    session.write_ready_config(raw_config)
+    csrf = _setup_csrf(session.client)
+
+    stop = session.client.post(
+        "/setup/session/stop",
+        data={"setup_csrf": csrf},
+        headers={"Origin": _LOCAL_BASE_URL},
+        follow_redirects=False,
+    )
+    status = session.client.get("/setup/status").json()
+
+    assert stop.status_code == 303
+    assert stop.headers["location"] == "/"
+    assert status["state"] == "ready"
+    assert status["completion"]["phase"] == "cancelled"
+    assert "redirect" not in status
+    assert session.client.get("/setup", follow_redirects=False).status_code == 200
+
+
+def test_unexpected_exit_requires_attention_instead_of_navigating(completion_session, raw_config):
+    session = completion_session
+    session.write_ready_config(raw_config)
+    session.process.running = False
+    session.process.output.put(None)
+    _wait_for_session_state(session, "exited")
+
+    status = session.client.get("/setup/status").json()
+
+    assert status["state"] == "ready"
+    assert status["completion"]["phase"] == "attention"
+    assert "redirect" not in status
+    assert session.client.get("/setup/session", follow_redirects=False).status_code == 200
+
+
+def test_other_browser_is_not_gated_by_the_owners_attempt(completion_session, raw_config):
+    session = completion_session
+    session.write_ready_config(raw_config)
+    stranger = _stranger_client()
+    forged = _stranger_client()
+    forged.cookies.set("flowgency_setup", "forged.notarealsignature")
+
+    for client in (stranger, forged):
+        status = client.get("/setup/status").json()
+        assert status == {"state": "ready", "redirect": "/"}
+        assert client.get("/setup", follow_redirects=False).headers["location"] == "/"
+    assert session.client.get("/setup/status").json()["completion"]["phase"] == "pending"
+
+
+def test_session_view_keeps_inspection_intent_and_launch_identity(completion_session, raw_config):
+    session = completion_session
+    assert session.post(session.command(session.write_ready_config(raw_config))).status_code == 200
+
+    waiting = session.client.get("/setup/session")
+    inspection = session.client.get("/setup/session?view=inspection")
+
+    assert waiting.status_code == inspection.status_code == 200
+    assert 'data-setup-view="waiting"' in waiting.text
+    assert 'data-setup-view="inspection"' in inspection.text
+    assert f'data-launch-id="{session.launch_id}"' in inspection.text
+    assert session.token not in waiting.text + inspection.text
+
+
+def test_launch_form_does_not_bounce_to_dashboard_while_attempt_is_pending(
+    completion_session, raw_config
+):
+    session = completion_session
+    session.write_ready_config(raw_config)
+    csrf = _setup_csrf(session.client)
+    form = {
+        "data_root": str(session.tmp_path / "Flowgency"),
+        "integration": "copilot",
+        "setup_csrf": csrf,
+    }
+
+    again = session.client.post(
+        "/setup/launch", data=form, headers={"Origin": _LOCAL_BASE_URL}, follow_redirects=False
+    )
+
+    assert again.status_code == 303
+    assert again.headers["location"] == "/setup/session"
+
+
+def test_dashboard_terminal_link_opens_an_inspection_view(completion_session, raw_config):
+    session = completion_session
+    session.write_ready_config(raw_config)
+    session.client.get("/setup/status")
+
+    page = session.client.get("/newsletter/")
+
+    assert 'href="/setup/session?view=inspection"' in page.text

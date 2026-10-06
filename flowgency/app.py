@@ -1782,7 +1782,7 @@ async def home(request: Request, team: str):
             credential, csrf, _issued = access.ensure_browser(request)
             if credential == owner:
                 setup_session = {
-                    "href": "/setup/session",
+                    "href": "/setup/session?view=inspection",
                     "csrf": csrf,
                     "state": session.state,
                     "message": session.message,

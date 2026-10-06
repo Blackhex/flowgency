@@ -12,7 +12,13 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.websockets import WebSocketState
 
 from flowgency.web.dependencies import FlowgencyServices, get_services
-from flowgency.web.routes.admin_teams import _setup_response, _setup_status_with_fresh_services
+from flowgency.web.routes.admin_teams import (
+    _setup_response,
+    _setup_status_with_fresh_services,
+    completion_presentation,
+    navigation_permitted,
+    setup_navigation_decision,
+)
 from flowgency.web.setup_completion import (
     SetupCompletionStale,
     SetupCompletionUnavailable,
@@ -50,8 +56,10 @@ async def setup_session_view(
     manager = getattr(request.app.state, "setup_sessions", None)
     snapshot = manager.snapshot(owner) if manager is not None else None
     services, status = _setup_status_with_fresh_services(request, services)
+    decision = await setup_navigation_decision(request, services)
     if snapshot is None:
-        return RedirectResponse("/" if status.state == "ready" else "/setup", status_code=303)
+        ready = status.state == "ready" and navigation_permitted(decision)
+        return RedirectResponse("/" if ready else "/setup", status_code=303)
     credential, csrf, _issued = request.app.state.setup_access.ensure_browser(request)
     integration = services.integrations[snapshot.integration_name]
     response = _setup_response(
@@ -61,6 +69,8 @@ async def setup_session_view(
         waiting=True,
         connected=True,
         session_view=True,
+        inspection_view=request.query_params.get("view") == "inspection",
+        completion_launch_id=decision.launch_id if decision is not None else None,
         data_root_value=str(snapshot.data_root),
         selected_integration=snapshot.integration_name,
         selected_integration_name=integration.display_name,
@@ -72,20 +82,25 @@ async def setup_session_view(
 
 
 @router.get("/setup/session/state")
-async def setup_session_state(request: Request) -> JSONResponse:
+async def setup_session_state(
+    request: Request,
+    services: FlowgencyServices = Depends(get_services),
+) -> JSONResponse:
     owner = _require_setup_owner(request)
     manager = getattr(request.app.state, "setup_sessions", None)
     snapshot = manager.snapshot(owner) if manager is not None else None
     if snapshot is None:
         return JSONResponse({"error": "No setup session for this browser"}, status_code=404)
-    return JSONResponse(
-        {
-            "state": snapshot.state,
-            "exit_code": snapshot.exit_code,
-            "truncated": snapshot.truncated,
-            "message": snapshot.message,
-        }
-    )
+    payload = {
+        "state": snapshot.state,
+        "exit_code": snapshot.exit_code,
+        "truncated": snapshot.truncated,
+        "message": snapshot.message,
+    }
+    decision = await setup_navigation_decision(request, services)
+    if decision is not None:
+        payload["completion"] = completion_presentation(decision)
+    return JSONResponse(payload)
 
 
 @router.post("/setup/session/stop")

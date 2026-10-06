@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import replace
 from ipaddress import ip_address
@@ -29,7 +30,11 @@ from flowgency.jobs.connected_process import ConnectedLaunchError, connected_pro
 from flowgency.jobs.store import revision_bound_team_operation
 from flowgency.web.dependencies import FlowgencyServices, build_services, get_services
 from flowgency.web.directory_browser import DirectoryBrowseError, list_directories
-from flowgency.web.setup_completion import completion_environment
+from flowgency.web.setup_completion import (
+    SetupCompletionDecision,
+    completion_environment,
+    validate_current_completion,
+)
 from flowgency.web.setup_flow import (
     build_setup_prompt,
     inspect_setup_status,
@@ -141,6 +146,8 @@ def _setup_response(
     error: str = "",
     setup_csrf: str = "",
     status_code: int = 200,
+    inspection_view: bool = False,
+    completion_launch_id: str | None = None,
 ):
     return _templates(request).TemplateResponse(
         request,
@@ -157,6 +164,8 @@ def _setup_response(
             "waiting": waiting,
             "connected": connected,
             "session_view": session_view,
+            "inspection_view": inspection_view,
+            "completion_launch_id": completion_launch_id or "",
             "data_root_value": data_root_value,
             "selected_integration": selected_integration,
             "selected_integration_name": selected_integration_name,
@@ -385,13 +394,53 @@ def _setup_status_with_fresh_services(
     return refreshed, startup_error_status(error)
 
 
+def _current_setup_readiness(services: FlowgencyServices) -> tuple[str | None, bool]:
+    try:
+        current = services.config_store.inspect()
+    except Exception:
+        return None, False
+    if not current.exists:
+        return None, False
+    try:
+        return validate_current_completion(services.config_path, current.revision), True
+    except Exception:
+        return current.revision, False
+
+
+async def setup_navigation_decision(
+    request: Request, services: FlowgencyServices
+) -> SetupCompletionDecision | None:
+    """Return the owner's completion decision, or None without an owner-bound attempt."""
+    manager = getattr(request.app.state, "setup_sessions", None)
+    if manager is None:
+        return None
+    try:
+        owner = request.app.state.setup_access.require_http(request)
+    except SetupAccessDenied:
+        return None
+    if manager.completion_decision(owner, None, False).launch_id is None:
+        return None
+    revision, ready = await asyncio.to_thread(_current_setup_readiness, services)
+    return manager.completion_decision(owner, revision, ready)
+
+
+def navigation_permitted(decision: SetupCompletionDecision | None) -> bool:
+    return decision is None or decision.redirect_allowed
+
+
+def completion_presentation(decision: SetupCompletionDecision) -> dict[str, str | None]:
+    return {"launch_id": decision.launch_id, "phase": decision.phase, "message": decision.message}
+
+
 @router.get("/setup", response_class=HTMLResponse)
 async def setup_page(
     request: Request,
     services: FlowgencyServices = Depends(get_services),
 ):
     services, status = _setup_status_with_fresh_services(request, services)
-    if status.state == "ready":
+    if status.state == "ready" and navigation_permitted(
+        await setup_navigation_decision(request, services)
+    ):
         return RedirectResponse("/", status_code=303)
     try:
         credential, csrf, _issued = request.app.state.setup_access.ensure_browser(request)
@@ -482,6 +531,7 @@ async def _external_setup_launch(
                 error=launch_notice,
                 setup_csrf=setup_csrf,
             )
+    decision = await setup_navigation_decision(request, services)
     return _setup_response(
         request,
         services,
@@ -494,6 +544,7 @@ async def _external_setup_launch(
         fallback_command=fallback_command,
         launch_notice=launch_notice,
         setup_csrf=setup_csrf,
+        completion_launch_id=decision.launch_id if decision is not None else None,
     )
 
 
@@ -512,7 +563,9 @@ async def setup_launch(
         return JSONResponse({"error": "Local setup access required."}, status_code=403)
 
     status = inspect_setup_status(services.config_store)
-    if status.state == "ready":
+    if status.state == "ready" and navigation_permitted(
+        await setup_navigation_decision(request, services)
+    ):
         return RedirectResponse("/", status_code=303)
     data_root_value = str(form.get("data_root", "")).strip()
     requested_integration = str(form.get("integration", "")).strip()
@@ -709,11 +762,14 @@ async def setup_status(
     services: FlowgencyServices = Depends(get_services),
 ) -> JSONResponse:
     services, status = _setup_status_with_fresh_services(request, services)
-    payload: dict[str, str] = {"state": status.state}
+    payload: dict[str, Any] = {"state": status.state}
+    decision = await setup_navigation_decision(request, services)
+    if decision is not None:
+        payload["completion"] = completion_presentation(decision)
     if status.state == "ready":
-        payload["redirect"] = "/"
-        return JSONResponse(payload)
-    if status.message:
+        if navigation_permitted(decision):
+            payload["redirect"] = "/"
+    elif status.message:
         payload["message"] = status.message
     return JSONResponse(payload)
 

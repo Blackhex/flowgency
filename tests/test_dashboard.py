@@ -422,14 +422,14 @@ def test_dashboard_shows_setup_session_only_for_its_local_owner(monkeypatch, tmp
         client.cookies.set("flowgency_setup", owner)
         response = client.get("/newsletter/")
         assert response.status_code == 200
-        assert 'href="/setup/session"' in response.text
+        assert 'href="/setup/session?view=inspection"' in response.text
         assert 'action="/setup/session/stop"' in response.text
         assert owner not in response.text
 
         other = TestClient(app_mod.app, base_url="http://127.0.0.1:8500", client=("127.0.0.1", 50002))
         remote = TestClient(app_mod.app, base_url="http://127.0.0.1:8500", client=("192.0.2.9", 50003))
-        assert 'href="/setup/session"' not in other.get("/newsletter/").text
-        assert 'href="/setup/session"' not in remote.get("/newsletter/").text
+        assert 'href="/setup/session?view=inspection"' not in other.get("/newsletter/").text
+        assert 'href="/setup/session?view=inspection"' not in remote.get("/newsletter/").text
         current = replace(current, state="failed", message="Could not confirm process exit")
         assert "Setup session needs attention" in client.get("/newsletter/").text
 
