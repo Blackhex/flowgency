@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import asdict
 
 import anyio
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -12,13 +13,25 @@ from starlette.websockets import WebSocketState
 
 from flowgency.web.dependencies import FlowgencyServices, get_services
 from flowgency.web.routes.admin_teams import _setup_response, _setup_status_with_fresh_services
+from flowgency.web.setup_completion import (
+    SetupCompletionStale,
+    SetupCompletionUnavailable,
+    validate_current_completion,
+)
 from flowgency.web.setup_flow import inspect_setup_status
-from flowgency.web.setup_security import SetupAccessDenied
+from flowgency.web.setup_security import (
+    SetupAccessDenied,
+    SetupCompletionError,
+    completion_error_response,
+    read_completion_command,
+    require_completion_peer_and_bearer,
+)
 from flowgency.web.setup_sessions import SetupSessionConflict, SetupSessionManager
 
 router = APIRouter()
 
 _OUTPUT_CHUNK_BYTES = 16 * 1024
+_COMPLETION_MAX_BYTES = 4096
 
 
 def _require_setup_owner(request: Request, csrf: str | None = None, *, unsafe: bool = False) -> str:
@@ -87,6 +100,33 @@ async def stop_setup_session(request: Request, services: FlowgencyServices = Dep
         return JSONResponse({"error": evidence.reason}, status_code=409)
     status = inspect_setup_status(services.config_store)
     return RedirectResponse("/" if status.state == "ready" else "/setup", status_code=303)
+
+
+@router.post("/setup/session/completion")
+async def setup_completion_callback(request: Request) -> JSONResponse:
+    manager = getattr(request.app.state, "setup_sessions", None)
+    try:
+        if manager is None:
+            raise SetupCompletionError("invalid-credentials")
+        token = require_completion_peer_and_bearer(request, manager)
+        launch_id = manager.require_completion_token(token)
+        command = await read_completion_command(request, max_bytes=_COMPLETION_MAX_BYTES)
+        if command.launch_id != launch_id:
+            raise SetupCompletionError("stale")
+        decision = await manager.acknowledge_validated(
+            token, command, validate_current_completion
+        )
+    except SetupCompletionError as error:
+        return completion_error_response(error)
+    except (SetupCompletionStale, SetupSessionConflict):
+        return completion_error_response(SetupCompletionError("stale"))
+    except SetupCompletionUnavailable as error:
+        return completion_error_response(SetupCompletionError(error.code))
+    except Exception:
+        return completion_error_response(SetupCompletionError("unavailable"))
+    return JSONResponse(
+        {"ok": True, "completion": asdict(decision)}, headers={"Cache-Control": "no-store"}
+    )
 
 
 async def _receive_controls(

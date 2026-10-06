@@ -28,6 +28,17 @@ def terminal_available() -> bool:
     return _find_posix_terminal() is not None
 
 
+def terminal_carries_environment() -> bool:
+    """Whether the spawned terminal's child inherits the environment we pass.
+
+    Terminals that hand the command to a pre-existing server process lose it.
+    """
+    if platform.system() == "Windows":
+        return True
+    terminal = _find_posix_terminal()
+    return terminal is not None and _resolved_terminal_name(terminal).startswith("xterm")
+
+
 def format_interactive_command(command: Sequence[str]) -> str:
     parts = [str(part) for part in command]
     if platform.system() == "Windows":

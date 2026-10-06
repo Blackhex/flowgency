@@ -9,9 +9,19 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Literal
 
+import yaml
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr, model_validator
+
+from flowgency.blueprints import BlueprintLibrary
+from flowgency.configuration import ConfigStore, ValidationFailed
+from flowgency.configuration.paths import validate_resolved_paths
+from flowgency.integrations import REGISTRY
+from flowgency.prompts import PromptStore, validate_prompt_catalogs
+from flowgency.web.dependencies import FlowgencyServices
+from flowgency.web.validation import collect_validation_issues
 
 SchedulerResult = Literal[
     "manual-only", "inactive", "declined", "confirmed", "failed", "unknown"
@@ -65,3 +75,80 @@ class SetupCompletionDecision:
     phase: Literal["pending", "acknowledged", "complete", "attention", "cancelled"]
     redirect_allowed: bool
     message: str
+
+
+def completion_environment(launch: SetupCompletionLaunch) -> dict[str, str]:
+    return {
+        "FLOWGENCY_SETUP_ORIGIN": launch.origin,
+        "FLOWGENCY_SETUP_TOKEN": launch.token,
+        "FLOWGENCY_SETUP_LAUNCH_ID": launch.launch_id,
+    }
+
+
+class SetupCompletionStale(Exception):
+    """The configuration revision no longer matches the one the agent reported."""
+
+
+class SetupCompletionUnavailable(Exception):
+    """The configuration could not be shown ready; carries only a fixed code."""
+
+    def __init__(self, code: Literal["not-ready", "unavailable"]) -> None:
+        self.code = code
+        super().__init__(code)
+
+
+_UNREADABLE_CONFIG = (FileNotFoundError, ValidationFailed, yaml.YAMLError, TypeError, ValueError)
+
+
+def _require_ready(config_store: ConfigStore, snapshot) -> None:
+    config = snapshot.config
+    if not config.teams or validate_resolved_paths(config):
+        raise SetupCompletionUnavailable("not-ready")
+    flowgency = config.flowgency
+    prompt_root = Path(flowgency.prompt_store)
+    uses_instance_prompts = any(
+        agent.prompts for team in config.teams.values() for agent in team.agents.values()
+    )
+    # Reading an instance prompt takes a lock that would create a missing store.
+    if uses_instance_prompts and not prompt_root.is_dir():
+        raise SetupCompletionUnavailable("not-ready")
+    library = BlueprintLibrary(Path(flowgency.agent_library))
+    services = FlowgencyServices(
+        config_path=snapshot.path,
+        config_store=config_store,
+        blueprint_library=library,
+        compilation_cache=None,
+        memory_store=None,
+        prompt_store=None,
+        job_store=None,
+        instances=None,
+        integrations=REGISTRY,
+        prompt_issues=validate_prompt_catalogs(snapshot, library, PromptStore(prompt_root)),
+    )
+    if collect_validation_issues(services, snapshot):
+        raise SetupCompletionUnavailable("not-ready")
+
+
+def validate_current_completion(config_path: Path, expected_revision: str) -> str:
+    """Re-check readiness without creating or repairing any source; return the revision."""
+    store = ConfigStore(config_path)
+    try:
+        snapshot = store.load()
+    except _UNREADABLE_CONFIG:
+        raise SetupCompletionUnavailable("not-ready") from None
+    except Exception:
+        raise SetupCompletionUnavailable("unavailable") from None
+    if snapshot.revision != expected_revision:
+        raise SetupCompletionStale()
+    try:
+        _require_ready(store, snapshot)
+        current = store.inspect()
+    except SetupCompletionUnavailable:
+        raise
+    except ValidationFailed:
+        raise SetupCompletionUnavailable("not-ready") from None
+    except Exception:
+        raise SetupCompletionUnavailable("unavailable") from None
+    if not current.exists or current.revision != expected_revision:
+        raise SetupCompletionStale()
+    return current.revision

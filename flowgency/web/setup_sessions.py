@@ -101,6 +101,7 @@ class _CompletionAttempt:
     cancelled: bool = False
     unexpected_failure: bool = False
     exit_capability_verified: bool = False
+    validation_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 
     @property
     def launch_id(self) -> str:
@@ -304,6 +305,45 @@ class SetupSessionManager:
     def require_completion_token(self, token: str) -> str:
         attempt = self._attempt_for_token(token)
         return attempt.launch_id
+
+    def completion_context(self, token: str) -> tuple[str, Path]:
+        attempt = self._attempt_for_token(token)
+        return attempt.launch.origin, attempt.config_path
+
+    async def acknowledge_validated(
+        self,
+        token: str,
+        command: SetupCompletionCommand,
+        validate: Callable[[Path, str], str],
+    ) -> SetupCompletionDecision:
+        """Validate and acknowledge one attempt at a time, replaying identical reports."""
+        attempt = self._attempt_for_token(token)
+        async with attempt.validation_lock:
+            self._attempt_for_token(token)
+            if not hmac.compare_digest(
+                command.launch_id.encode("utf-8"), attempt.launch_id.encode("utf-8")
+            ):
+                raise SetupSessionConflict(_COMPLETION_REJECTED)
+            reported = _Acknowledgement(
+                command.revision, command.scheduler_result, command.limitations_acknowledged
+            )
+            if attempt.acknowledgement == reported:
+                validated = command.revision
+            else:
+                check = asyncio.ensure_future(
+                    asyncio.to_thread(validate, attempt.config_path, command.revision)
+                )
+                try:
+                    validated = await asyncio.shield(check)
+                except asyncio.CancelledError:
+                    # Keep the lock until the worker thread ends so checks never overlap.
+                    while not check.done():
+                        with contextlib.suppress(BaseException):
+                            await asyncio.shield(check)
+                    if not check.cancelled():
+                        check.exception()
+                    raise
+            return await self.acknowledge_completion(token, command, validated)
 
     async def acknowledge_completion(
         self, token: str, command: SetupCompletionCommand, validated_revision: str

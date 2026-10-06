@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from ipaddress import ip_address
 from pathlib import Path
 from typing import Any
@@ -28,18 +29,23 @@ from flowgency.jobs.connected_process import ConnectedLaunchError, connected_pro
 from flowgency.jobs.store import revision_bound_team_operation
 from flowgency.web.dependencies import FlowgencyServices, build_services, get_services
 from flowgency.web.directory_browser import DirectoryBrowseError, list_directories
+from flowgency.web.setup_completion import completion_environment
 from flowgency.web.setup_flow import (
     build_setup_prompt,
     inspect_setup_status,
     launchable_integrations,
     startup_error_status,
 )
-from flowgency.web.setup_security import SetupAccessDenied
+from flowgency.web.setup_security import SetupAccessDenied, completion_origin
 from flowgency.web.setup_sessions import SetupSessionConflict, _SANITIZED_START_FAILURE
 
 
 router = APIRouter()
 
+_AUTOMATIC_COMPLETION_UNAVAILABLE = (
+    "Automatic setup completion is unavailable for this launch; "
+    "return to the dashboard yourself once setup has finished."
+)
 
 def _templates(request: Request):
     return request.app.state.templates
@@ -447,6 +453,8 @@ async def _external_setup_launch(
             fallback_command = integration.interactive_setup_fallback_command(
                 setup_request
             )
+        if not getattr(result, "completion_environment_delivered", False):
+            launch_notice = launch_notice or _AUTOMATIC_COMPLETION_UNAVAILABLE
     except Exception as launch_error:
         if isinstance(launch_error, SetupSessionConflict) or (
             isinstance(launch_error, ConnectedLaunchError) and not launch_error.cleanup_confirmed
@@ -457,6 +465,7 @@ async def _external_setup_launch(
             )
         if not launch_notice:
             launch_notice = str(launch_error).strip() or "Interactive setup could not be launched."
+        launch_notice = f"{launch_notice} {_AUTOMATIC_COMPLETION_UNAVAILABLE}"
         try:
             fallback_command = integration.interactive_setup_fallback_command(
                 setup_request
@@ -543,14 +552,25 @@ async def setup_launch(
             setup_csrf=csrf_token,
         )
     integration = launchable_by_name[requested_integration]
+    config_path = services.config_path.resolve()
+    origin = completion_origin(request)
+    try:
+        completion = await request.app.state.setup_sessions.prepare_completion(
+            owner, integration.name, resolved_data_root, config_path, origin
+        )
+    except SetupSessionConflict as exc:
+        return JSONResponse(
+            {"error": str(exc), "session": "/setup/session"}, status_code=409,
+        )
     setup_request = InteractiveSetupRequest(
         data_root=resolved_data_root,
-        config_path=services.config_path.resolve(),
+        config_path=config_path,
         prompt=build_setup_prompt(
             resolved_data_root,
             services.config_path,
             selected_integration=requested_integration,
         ),
+        environment=completion_environment(completion),
     )
     connected = (
         requested_integration == "copilot"
@@ -587,6 +607,15 @@ async def setup_launch(
                 return JSONResponse({"error": _SANITIZED_START_FAILURE}, status_code=409)
             # A confirmed-clean failure frees the slot; fall back to the
             # existing external launcher rather than leaving the user stuck.
+            # The failed attempt is cancelled, so the fallback gets a fresh one.
+            try:
+                completion = await request.app.state.setup_sessions.prepare_completion(
+                    owner, integration.name, resolved_data_root, config_path, origin
+                )
+            except SetupSessionConflict as conflict:
+                return JSONResponse(
+                    {"error": str(conflict), "session": "/setup/session"}, status_code=409,
+                )
             return await _external_setup_launch(
                 request,
                 services,
@@ -595,7 +624,7 @@ async def setup_launch(
                 requested_integration,
                 selected_integration_name,
                 integration,
-                setup_request,
+                replace(setup_request, environment=completion_environment(completion)),
                 resolved_data_root,
                 owner=owner,
                 launch_notice=str(exc),

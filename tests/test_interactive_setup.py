@@ -629,3 +629,147 @@ def test_copilot_rejects_unreadable_packaged_setup_skill(monkeypatch, tmp_path):
 
     with pytest.raises(IntegrationError, match="reinstall flowgency"):
         CopilotIntegration().interactive_setup_fallback_command(request)
+
+
+_SENTINEL = "sentinel-capability-9f3a"
+_SETUP_ENVIRONMENT = {
+    "FLOWGENCY_SETUP_ORIGIN": "http://127.0.0.1:8500",
+    "FLOWGENCY_SETUP_TOKEN": _SENTINEL,
+    "FLOWGENCY_SETUP_LAUNCH_ID": "a" * 32,
+}
+
+
+def _environment_request(tmp_path: Path, environment=None) -> InteractiveSetupRequest:
+    return InteractiveSetupRequest(
+        tmp_path,
+        tmp_path / "config.yaml",
+        "Use the flowgency-setup skill.",
+        environment=_SETUP_ENVIRONMENT if environment is None else environment,
+    )
+
+
+def test_setup_request_environment_is_hidden_from_repr(tmp_path: Path) -> None:
+    request = _environment_request(tmp_path)
+
+    assert _SENTINEL not in repr(request)
+    assert request.environment["FLOWGENCY_SETUP_TOKEN"] == _SENTINEL
+    assert InteractiveSetupRequest(tmp_path, tmp_path / "c.yaml", "p").environment == {}
+
+
+@pytest.mark.parametrize("name", ["PATH", "FLOWGENCY_SETUP_EXTRA", "flowgency_setup_token", ""])
+def test_setup_request_environment_rejects_names_outside_the_completion_trio(
+    tmp_path: Path, name: str
+) -> None:
+    with pytest.raises(ValueError) as caught:
+        _environment_request(tmp_path, {name: _SENTINEL})
+
+    assert _SENTINEL not in str(caught.value)
+    assert _SENTINEL not in repr(caught.value)
+
+
+def test_runtime_launch_repr_redacts_environment_values_without_changing_them(
+    tmp_path: Path,
+) -> None:
+    from flowgency.integrations.models import RuntimeLaunch
+
+    launch = RuntimeLaunch(("copilot",), tmp_path, dict(_SETUP_ENVIRONMENT), "connected")
+
+    assert _SENTINEL not in repr(launch)
+    assert "FLOWGENCY_SETUP_TOKEN" in repr(launch)
+    assert launch.env["FLOWGENCY_SETUP_TOKEN"] == _SENTINEL
+    assert dict(launch.env) == _SETUP_ENVIRONMENT
+
+
+def test_copilot_connected_launch_carries_setup_environment_only_in_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(CopilotIntegration, "_interactive_setup_command_prefix", lambda self: ("copilot",))
+    integration = CopilotIntegration()
+    request = _environment_request(tmp_path)
+
+    launch = integration.connected_setup_launch(request)
+
+    for name, value in _SETUP_ENVIRONMENT.items():
+        assert launch.env[name] == value
+    assert not any(_SENTINEL in part for part in launch.argv)
+    assert _SENTINEL not in request.prompt
+    assert _SENTINEL not in repr(launch)
+    assert _SENTINEL not in integration.interactive_setup_fallback_command(request)
+
+
+def test_copilot_external_launch_hands_setup_environment_to_the_terminal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(CopilotIntegration, "_interactive_setup_command_prefix", lambda self: ("copilot",))
+    monkeypatch.setattr(
+        "flowgency.integrations.flowgency.copilot.terminal_carries_environment", lambda: True
+    )
+    monkeypatch.setattr(
+        "flowgency.integrations.flowgency.copilot.spawn_interactive_terminal",
+        lambda command, cwd, env=None: captured.update(command=tuple(command), env=env) or "shown",
+    )
+    monkeypatch.setenv("FLOWGENCY_SETUP_TOKEN", "stale-value-from-parent")
+    integration = CopilotIntegration()
+
+    result = integration.launch_interactive_setup(_environment_request(tmp_path))
+
+    env = captured["env"]
+    assert env["FLOWGENCY_SETUP_TOKEN"] == _SENTINEL
+    assert env["PATH"] == __import__("os").environ["PATH"]
+    assert not any(_SENTINEL in part for part in captured["command"])
+    assert _SENTINEL not in result.fallback_command
+    assert result.completion_environment_delivered is True
+
+
+def test_copilot_external_launch_without_setup_environment_inherits_as_before(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple] = []
+    monkeypatch.setattr(CopilotIntegration, "_interactive_setup_command_prefix", lambda self: ("copilot",))
+    monkeypatch.setattr(
+        "flowgency.integrations.flowgency.copilot.spawn_interactive_terminal",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or "shown",
+    )
+
+    CopilotIntegration().launch_interactive_setup(
+        InteractiveSetupRequest(tmp_path, tmp_path / "config.yaml", "prompt")
+    )
+
+    assert "env" not in calls[0][1]
+    assert len(calls[0][0]) == 2
+
+
+def test_copilot_external_launch_reports_unavailable_when_terminal_cannot_carry_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict] = []
+    monkeypatch.setattr(CopilotIntegration, "_interactive_setup_command_prefix", lambda self: ("copilot",))
+    monkeypatch.setattr(
+        "flowgency.integrations.flowgency.copilot.terminal_carries_environment", lambda: False
+    )
+    monkeypatch.setattr(
+        "flowgency.integrations.flowgency.copilot.spawn_interactive_terminal",
+        lambda command, cwd, env=None: calls.append({"env": env}) or "shown",
+    )
+
+    result = CopilotIntegration().launch_interactive_setup(_environment_request(tmp_path))
+
+    assert calls == [{"env": None}]
+    assert result.completion_environment_delivered is False
+    assert _SENTINEL not in result.fallback_command
+
+
+def test_terminal_carries_environment_only_for_direct_children(monkeypatch: pytest.MonkeyPatch) -> None:
+    from flowgency.integrations import interactive
+
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+    assert interactive.terminal_carries_environment() is True
+
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr(interactive, "_find_posix_terminal", lambda: "/usr/bin/xterm")
+    assert interactive.terminal_carries_environment() is True
+    monkeypatch.setattr(interactive, "_find_posix_terminal", lambda: "/usr/bin/gnome-terminal")
+    assert interactive.terminal_carries_environment() is False
+    monkeypatch.setattr(interactive, "_find_posix_terminal", lambda: None)
+    assert interactive.terminal_carries_environment() is False

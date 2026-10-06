@@ -11,16 +11,122 @@ import hashlib
 import hmac
 import secrets
 from ipaddress import ip_address
+from typing import Protocol
 from urllib.parse import urlsplit
 
 from fastapi import Request, Response, WebSocket
+from fastapi.responses import JSONResponse
 from starlette.requests import HTTPConnection
 
+from flowgency.web.setup_completion import SetupCompletionCommand
+from flowgency.web.setup_sessions import SetupSessionConflict
+
 COOKIE_NAME = "flowgency_setup"
+
+_COMPLETION_ERRORS = {
+    "invalid-credentials": (401, "Setup completion credentials are invalid."),
+    "forbidden": (403, "Setup completion is only available to the local setup process."),
+    "payload-too-large": (413, "Setup completion payload is too large."),
+    "invalid-completion": (422, "Setup completion payload was rejected."),
+    "stale": (409, "The setup launch or configuration changed; report completion again."),
+    "not-ready": (503, "Setup configuration is not ready to be completed."),
+    "unavailable": (503, "Setup completion could not be verified right now."),
+}
 
 
 class SetupAccessDenied(Exception):
     """Raised when a request or WebSocket upgrade fails the local-browser guard."""
+
+
+class SetupCompletionError(Exception):
+    """A completion rejection carrying only a fixed, secret-free code and message."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        self.status_code, self.message = _COMPLETION_ERRORS[code]
+        super().__init__(self.message)
+
+
+def completion_error_response(error: SetupCompletionError) -> JSONResponse:
+    headers = {"Cache-Control": "no-store"}
+    if error.status_code == 401:
+        headers["WWW-Authenticate"] = "Bearer"
+    return JSONResponse(
+        {"ok": False, "code": error.code, "error": error.message},
+        status_code=error.status_code,
+        headers=headers,
+    )
+
+
+class _CompletionContext(Protocol):
+    def completion_context(self, token: str) -> tuple[str, object]: ...
+
+
+def completion_origin(request: Request) -> str:
+    """The literal loopback origin the setup process must call back to."""
+    scheme = "https" if request.url.scheme == "https" else "http"
+    parsed = urlsplit(f"{scheme}://{request.headers.get('host', '')}")
+    host = parsed.hostname or ""
+    if host == "localhost":
+        server = request.scope.get("server")
+        host = "::1" if server and server[0] == "::1" else "127.0.0.1"
+    if ":" in host:
+        host = f"[{host}]"
+    port = f":{parsed.port}" if parsed.port else ""
+    return f"{scheme}://{host}{port}"
+
+
+def _bearer_token(request: Request) -> str:
+    scheme, _, credential = request.headers.get("authorization", "").partition(" ")
+    credential = credential.strip()
+    if scheme.lower() != "bearer" or not credential or len(credential) > 256:
+        raise SetupCompletionError("invalid-credentials")
+    return credential
+
+
+def require_completion_peer_and_bearer(request: Request, manager: _CompletionContext) -> str:
+    """Authenticate the local peer and capability before any body is read."""
+    client = request.client
+    try:
+        local = client is not None and ip_address(client.host).is_loopback
+    except ValueError:
+        local = False
+    if not local:
+        raise SetupCompletionError("forbidden")
+    token = _bearer_token(request)
+    try:
+        origin, _config_path = manager.completion_context(token)
+    except SetupSessionConflict:
+        raise SetupCompletionError("invalid-credentials") from None
+    prepared = urlsplit(origin)
+    if (
+        request.url.scheme != prepared.scheme
+        or request.headers.get("host") != prepared.netloc
+        or request.headers.get("origin", origin) != origin
+    ):
+        raise SetupCompletionError("forbidden")
+    return token
+
+
+async def read_completion_command(request: Request, *, max_bytes: int) -> SetupCompletionCommand:
+    declared = request.headers.get("content-length")
+    if declared is not None:
+        if not (declared.isascii() and declared.isdigit()):
+            raise SetupCompletionError("invalid-completion")
+        if int(declared) > max_bytes:
+            raise SetupCompletionError("payload-too-large")
+    media_type = request.headers.get("content-type", "").partition(";")[0].strip().lower()
+    if media_type != "application/json":
+        raise SetupCompletionError("invalid-completion")
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > max_bytes:
+            raise SetupCompletionError("payload-too-large")
+    try:
+        return SetupCompletionCommand.model_validate_json(bytes(body))
+    except ValueError:
+        raise SetupCompletionError("invalid-completion") from None
 
 
 def _require_local_origin(connection: HTTPConnection, *, unsafe: bool) -> None:

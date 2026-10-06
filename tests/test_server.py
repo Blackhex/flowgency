@@ -1640,3 +1640,455 @@ def test_admin_context_fallback_title_without_snapshot():
     ctx = _base_admin_context(MagicMock(), snapshot=None)
 
     assert ctx["flowgency_title"] == "Flowgency"
+
+
+_COMPLETION_ENV_NAMES = (
+    "FLOWGENCY_SETUP_ORIGIN",
+    "FLOWGENCY_SETUP_TOKEN",
+    "FLOWGENCY_SETUP_LAUNCH_ID",
+)
+
+
+class _EnvironmentLaunchIntegration(_ConnectedLaunchIntegration):
+    """Carries the setup-only environment overlay the way the real integration does."""
+
+    def connected_setup_launch(self, request) -> RuntimeLaunch:
+        self.connected_requests.append(request)
+        return RuntimeLaunch(
+            ("copilot", "-i", request.prompt), request.data_root, dict(request.environment), "connected"
+        )
+
+
+class _CompletionSession:
+    def __init__(self, client, launches, process, manager, config_path, tmp_path, integration):
+        self.client = client
+        self.launches = launches
+        self.process = process
+        self.manager = manager
+        self.config_path = config_path
+        self.tmp_path = tmp_path
+        self.integration = integration
+
+    @property
+    def env(self):
+        return self.launches[0].env
+
+    @property
+    def token(self) -> str:
+        return self.env["FLOWGENCY_SETUP_TOKEN"]
+
+    @property
+    def launch_id(self) -> str:
+        return self.env["FLOWGENCY_SETUP_LAUNCH_ID"]
+
+    def write_ready_config(self, raw_config) -> str:
+        import hashlib
+
+        self.config_path.write_text(
+            yaml.safe_dump(_materialize_ready_config(self.tmp_path, raw_config), sort_keys=False),
+            encoding="utf-8",
+        )
+        return hashlib.sha256(self.config_path.read_bytes()).hexdigest()
+
+    def command(self, revision: str, **overrides) -> dict:
+        body = {
+            "launch_id": self.launch_id,
+            "revision": revision,
+            "scheduler_result": "manual-only",
+            "all_questions_answered": True,
+            "summary_delivered": True,
+        }
+        body.update(overrides)
+        return body
+
+    def post(self, body, *, token=None, headers=None, **kwargs):
+        sent = {"Authorization": f"Bearer {self.token if token is None else token}"}
+        sent.update(headers or {})
+        return self.client.post("/setup/session/completion", json=body, headers=sent, **kwargs)
+
+
+@pytest.fixture
+def completion_session(tmp_path, monkeypatch):
+    launches = []
+    process = FakeProcess()
+
+    def factory(launch):
+        launches.append(launch)
+        return process
+
+    config_path, root, integration, _unused, manager = _start_connected_session(
+        tmp_path, monkeypatch, process_factory=factory, integration=_EnvironmentLaunchIntegration()
+    )
+    with TestClient(app_mod.app, base_url=_LOCAL_BASE_URL, client=("127.0.0.1", 50040)) as client:
+        csrf = _setup_csrf(client)
+        launch = client.post(
+            "/setup/launch",
+            data={"data_root": str(root), "integration": "copilot", "setup_csrf": csrf},
+            headers={"Origin": _LOCAL_BASE_URL},
+            follow_redirects=False,
+        )
+        assert launch.status_code == 303
+        yield _CompletionSession(client, launches, process, manager, config_path, tmp_path, integration)
+        process.running = False
+        process.output.put(None)
+
+
+def test_completion_launch_passes_scoped_capability_only_through_environment(completion_session):
+    session = completion_session
+    request = session.integration.connected_requests[0]
+
+    assert set(session.env) == set(_COMPLETION_ENV_NAMES)
+    assert session.env["FLOWGENCY_SETUP_ORIGIN"] == _LOCAL_BASE_URL
+    assert len(session.launch_id) == 32
+    assert request.environment == dict(session.env)
+    assert session.token not in request.prompt
+    assert not any(session.token in part for part in session.launches[0].argv)
+    assert session.token not in repr(request)
+    assert session.token not in repr(session.launches[0])
+    page = session.client.get("/setup/session")
+    assert session.token not in page.text
+    assert session.token not in session.client.get("/setup/session/state").text
+    snapshot = session.manager._session
+    assert session.token not in snapshot.fallback_command
+
+
+def test_completion_callback_acknowledges_with_bearer_capability(completion_session, raw_config):
+    session = completion_session
+    revision = session.write_ready_config(raw_config)
+
+    response = session.post(session.command(revision))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["completion"]["launch_id"] == session.launch_id
+    assert set(body["completion"]) == {"launch_id", "phase", "redirect_allowed", "message"}
+    assert session.token not in response.text
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_completion_callback_rejects_missing_and_invalid_credentials(completion_session, raw_config):
+    session = completion_session
+    revision = session.write_ready_config(raw_config)
+    body = session.command(revision)
+
+    missing = session.client.post("/setup/session/completion", json=body)
+    invalid = session.client.post(
+        "/setup/session/completion",
+        json={"launch_id": "a" * 32},
+        headers={"Authorization": "Bearer invalid-test-capability"},
+    )
+
+    assert missing.status_code == 401
+    assert invalid.status_code == 401
+    assert "invalid-test-capability" not in invalid.text
+    assert session.token not in missing.text + invalid.text
+
+
+def test_completion_callback_denies_remote_peer_foreign_host_and_origin(completion_session, raw_config):
+    session = completion_session
+    body = session.command(session.write_ready_config(raw_config))
+    auth = {"Authorization": f"Bearer {session.token}"}
+
+    remote = TestClient(app_mod.app, base_url=_LOCAL_BASE_URL, client=("192.0.2.9", 50041))
+    foreign_host = TestClient(app_mod.app, base_url="http://localhost:8500", client=("127.0.0.1", 50042))
+
+    assert remote.post("/setup/session/completion", json=body, headers=auth).status_code == 403
+    assert foreign_host.post("/setup/session/completion", json=body, headers=auth).status_code == 403
+    foreign_origin = session.post(body, headers={"Origin": "http://evil.example"})
+    assert foreign_origin.status_code == 403
+    assert session.token not in foreign_origin.text
+
+
+def test_completion_callback_rejects_wrong_launch_and_stale_revision(completion_session, raw_config):
+    session = completion_session
+    revision = session.write_ready_config(raw_config)
+
+    wrong_launch = session.post(session.command(revision, launch_id="c" * 32))
+    stale = session.post(session.command("d" * 64))
+
+    assert wrong_launch.status_code == 409
+    assert stale.status_code == 409
+    assert session.token not in wrong_launch.text + stale.text
+
+
+def test_completion_callback_rejects_malformed_oversized_and_extra_fields(completion_session, raw_config):
+    session = completion_session
+    revision = session.write_ready_config(raw_config)
+    auth = {"Authorization": f"Bearer {session.token}", "Content-Type": "application/json"}
+
+    extra = session.post({**session.command(revision), "unexpected": "leaked-field-sentinel"})
+    typed = session.post(session.command(revision, all_questions_answered="true"))
+    declared = session.client.post(
+        "/setup/session/completion", content=b" " * 5000, headers=auth
+    )
+
+    def chunks():
+        for _ in range(60):
+            yield b" " * 100
+
+    streamed = session.client.post("/setup/session/completion", content=chunks(), headers=auth)
+
+    assert extra.status_code == typed.status_code == 422
+    assert "leaked-field-sentinel" not in extra.text
+    assert declared.status_code == 413
+    assert streamed.status_code == 413
+    assert session.token not in extra.text + typed.text + declared.text + streamed.text
+
+
+def test_completion_callback_rejects_capability_after_unexpected_exit(completion_session, raw_config):
+    session = completion_session
+    revision = session.write_ready_config(raw_config)
+    session.process.running = False
+    session.process.output.put(None)
+    for _ in range(500):
+        if session.client.get("/setup/session/state").json()["state"] == "exited":
+            break
+        threading.Event().wait(0.01)
+
+    response = session.post(session.command(revision))
+
+    assert response.status_code == 401
+    assert session.token not in response.text
+
+
+def test_completion_callback_replays_identical_request_without_revalidating(
+    completion_session, raw_config, monkeypatch
+):
+    from flowgency.web.routes import setup_terminal
+
+    session = completion_session
+    revision = session.write_ready_config(raw_config)
+    calls = []
+    real = setup_terminal.validate_current_completion
+    monkeypatch.setattr(
+        setup_terminal, "validate_current_completion", lambda *args: calls.append(args) or real(*args)
+    )
+
+    first = session.post(session.command(revision))
+    again = session.post(session.command(revision))
+
+    assert first.status_code == again.status_code == 200
+    assert first.json() == again.json()
+    assert len(calls) == 1
+
+
+def test_completion_callback_never_overlaps_validation_for_one_attempt(
+    completion_session, raw_config, monkeypatch
+):
+    from flowgency.web.routes import setup_terminal
+
+    session = completion_session
+    revision = session.write_ready_config(raw_config)
+    state = {"active": 0, "peak": 0, "calls": 0}
+    guard = threading.Lock()
+    real = setup_terminal.validate_current_completion
+
+    def slow(*args):
+        with guard:
+            state["active"] += 1
+            state["calls"] += 1
+            state["peak"] = max(state["peak"], state["active"])
+        threading.Event().wait(0.15)
+        try:
+            return real(*args)
+        finally:
+            with guard:
+                state["active"] -= 1
+
+    monkeypatch.setattr(setup_terminal, "validate_current_completion", slow)
+    results = []
+
+    def run(result):
+        results.append(session.post(session.command(revision, scheduler_result=result)))
+
+    threads = [
+        threading.Thread(target=run, args=("manual-only",)),
+        threading.Thread(target=run, args=("inactive",)),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert [item.status_code for item in results] == [200, 200]
+    assert state["calls"] == 2
+    assert state["peak"] == 1
+
+
+def test_completion_callback_reports_sanitized_unavailable_when_validation_fails(
+    completion_session, raw_config, monkeypatch
+):
+    from flowgency.web.routes import setup_terminal
+
+    session = completion_session
+    revision = session.write_ready_config(raw_config)
+
+    def boom(*args):
+        raise RuntimeError(f"secret-trace-detail {session.token} {session.config_path}")
+
+    monkeypatch.setattr(setup_terminal, "validate_current_completion", boom)
+
+    response = session.post(session.command(revision))
+
+    assert response.status_code == 503
+    assert "secret-trace-detail" not in response.text
+    assert session.token not in response.text
+    assert str(session.config_path) not in response.text
+    assert set(response.json()) == {"ok", "code", "error"}
+
+
+def test_completion_callback_reports_not_ready_configuration(completion_session):
+    session = completion_session
+
+    response = session.post(session.command("e" * 64))
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "not-ready"
+    assert str(session.config_path) not in response.text
+
+
+def test_validate_current_completion_is_read_only_and_returns_rechecked_revision(
+    tmp_path, raw_config
+):
+    import hashlib
+    from flowgency.web.setup_completion import validate_current_completion
+
+    config_path = tmp_path / "config.yaml"
+    raw = _materialize_ready_config(tmp_path, raw_config)
+    for key in ("compilation_cache", "memory_store", "prompt_store"):
+        Path(raw["flowgency"][key]).rmdir()
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    revision = hashlib.sha256(config_path.read_bytes()).hexdigest()
+    before = sorted(path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*"))
+
+    assert validate_current_completion(config_path, revision) == revision
+
+    after = sorted(path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*"))
+    assert [item for item in after if item not in before] in ([], ["config.yaml.lock"])
+    for key in ("compilation_cache", "memory_store", "prompt_store"):
+        assert not Path(raw["flowgency"][key]).exists()
+
+
+def test_validate_current_completion_rejects_stale_missing_and_unready_sources(tmp_path, raw_config):
+    import hashlib
+    from flowgency.web.setup_completion import (
+        SetupCompletionStale,
+        SetupCompletionUnavailable,
+        validate_current_completion,
+    )
+
+    config_path = tmp_path / "config.yaml"
+    with pytest.raises(SetupCompletionUnavailable):
+        validate_current_completion(config_path, "a" * 64)
+    assert not config_path.exists()
+
+    raw = _materialize_ready_config(tmp_path, raw_config)
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    revision = hashlib.sha256(config_path.read_bytes()).hexdigest()
+    with pytest.raises(SetupCompletionStale):
+        validate_current_completion(config_path, "f" * 64)
+
+    (tmp_path / "agent-library" / "builder-blueprint" / "AGENTS.md").unlink()
+    with pytest.raises(SetupCompletionUnavailable):
+        validate_current_completion(config_path, revision)
+
+    empty = tmp_path / "empty.yaml"
+    unready = {**raw, "teams": {}}
+    empty.write_text(yaml.safe_dump(unready, sort_keys=False), encoding="utf-8")
+    with pytest.raises(SetupCompletionUnavailable):
+        validate_current_completion(empty, hashlib.sha256(empty.read_bytes()).hexdigest())
+
+
+def test_completion_connected_launch_failure_fallback_gets_a_fresh_scoped_capability(tmp_path, monkeypatch):
+    launches = []
+
+    def failing_factory(launch):
+        launches.append(launch)
+        raise ConnectedLaunchError("cleaned up", cleanup_confirmed=True)
+
+    integration = _EnvironmentLaunchIntegration()
+    config_path, root, integration, _process, manager = _start_connected_session(
+        tmp_path, monkeypatch, process_factory=failing_factory, integration=integration
+    )
+    with _local_client() as client:
+        csrf = _setup_csrf(client)
+        response = client.post(
+            "/setup/launch",
+            data={"data_root": str(root), "integration": "copilot", "setup_csrf": csrf},
+            headers={"Origin": _LOCAL_BASE_URL},
+        )
+
+    assert response.status_code == 200
+    external = integration.requests[0]
+    assert set(external.environment) == set(_COMPLETION_ENV_NAMES)
+    assert external.environment["FLOWGENCY_SETUP_TOKEN"] != launches[0].env["FLOWGENCY_SETUP_TOKEN"]
+    for secret in (external.environment["FLOWGENCY_SETUP_TOKEN"], launches[0].env["FLOWGENCY_SETUP_TOKEN"]):
+        assert secret not in response.text
+        assert secret not in integration.fallback_requests[0].prompt
+
+
+def test_external_launch_reports_automatic_completion_unavailable_without_capability_in_page(
+    tmp_path, monkeypatch
+):
+    config_path = _configure_missing_config(tmp_path, monkeypatch)
+    root = tmp_path / "Flowgency"
+
+    class NotCarrying(_LaunchIntegration):
+        def launch_interactive_setup(self, request):
+            self.requests.append(request)
+            return type(
+                "Result",
+                (),
+                {"fallback_command": self._fallback_command, "completion_environment_delivered": False},
+            )()
+
+    integration = NotCarrying()
+    monkeypatch.setattr(
+        "flowgency.web.routes.admin_teams.launchable_integrations",
+        lambda integrations, data_root: (integration,),
+    )
+    with _local_client() as client:
+        csrf = _setup_csrf(client)
+        response = client.post(
+            "/setup/launch",
+            data={"data_root": str(root), "integration": "copilot", "setup_csrf": csrf},
+            headers={"Origin": _LOCAL_BASE_URL},
+        )
+
+    token = integration.requests[0].environment["FLOWGENCY_SETUP_TOKEN"]
+    assert response.status_code == 200
+    assert "Automatic setup completion is unavailable" in response.text
+    assert token not in response.text
+
+
+@pytest.mark.parametrize(
+    ("base_url", "peer", "expected"),
+    [
+        ("http://localhost:8500", "127.0.0.1", "http://127.0.0.1:8500"),
+        ("http://127.0.0.1:8123", "127.0.0.1", "http://127.0.0.1:8123"),
+    ],
+)
+def test_completion_origin_is_normalized_to_a_literal_loopback_address(
+    tmp_path, monkeypatch, base_url, peer, expected
+):
+    launches = []
+
+    def factory(launch):
+        launches.append(launch)
+        return FakeProcess()
+
+    config_path, root, integration, _process, manager = _start_connected_session(
+        tmp_path, monkeypatch, process_factory=factory, integration=_EnvironmentLaunchIntegration()
+    )
+    with TestClient(app_mod.app, base_url=base_url, client=(peer, 50050)) as client:
+        csrf = _setup_csrf(client)
+        response = client.post(
+            "/setup/launch",
+            data={"data_root": str(root), "integration": "copilot", "setup_csrf": csrf},
+            headers={"Origin": base_url},
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        assert launches[0].env["FLOWGENCY_SETUP_ORIGIN"] == expected

@@ -178,14 +178,36 @@ class RuntimeLaunch:
     env: Mapping[str, str]
     mode: ExecutionMode
 
+    def __repr__(self) -> str:
+        redacted = {name: "***" for name in self.env}
+        return (
+            f"RuntimeLaunch(argv={self.argv!r}, cwd={self.cwd!r}, "
+            f"env={redacted!r}, mode={self.mode!r})"
+        )
+
+
+SETUP_COMPLETION_ENVIRONMENT = (
+    "FLOWGENCY_SETUP_ORIGIN",
+    "FLOWGENCY_SETUP_TOKEN",
+    "FLOWGENCY_SETUP_LAUNCH_ID",
+)
+
 
 @dataclass(frozen=True)
 class InteractiveSetupRequest:
     data_root: Path
     config_path: Path
     prompt: str
+    environment: Mapping[str, str] = field(default_factory=dict, repr=False)
+
+    def __post_init__(self) -> None:
+        environment = dict(self.environment)
+        if any(name not in SETUP_COMPLETION_ENVIRONMENT for name in environment):
+            raise ValueError("Setup environment accepts only the completion variables")
+        object.__setattr__(self, "environment", environment)
 
 
 @dataclass(frozen=True)
 class InteractiveSetupResult:
     fallback_command: str
+    completion_environment_delivered: bool = True

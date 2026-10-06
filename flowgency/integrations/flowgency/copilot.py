@@ -37,6 +37,7 @@ from flowgency.integrations import (
     spawn_interactive_terminal,
     terminal_available,
 )
+from flowgency.integrations.interactive import terminal_carries_environment
 from flowgency.integrations.flowgency.copilot_sandbox import build_sandbox_settings
 from flowgency.integrations.models import (
     EffectiveRuntimePolicy,
@@ -568,8 +569,16 @@ class CopilotIntegration(BaseIntegration):
     def launch_interactive_setup(self, request: InteractiveSetupRequest) -> InteractiveSetupResult:
         data_root = request.data_root.resolve(strict=True)
         command = self._interactive_setup_command(request)
-        fallback_command = spawn_interactive_terminal(command, data_root)
-        return InteractiveSetupResult(fallback_command=fallback_command)
+        if not request.environment:
+            fallback_command = spawn_interactive_terminal(command, data_root)
+            return InteractiveSetupResult(fallback_command=fallback_command)
+        delivered = terminal_carries_environment()
+        env = {**os.environ, **request.environment} if delivered else None
+        fallback_command = spawn_interactive_terminal(command, data_root, env=env)
+        return InteractiveSetupResult(
+            fallback_command=fallback_command,
+            completion_environment_delivered=delivered,
+        )
 
     def interactive_setup_fallback_command(
         self,
@@ -582,7 +591,7 @@ class CopilotIntegration(BaseIntegration):
         return RuntimeLaunch(
             argv=tuple(self._interactive_setup_command(request)),
             cwd=data_root,
-            env=self._launch_environment(None),
+            env={**self._launch_environment(None), **request.environment},
             mode="connected",
         )
 
