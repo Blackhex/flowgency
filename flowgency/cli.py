@@ -40,7 +40,7 @@ from flowgency.tickets.cli import register_ticket_commands
 from flowgency.tickets.models import UserTicketContext
 from flowgency.tickets.views import build_board_view
 from flowgency.web.dependencies import FlowgencyServices, build_services
-from flowgency.workflows.validation import validate_workflow_references
+from flowgency.web.validation import collect_validation_issues
 
 
 def _supports_color() -> bool:
@@ -350,27 +350,8 @@ def run_server(**options) -> None:
 
 def cmd_validate(args: Namespace) -> int:
     services = _services(args)
-    issues: list[ValidationIssue] = list(services.prompt_issues)
-    seen: set[tuple[str, str, str]] = {(i.code, i.field, i.message) for i in issues}
-
-    if services.blueprint_library is not None:
-        try:
-            services.blueprint_library.list()
-        except ValidationFailed as exc:
-            for issue in exc.issues:
-                key = (issue.code, issue.field, issue.message)
-                if key not in seen:
-                    seen.add(key)
-                    issues.append(issue)
-
     snapshot = services.config_store.load()
-    for issue in validate_workflow_references(snapshot):
-        key = (issue.code, issue.field, issue.message)
-        if key not in seen:
-            seen.add(key)
-            issues.append(issue)
-
-    combined = tuple(issues)
+    combined = collect_validation_issues(services, snapshot)
     if combined:
         raise CliFailure(ExitCode.VALIDATION, "validation-failed", "Validation failed", combined)
     if getattr(args, "json", False):

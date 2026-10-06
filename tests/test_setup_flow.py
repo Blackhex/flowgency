@@ -9,6 +9,11 @@ import yaml
 from flowgency.configuration import ConfigStore
 from flowgency.integrations import BaseIntegration
 from flowgency.web.directory_browser import DirectoryBrowseError, list_directories
+from flowgency.web.setup_completion import (
+    SetupCompletionCommand,
+    SetupCompletionDecision,
+    SetupCompletionLaunch,
+)
 from flowgency.web.setup_flow import (
     build_setup_prompt,
     inspect_setup_status,
@@ -410,3 +415,108 @@ def test_list_directories_reports_permission_denied_during_resolution(
 
     with pytest.raises(DirectoryBrowseError, match="cannot be accessed"):
         list_directories(str(restricted), default_path=tmp_path)
+
+
+def _completion_kwargs(**overrides):
+    kwargs = dict(
+        launch_id="a" * 32,
+        revision="b" * 64,
+        scheduler_result="manual-only",
+        all_questions_answered=True,
+        summary_delivered=True,
+        limitations_acknowledged=False,
+    )
+    kwargs.update(overrides)
+    return kwargs
+
+
+def test_setup_completion_accepts_a_fully_closed_command():
+    command = SetupCompletionCommand(**_completion_kwargs())
+
+    assert command.launch_id == "a" * 32
+    assert command.revision == "b" * 64
+
+
+def test_setup_completion_rejects_unacknowledged_scheduler_failure():
+    with pytest.raises(ValueError):
+        SetupCompletionCommand(
+            launch_id="a" * 32,
+            revision="b" * 64,
+            scheduler_result="failed",
+            all_questions_answered=True,
+            summary_delivered=True,
+            limitations_acknowledged=False,
+        )
+
+
+@pytest.mark.parametrize("scheduler_result", ["failed", "unknown"])
+def test_setup_completion_accepts_acknowledged_scheduler_limitation(scheduler_result):
+    command = SetupCompletionCommand(
+        **_completion_kwargs(
+            scheduler_result=scheduler_result,
+            limitations_acknowledged=True,
+        )
+    )
+
+    assert command.scheduler_result == scheduler_result
+
+
+@pytest.mark.parametrize("field", ["all_questions_answered", "summary_delivered"])
+def test_setup_completion_rejects_false_completion_assertions(field):
+    with pytest.raises(ValueError):
+        SetupCompletionCommand(**_completion_kwargs(**{field: False}))
+
+
+@pytest.mark.parametrize("field", ["all_questions_answered", "summary_delivered", "limitations_acknowledged"])
+@pytest.mark.parametrize("stand_in", ["true", 1])
+def test_setup_completion_rejects_string_and_integer_booleans(field, stand_in):
+    with pytest.raises(ValueError):
+        SetupCompletionCommand(**_completion_kwargs(**{field: stand_in}))
+
+
+def test_setup_completion_rejects_extra_fields():
+    with pytest.raises(ValueError):
+        SetupCompletionCommand(**_completion_kwargs(unexpected="value"))
+
+
+@pytest.mark.parametrize(
+    "launch_id",
+    ["", "a" * 31, "a" * 33, "A" * 32, "g" * 32, "not-a-uuid-hex-value-012345678"],
+)
+def test_setup_completion_rejects_malformed_launch_id(launch_id):
+    with pytest.raises(ValueError):
+        SetupCompletionCommand(**_completion_kwargs(launch_id=launch_id))
+
+
+@pytest.mark.parametrize(
+    "revision",
+    ["", "b" * 63, "b" * 65, "B" * 64, "g" * 64],
+)
+def test_setup_completion_rejects_malformed_revision(revision):
+    with pytest.raises(ValueError):
+        SetupCompletionCommand(**_completion_kwargs(revision=revision))
+
+
+def test_setup_completion_rejects_unknown_scheduler_result():
+    with pytest.raises(ValueError):
+        SetupCompletionCommand(**_completion_kwargs(scheduler_result="running"))
+
+
+def test_setup_completion_launch_hides_token_from_repr():
+    launch = SetupCompletionLaunch(launch_id="a" * 32, origin="setup", token="super-secret")
+
+    assert "super-secret" not in repr(launch)
+    assert launch.token == "super-secret"
+
+
+def test_setup_completion_decision_is_a_frozen_record():
+    decision = SetupCompletionDecision(
+        launch_id="a" * 32,
+        phase="complete",
+        redirect_allowed=True,
+        message="Setup is complete.",
+    )
+
+    assert decision.phase == "complete"
+    with pytest.raises(AttributeError):
+        decision.phase = "cancelled"

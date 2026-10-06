@@ -19,6 +19,7 @@ from flowgency.jobs import JobHandle, JobSubmissionError
 from flowgency.memory import resolve_memory_selector
 from flowgency.tickets.models import TicketOperation, UserTicketContext
 from flowgency.web.dependencies import build_services
+from flowgency.web.validation import collect_validation_issues
 from tests._ticket_helpers import delivery_definition
 from tests._team_helpers import apply_team_paths, create_team_environment
 
@@ -305,6 +306,30 @@ def test_validate_accepts_config_with_workflow_instance(cli_config, cli_runner):
     result = cli_runner("validate", config=cli_config)
     assert result.exit_code == 0
     assert "No validation issues found." in result.stdout
+
+
+def test_collect_validation_issues_matches_a_clean_config(cli_config):
+    services = build_services(cli_config)
+    assert services.startup_error is None
+    snapshot = services.config_store.load()
+
+    issues = collect_validation_issues(services, snapshot)
+
+    assert issues == ()
+
+
+def test_collect_validation_issues_reports_missing_workflow_source(cli_config):
+    snapshot = ConfigStore(cli_config).load()
+    source = Path(snapshot.config.flowgency.workflow_library) / "delivery" / "workflow.yaml"
+    source.unlink()
+    services = build_services(cli_config)
+    assert services.startup_error is None
+    snapshot = services.config_store.load()
+
+    issues = collect_validation_issues(services, snapshot)
+
+    assert any(issue.code == "missing-blueprint" for issue in issues)
+    assert len(issues) == len({(i.code, i.field, i.message) for i in issues})
 
 
 @pytest.mark.parametrize("as_json", [False, True])
