@@ -15,7 +15,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from ipaddress import ip_address
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol
 from urllib.parse import urlsplit
 
 import yaml
@@ -82,6 +82,46 @@ class SetupCompletionDecision:
     phase: Literal["pending", "acknowledged", "complete", "attention", "cancelled"]
     redirect_allowed: bool
     message: str
+
+
+@dataclass(frozen=True)
+class SetupExitCapability:
+    supported: bool
+    cli_version: str
+    reason: str
+
+
+ExitBoundary = Literal["busy", "prompting", "safe", "unsupported"]
+
+
+class SetupExitAdapter(Protocol):
+    """Reports the interactive CLI's programmatic boundary; never inferred from screen text."""
+
+    def capability(self) -> SetupExitCapability: ...
+
+    def boundary(self) -> ExitBoundary: ...
+
+
+# Measured by tools/probe_setup_exit.py: no verified idle boundary for the interactive session.
+COPILOT_EXIT_CAPABILITY = SetupExitCapability(
+    supported=False,
+    cli_version="1.0.93-1",
+    reason=(
+        "No supported, measured completed/idle boundary exists for the interactive "
+        "session; /exit alone is not evidence that automatic exit is safe."
+    ),
+)
+
+
+class UnsupportedExitAdapter:
+    def __init__(self, capability: SetupExitCapability = COPILOT_EXIT_CAPABILITY) -> None:
+        self._capability = capability
+
+    def capability(self) -> SetupExitCapability:
+        return self._capability
+
+    def boundary(self) -> ExitBoundary:
+        return "unsupported"
 
 
 def completion_environment(launch: SetupCompletionLaunch) -> dict[str, str]:

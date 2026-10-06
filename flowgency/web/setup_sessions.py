@@ -44,6 +44,8 @@ from flowgency.web.setup_completion import (
     SetupCompletionCommand,
     SetupCompletionDecision,
     SetupCompletionLaunch,
+    SetupExitAdapter,
+    UnsupportedExitAdapter,
 )
 
 SetupSessionState = Literal["starting", "running", "exited", "stopped", "failed"]
@@ -58,6 +60,7 @@ _DEFAULT_REPLAY_LIMIT = 2 * 1024 * 1024
 _DEFAULT_CLIENT_LIMIT = 1 << 18
 _SANITIZED_START_FAILURE = "Setup could not be started; cleanup could not be confirmed."
 _COMPLETION_REJECTED = "Setup completion was rejected."
+_EXIT_COMMAND = b"/exit\r"
 
 ProcessFactory = Callable[[RuntimeLaunch], ConnectedProcess]
 _ExternalResult = TypeVar("_ExternalResult")
@@ -101,6 +104,8 @@ class _CompletionAttempt:
     cancelled: bool = False
     unexpected_failure: bool = False
     exit_capability_verified: bool = False
+    exit_requested: bool = False
+    input_count_at_acknowledgement: int = 0
     validation_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 
     @property
@@ -208,6 +213,7 @@ class _Session:
         self.stop_evidence: ProcessStopEvidence | None = None
         self.finalized = False
         self.eof_seen = False
+        self.input_count = 0
         self.replay_limit = replay_limit
         self.client_limit = client_limit
         self._now = now
@@ -248,8 +254,10 @@ class SetupSessionManager:
         idle_timeout: float = _IDLE_TIMEOUT_SECONDS,
         max_lifetime: float = _MAX_LIFETIME_SECONDS,
         sweep_interval: float = _SWEEP_INTERVAL_SECONDS,
+        exit_adapter: SetupExitAdapter | None = None,
     ) -> None:
         self._factory = process_factory
+        self._exit_adapter = exit_adapter if exit_adapter is not None else UnsupportedExitAdapter()
         self._now = now
         self._replay_limit = replay_limit
         self._client_limit = client_limit
@@ -298,7 +306,8 @@ class SetupSessionManager:
                 launch_id=uuid4().hex, origin=origin, token=secrets.token_urlsafe(32)
             )
             self._completion = _CompletionAttempt(
-                owner, integration_name, data_root, config_path, launch, created=self._now()
+                owner, integration_name, data_root, config_path, launch, created=self._now(),
+                exit_capability_verified=self._exit_adapter.capability().supported,
             )
             return launch
 
@@ -365,7 +374,42 @@ class SetupSessionManager:
                 if not live:
                     raise SetupSessionConflict(_COMPLETION_REJECTED)
                 attempt.acknowledgement = acknowledgement
+                attempt.input_count_at_acknowledgement = (
+                    0 if session is None else session.input_count
+                )
             return self._decide(attempt, validated_revision, True)
+
+    async def request_completion_exit(self, launch_id: str) -> bool:
+        """Send ``/exit`` at most once, only at an adapter-verified safe boundary."""
+        async with self._state_lock:
+            attempt = self._completion
+            if attempt is None or attempt.cancelled or attempt.unexpected_failure:
+                return False
+            if not hmac.compare_digest(
+                launch_id.encode("utf-8"), attempt.launch_id.encode("utf-8")
+            ):
+                return False
+            session = attempt.session
+            if (
+                attempt.acknowledgement is None
+                or session is None
+                or session.process is None
+                or session.state != "running"
+                or session.eof_seen
+                or session.finalized
+            ):
+                return False
+            if attempt.exit_requested:
+                return True
+            adapter = self._exit_adapter
+            if not adapter.capability().supported or adapter.boundary() != "safe":
+                return False
+            if session.input_count != attempt.input_count_at_acknowledgement:
+                return False
+            attempt.exit_requested = True
+            process = session.process
+        await asyncio.to_thread(process.write, _EXIT_COMMAND)
+        return True
 
     def completion_decision(
         self, owner: str, current_revision: str | None, ready: bool
@@ -659,6 +703,7 @@ class SetupSessionManager:
                 raise ValueError("Setup input exceeds 64 KiB")
             process = session.process
             session._last_activity = self._now()
+            session.input_count += 1
         await asyncio.to_thread(process.write, bytes(data))
 
     async def resize(self, owner: str, connection_id: str, rows: int, cols: int) -> None:

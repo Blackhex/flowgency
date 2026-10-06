@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import os
 import queue
 import threading
@@ -15,7 +16,11 @@ import pytest
 from flowgency.integrations.models import RuntimeLaunch
 from flowgency.jobs.connected_process import ConnectedLaunchError
 from flowgency.jobs.processes import ProcessStopEvidence, process_identity_state, read_process_identity
-from flowgency.web.setup_completion import SetupCompletionCommand
+from flowgency.web.setup_completion import (
+    COPILOT_EXIT_CAPABILITY,
+    SetupCompletionCommand,
+    SetupExitCapability,
+)
 from flowgency.web.setup_sessions import SetupSessionConflict, SetupSessionManager
 
 from tests._connected_setup_helpers import FakeProcess
@@ -593,6 +598,198 @@ def test_completion_without_preparation_is_pending(tmp_path: Path):
             assert decision.redirect_allowed is False
             with pytest.raises(SetupSessionConflict):
                 manager.require_completion_token("anything")
+        finally:
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+class _FakeExitAdapter:
+    def __init__(self, boundary: str = "safe", supported: bool = True):
+        self.state = boundary
+        self._capability = SetupExitCapability(supported, "fake-1.0", "fake boundary")
+        self.checks = 0
+
+    def capability(self) -> SetupExitCapability:
+        return self._capability
+
+    def boundary(self) -> str:
+        self.checks += 1
+        return self.state
+
+
+class _CountingStopProcess(FakeProcess):
+    def __init__(self):
+        super().__init__()
+        self.stop_calls = 0
+
+    def stop(self, lifecycle):
+        self.stop_calls += 1
+        return super().stop(lifecycle)
+
+
+async def _acknowledged_exit_session(manager: SetupSessionManager, root: Path):
+    prepared = await _connected_completion(manager, root)
+    await manager.acknowledge_completion(
+        prepared.token, _completion_command(prepared.launch_id), _REVISION
+    )
+    return prepared
+
+
+def test_completion_exit_capability_is_a_frozen_contract():
+    capability = SetupExitCapability(False, "1.0.0", "no boundary")
+    assert (capability.supported, capability.cli_version, capability.reason) == (
+        False, "1.0.0", "no boundary"
+    )
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        capability.supported = True
+
+
+def test_completion_exit_production_default_is_unsupported_fallback(tmp_path: Path):
+    async def exercise():
+        fake = FakeProcess()
+        manager = SetupSessionManager(process_factory=lambda launch: fake, sweep_interval=0)
+        try:
+            prepared = await _acknowledged_exit_session(manager, tmp_path)
+            assert COPILOT_EXIT_CAPABILITY.supported is False
+            assert await manager.request_completion_exit(prepared.launch_id) is False
+            assert fake.writes == []
+            assert fake.running is True
+            decision = manager.completion_decision("owner", _REVISION, True)
+            assert decision.phase == "complete"
+            assert decision.redirect_allowed is True
+        finally:
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    ("boundary", "supported"),
+    [("busy", True), ("prompting", True), ("unsupported", True), ("safe", False)],
+)
+def test_completion_exit_never_writes_unless_boundary_is_verified_safe(
+    tmp_path: Path, boundary, supported
+):
+    async def exercise():
+        fake = FakeProcess()
+        adapter = _FakeExitAdapter(boundary, supported)
+        manager = SetupSessionManager(
+            process_factory=lambda launch: fake, exit_adapter=adapter, sweep_interval=0
+        )
+        try:
+            prepared = await _acknowledged_exit_session(manager, tmp_path)
+            assert await manager.request_completion_exit(prepared.launch_id) is False
+            assert fake.writes == []
+            assert fake.running is True
+            if supported:
+                adapter.state = "safe"
+                assert await manager.request_completion_exit(prepared.launch_id) is True
+                assert fake.writes == [b"/exit\r"]
+        finally:
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_completion_exit_writes_once_and_stays_non_navigable_until_clean_exit(tmp_path: Path):
+    async def exercise():
+        fake = _CountingStopProcess()
+        manager = SetupSessionManager(
+            process_factory=lambda launch: fake, exit_adapter=_FakeExitAdapter(), sweep_interval=0
+        )
+        try:
+            prepared = await _acknowledged_exit_session(manager, tmp_path)
+            assert await manager.request_completion_exit(prepared.launch_id) is True
+            assert await manager.request_completion_exit(prepared.launch_id) is True
+            assert fake.writes == [b"/exit\r"]
+            await asyncio.sleep(0.05)
+            decision = manager.completion_decision("owner", _REVISION, True)
+            assert decision.phase == "acknowledged"
+            assert decision.redirect_allowed is False
+            assert fake.running is True
+            assert fake.stop_calls == 0
+            fake.output.put(None)
+            await _until(lambda: manager.snapshot("owner").state == "exited")
+            decision = manager.completion_decision("owner", _REVISION, True)
+            assert decision.phase == "complete"
+            assert decision.redirect_allowed is True
+        finally:
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_completion_exit_requires_acknowledgement_and_matching_launch(tmp_path: Path):
+    async def exercise():
+        fake = FakeProcess()
+        manager = SetupSessionManager(
+            process_factory=lambda launch: fake, exit_adapter=_FakeExitAdapter(), sweep_interval=0
+        )
+        try:
+            prepared = await _connected_completion(manager, tmp_path)
+            assert await manager.request_completion_exit(prepared.launch_id) is False
+            await manager.acknowledge_completion(
+                prepared.token, _completion_command(prepared.launch_id), _REVISION
+            )
+            assert await manager.request_completion_exit("0" * 32) is False
+            assert fake.writes == []
+        finally:
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_completion_exit_does_not_overwrite_input_typed_after_acknowledgement(tmp_path: Path):
+    async def exercise():
+        fake = FakeProcess()
+        manager = SetupSessionManager(
+            process_factory=lambda launch: fake, exit_adapter=_FakeExitAdapter(), sweep_interval=0
+        )
+        try:
+            prepared = await _acknowledged_exit_session(manager, tmp_path)
+            _, connection_id, _ = await manager.attach("owner")
+            await manager.send_input("owner", connection_id, b"one more thing")
+            assert await manager.request_completion_exit(prepared.launch_id) is False
+            assert fake.writes == [b"one more thing"]
+        finally:
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_completion_exit_is_refused_after_stop_or_failure(tmp_path: Path):
+    async def exercise():
+        fake = FakeProcess()
+        manager = SetupSessionManager(
+            process_factory=lambda launch: fake, exit_adapter=_FakeExitAdapter(), sweep_interval=0
+        )
+        try:
+            prepared = await _acknowledged_exit_session(manager, tmp_path)
+            await manager.stop("owner")
+            assert await manager.request_completion_exit(prepared.launch_id) is False
+            assert fake.writes == []
+        finally:
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("process_class", [_NonZeroExitProcess, _UnconfirmedThenConfirmedProcess])
+def test_completion_exit_unexpected_failure_remains_attention_required(tmp_path: Path, process_class):
+    async def exercise():
+        fake = process_class()
+        manager = SetupSessionManager(
+            process_factory=lambda launch: fake, exit_adapter=_FakeExitAdapter(), sweep_interval=0
+        )
+        try:
+            prepared = await _acknowledged_exit_session(manager, tmp_path)
+            assert await manager.request_completion_exit(prepared.launch_id) is True
+            fake.output.put(None)
+            await _until(lambda: manager.snapshot("owner").state in {"exited", "failed"})
+            decision = manager.completion_decision("owner", _REVISION, True)
+            assert decision.phase == "attention"
+            assert decision.redirect_allowed is False
         finally:
             await manager.shutdown()
 
