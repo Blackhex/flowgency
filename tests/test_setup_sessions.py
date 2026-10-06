@@ -889,6 +889,109 @@ def test_completion_exit_failed_write_allows_one_retry(tmp_path: Path):
     asyncio.run(exercise())
 
 
+class _GatedFailingWriteProcess(_GatedWriteProcess):
+    def write(self, data: bytes) -> None:
+        self.log.append(("start", data))
+        if not self.entered.is_set():
+            self.entered.set()
+            assert self.release.wait(5)
+            raise OSError("pty write failed")
+        super().write(data)
+
+
+async def _cancel_in_flight(task: "asyncio.Task") -> None:
+    await asyncio.sleep(0.02)
+    task.cancel()
+    await asyncio.sleep(0.05)
+
+
+def test_cancelled_exit_write_keeps_lock_and_claim_until_worker_finishes(tmp_path: Path):
+    async def exercise():
+        fake = _GatedWriteProcess()
+        manager = _gated_manager(fake)
+        try:
+            prepared = await _acknowledged_exit_session(manager, tmp_path)
+            _, connection_id, _ = await manager.attach("owner")
+            exiting = asyncio.create_task(manager.request_completion_exit(prepared.launch_id))
+            await asyncio.to_thread(fake.entered.wait, 5)
+            await _cancel_in_flight(exiting)
+            retry = asyncio.create_task(manager.request_completion_exit(prepared.launch_id))
+            typing = asyncio.create_task(manager.send_input("owner", connection_id, b"typed"))
+            await asyncio.sleep(0.05)
+            assert not exiting.done()
+            assert not retry.done() and not typing.done()
+            assert fake.log == [("start", b"/exit\r")]
+            fake.release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await exiting
+            assert await retry is True
+            with pytest.raises(SetupSessionConflict):
+                await typing
+            assert fake.log == [("start", b"/exit\r"), ("end", b"/exit\r")]
+            assert fake.writes == [b"/exit\r"]
+        finally:
+            fake.release.set()
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_cancelled_exit_write_that_failed_resets_claim_for_one_retry(tmp_path: Path):
+    async def exercise():
+        fake = _GatedFailingWriteProcess()
+        manager = _gated_manager(fake)
+        try:
+            prepared = await _acknowledged_exit_session(manager, tmp_path)
+            exiting = asyncio.create_task(manager.request_completion_exit(prepared.launch_id))
+            await asyncio.to_thread(fake.entered.wait, 5)
+            await _cancel_in_flight(exiting)
+            retry = asyncio.create_task(manager.request_completion_exit(prepared.launch_id))
+            await asyncio.sleep(0.05)
+            assert not retry.done()
+            fake.release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await exiting
+            assert await retry is True
+            assert await manager.request_completion_exit(prepared.launch_id) is True
+            assert fake.writes == [b"/exit\r"]
+        finally:
+            fake.release.set()
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_cancelled_input_write_blocks_later_writers_until_worker_finishes(tmp_path: Path):
+    async def exercise():
+        fake = _GatedWriteProcess()
+        manager = _gated_manager(fake)
+        try:
+            prepared = await _acknowledged_exit_session(manager, tmp_path)
+            _, connection_id, _ = await manager.attach("owner")
+            typing = asyncio.create_task(manager.send_input("owner", connection_id, b"first"))
+            await asyncio.to_thread(fake.entered.wait, 5)
+            await _cancel_in_flight(typing)
+            second = asyncio.create_task(manager.send_input("owner", connection_id, b"second"))
+            exiting = asyncio.create_task(manager.request_completion_exit(prepared.launch_id))
+            await asyncio.sleep(0.05)
+            assert not second.done() and not exiting.done()
+            assert fake.log == [("start", b"first")]
+            fake.release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await typing
+            await second
+            assert await exiting is False
+            assert fake.log == [
+                ("start", b"first"), ("end", b"first"),
+                ("start", b"second"), ("end", b"second"),
+            ]
+        finally:
+            fake.release.set()
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
 def test_completion_exit_is_refused_after_stop_or_failure(tmp_path: Path):
     async def exercise():
         fake = FakeProcess()

@@ -15,7 +15,8 @@ Two locks keep that promise:
   never held across blocking PTY I/O.
 
 Each session's ``write_lock`` serializes whole PTY input writes (user input and
-the completion ``/exit``). It is taken before ``_state_lock``, never the reverse.
+the completion ``/exit``) and is held until the worker thread has finished, even
+if the caller is cancelled. It is taken before ``_state_lock``, never the reverse.
 
 The reader's end-of-stream path finalizes using ``_state_lock`` alone and relies
 on the process layer's idempotent Stop, so it can never invert against a Stop
@@ -423,11 +424,11 @@ class SetupSessionManager:
                     return False
                 attempt.exit_requested = True
                 process = session.process
-            try:
-                await asyncio.to_thread(process.write, _EXIT_COMMAND)
-            except BaseException:
-                attempt.exit_requested = False
-                raise
+
+            def settle(written: bool) -> None:
+                attempt.exit_requested = written
+
+            await self._write_pty(process, _EXIT_COMMAND, settle)
         return True
 
     def completion_decision(
@@ -728,10 +729,28 @@ class SetupSessionManager:
                     raise SetupSessionConflict("The setup session is exiting")
                 process = session.process
                 session._last_activity = self._now()
-            try:
-                await asyncio.to_thread(process.write, bytes(data))
-            finally:
+            def settle(_written: bool) -> None:
                 session.input_count += 1
+
+            await self._write_pty(process, bytes(data), settle)
+
+    @staticmethod
+    async def _write_pty(
+        process: ConnectedProcess, data: bytes, settle: Callable[[bool], None]
+    ) -> None:
+        # Callers hold write_lock: a cancelled caller must not release it while
+        # the worker thread may still write, so wait the write out, then settle
+        # exactly once with the real outcome and re-raise.
+        task = asyncio.ensure_future(asyncio.to_thread(process.write, data))
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            while not task.done():
+                with contextlib.suppress(BaseException):
+                    await asyncio.shield(task)
+            raise
+        finally:
+            settle(not task.cancelled() and task.exception() is None)
 
     async def resize(self, owner: str, connection_id: str, rows: int, cols: int) -> None:
         async with self._state_lock:
