@@ -15,6 +15,7 @@ import pytest
 from flowgency.integrations.models import RuntimeLaunch
 from flowgency.jobs.connected_process import ConnectedLaunchError
 from flowgency.jobs.processes import ProcessStopEvidence, process_identity_state, read_process_identity
+from flowgency.web.setup_completion import SetupCompletionCommand
 from flowgency.web.setup_sessions import SetupSessionConflict, SetupSessionManager
 
 from tests._connected_setup_helpers import FakeProcess
@@ -66,6 +67,420 @@ class _UnconfirmedThenConfirmedProcess(FakeProcess):
         self.running = False
         self.output.put(None)  # release the parked reader thread
         return ProcessStopEvidence(lifecycle.job_id, lifecycle.generation, True, "stopped")
+
+
+_REVISION = "b" * 64
+_OTHER_REVISION = "c" * 64
+
+
+class _NonZeroExitProcess(FakeProcess):
+    def exit_code(self):
+        return None if self.running else 3
+
+
+def _completion_command(launch_id: str, revision: str = _REVISION, **overrides) -> SetupCompletionCommand:
+    values = {
+        "launch_id": launch_id,
+        "revision": revision,
+        "scheduler_result": "manual-only",
+        "all_questions_answered": True,
+        "summary_delivered": True,
+    }
+    values.update(overrides)
+    return SetupCompletionCommand(**values)
+
+
+async def _until(predicate, timeout: float = 5.0) -> None:
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        assert time.monotonic() < deadline, "condition not reached"
+        await asyncio.sleep(0.01)
+
+
+async def _connected_completion(manager: SetupSessionManager, root: Path, owner: str = "owner"):
+    prepared = await manager.prepare_completion(
+        owner, "copilot", root, root / "config.yaml", "http://127.0.0.1:8500"
+    )
+    launch = RuntimeLaunch(("copilot",), root, {}, "connected")
+    await manager.start(owner, "copilot", launch, "fallback")
+    return prepared
+
+
+def test_completion_ready_configuration_without_acknowledgement_stays_pending(tmp_path: Path):
+    async def exercise():
+        fake = FakeProcess()
+        manager = SetupSessionManager(process_factory=lambda launch: fake, sweep_interval=0)
+        try:
+            prepared = await _connected_completion(manager, tmp_path)
+            decision = manager.completion_decision("owner", _REVISION, True)
+            assert decision.phase == "pending"
+            assert decision.redirect_allowed is False
+            assert decision.launch_id == prepared.launch_id
+            assert fake.running is True
+            assert manager.completion_decision("other", _REVISION, True).redirect_allowed is False
+        finally:
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_completion_capability_is_private_and_bound_to_lifecycle(tmp_path: Path):
+    async def exercise():
+        manager = SetupSessionManager(process_factory=lambda launch: FakeProcess(), sweep_interval=0)
+        try:
+            prepared = await _connected_completion(manager, tmp_path)
+            assert len(prepared.token) >= 43
+            assert prepared.token not in repr(prepared)
+            assert len(prepared.launch_id) == 32
+            assert prepared.origin == "http://127.0.0.1:8500"
+            assert manager._session.lifecycle.generation == prepared.launch_id
+            snapshot = manager.snapshot("owner")
+            assert prepared.token not in repr(snapshot)
+            assert not hasattr(snapshot, "token")
+            assert prepared.token not in manager.completion_decision("owner", _REVISION, True).message
+            assert manager.require_completion_token(prepared.token) == prepared.launch_id
+            with pytest.raises(SetupSessionConflict) as bad:
+                manager.require_completion_token(prepared.token + "x")
+            assert prepared.token not in str(bad.value)
+        finally:
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_completion_acknowledgement_completes_without_stopping_process(tmp_path: Path):
+    async def exercise():
+        fake = FakeProcess()
+        manager = SetupSessionManager(process_factory=lambda launch: fake, sweep_interval=0)
+        try:
+            prepared = await _connected_completion(manager, tmp_path)
+            command = _completion_command(prepared.launch_id)
+            decision = await manager.acknowledge_completion(prepared.token, command, _REVISION)
+            assert decision.phase == "complete"
+            assert decision.redirect_allowed is True
+            assert fake.running is True
+            assert manager.snapshot("owner").state == "running"
+            assert manager.completion_decision("owner", _REVISION, True).redirect_allowed is True
+            assert manager.completion_decision("owner", _REVISION, False).phase == "pending"
+            assert manager.completion_decision("owner", _OTHER_REVISION, True).phase == "pending"
+            assert manager.completion_decision("owner", None, True).redirect_allowed is False
+            assert manager.completion_decision("other", _REVISION, True).redirect_allowed is False
+        finally:
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_completion_acknowledgement_rejects_mismatches(tmp_path: Path):
+    async def exercise():
+        manager = SetupSessionManager(process_factory=lambda launch: FakeProcess(), sweep_interval=0)
+        try:
+            prepared = await _connected_completion(manager, tmp_path)
+            good = _completion_command(prepared.launch_id)
+            for token, command, revision in (
+                (prepared.token + "x", good, _REVISION),
+                ("", good, _REVISION),
+                (prepared.token, _completion_command("a" * 32), _REVISION),
+                (prepared.token, good, _OTHER_REVISION),
+                (prepared.token, _completion_command(prepared.launch_id, _OTHER_REVISION), _REVISION),
+            ):
+                with pytest.raises(SetupSessionConflict) as error:
+                    await manager.acknowledge_completion(token, command, revision)
+                assert prepared.token not in str(error.value)
+            assert manager.completion_decision("owner", _REVISION, True).redirect_allowed is False
+        finally:
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_completion_duplicate_acknowledgement_is_idempotent(tmp_path: Path):
+    async def exercise():
+        manager = SetupSessionManager(process_factory=lambda launch: FakeProcess(), sweep_interval=0)
+        try:
+            prepared = await _connected_completion(manager, tmp_path)
+            command = _completion_command(prepared.launch_id)
+            first = await manager.acknowledge_completion(prepared.token, command, _REVISION)
+            second = await manager.acknowledge_completion(prepared.token, command, _REVISION)
+            assert first == second
+            assert second.redirect_allowed is True
+        finally:
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_completion_changed_revision_requires_new_acknowledgement(tmp_path: Path):
+    async def exercise():
+        manager = SetupSessionManager(process_factory=lambda launch: FakeProcess(), sweep_interval=0)
+        try:
+            prepared = await _connected_completion(manager, tmp_path)
+            await manager.acknowledge_completion(
+                prepared.token, _completion_command(prepared.launch_id), _REVISION
+            )
+            assert manager.completion_decision("owner", _OTHER_REVISION, True).phase == "pending"
+            renewed = await manager.acknowledge_completion(
+                prepared.token, _completion_command(prepared.launch_id, _OTHER_REVISION), _OTHER_REVISION
+            )
+            assert renewed.redirect_allowed is True
+        finally:
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_completion_reattach_reuses_credential_and_rejects_other_selection(tmp_path: Path):
+    async def exercise():
+        manager = SetupSessionManager(process_factory=lambda launch: FakeProcess(), sweep_interval=0)
+        try:
+            first = await _connected_completion(manager, tmp_path)
+            again = await manager.prepare_completion(
+                "owner", "copilot", tmp_path, tmp_path / "config.yaml", "http://127.0.0.1:8500"
+            )
+            assert again == first
+            assert again.token == first.token
+            for owner, integration, root in (
+                ("other", "copilot", tmp_path),
+                ("owner", "codex", tmp_path),
+                ("owner", "copilot", tmp_path / "elsewhere"),
+            ):
+                with pytest.raises(SetupSessionConflict):
+                    await manager.prepare_completion(
+                        owner, integration, root, tmp_path / "config.yaml", "http://127.0.0.1:8500"
+                    )
+            assert manager.require_completion_token(first.token) == first.launch_id
+        finally:
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_completion_replacement_attempt_rejects_old_token(tmp_path: Path):
+    async def exercise():
+        processes = []
+
+        def factory(launch):
+            processes.append(FakeProcess())
+            return processes[-1]
+
+        manager = SetupSessionManager(process_factory=factory, sweep_interval=0)
+        try:
+            old = await _connected_completion(manager, tmp_path)
+            assert (await manager.stop("owner")).confirmed is True
+            new = await _connected_completion(manager, tmp_path)
+            assert new.launch_id != old.launch_id
+            assert new.token != old.token
+            with pytest.raises(SetupSessionConflict):
+                await manager.acknowledge_completion(
+                    old.token, _completion_command(old.launch_id), _REVISION
+                )
+            with pytest.raises(SetupSessionConflict):
+                await manager.acknowledge_completion(
+                    old.token, _completion_command(new.launch_id), _REVISION
+                )
+            with pytest.raises(SetupSessionConflict):
+                await manager.acknowledge_completion(
+                    new.token, _completion_command(old.launch_id), _REVISION
+                )
+            assert manager.completion_decision("owner", _REVISION, True).phase == "pending"
+            decision = await manager.acknowledge_completion(
+                new.token, _completion_command(new.launch_id), _REVISION
+            )
+            assert decision.redirect_allowed is True
+        finally:
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("acknowledge_first", [False, True])
+def test_completion_stop_is_cancelled_and_cannot_be_acknowledged(tmp_path: Path, acknowledge_first):
+    async def exercise():
+        manager = SetupSessionManager(process_factory=lambda launch: FakeProcess(), sweep_interval=0)
+        try:
+            prepared = await _connected_completion(manager, tmp_path)
+            command = _completion_command(prepared.launch_id)
+            if acknowledge_first:
+                await manager.acknowledge_completion(prepared.token, command, _REVISION)
+            assert (await manager.stop("owner")).confirmed is True
+            decision = manager.completion_decision("owner", _REVISION, True)
+            assert decision.phase == "cancelled"
+            assert decision.redirect_allowed is False
+            assert manager.snapshot("owner").state == "stopped"
+            with pytest.raises(SetupSessionConflict):
+                await manager.acknowledge_completion(prepared.token, command, _REVISION)
+            with pytest.raises(SetupSessionConflict):
+                manager.require_completion_token(prepared.token)
+        finally:
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_completion_natural_exit_without_acknowledgement_requires_attention(tmp_path: Path):
+    async def exercise():
+        fake = FakeProcess()
+        manager = SetupSessionManager(process_factory=lambda launch: fake, sweep_interval=0)
+        try:
+            prepared = await _connected_completion(manager, tmp_path)
+            fake.output.put(None)
+            await _until(lambda: manager.snapshot("owner").state == "exited")
+            decision = manager.completion_decision("owner", _REVISION, True)
+            assert decision.phase == "attention"
+            assert decision.redirect_allowed is False
+            with pytest.raises(SetupSessionConflict):
+                await manager.acknowledge_completion(
+                    prepared.token, _completion_command(prepared.launch_id), _REVISION
+                )
+        finally:
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_completion_unconfirmed_stop_is_not_success(tmp_path: Path):
+    async def exercise():
+        fake = _UnconfirmedThenConfirmedProcess()
+        manager = SetupSessionManager(process_factory=lambda launch: fake, sweep_interval=0)
+        try:
+            prepared = await _connected_completion(manager, tmp_path)
+            await manager.acknowledge_completion(
+                prepared.token, _completion_command(prepared.launch_id), _REVISION
+            )
+            assert (await manager.stop("owner")).confirmed is False
+            decision = manager.completion_decision("owner", _REVISION, True)
+            assert decision.redirect_allowed is False
+            assert decision.phase in {"attention", "cancelled"}
+            assert (await manager.stop("owner")).confirmed is True
+            assert manager.completion_decision("owner", _REVISION, True).redirect_allowed is False
+        finally:
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_completion_verified_exit_waits_for_confirmed_natural_exit(tmp_path: Path):
+    async def exercise():
+        fake = FakeProcess()
+        manager = SetupSessionManager(process_factory=lambda launch: fake, sweep_interval=0)
+        try:
+            prepared = await _connected_completion(manager, tmp_path)
+            manager._completion.exit_capability_verified = True
+            decision = await manager.acknowledge_completion(
+                prepared.token, _completion_command(prepared.launch_id), _REVISION
+            )
+            assert decision.phase == "acknowledged"
+            assert decision.redirect_allowed is False
+            fake.output.put(None)
+            await _until(lambda: manager.snapshot("owner").state == "exited")
+            decision = manager.completion_decision("owner", _REVISION, True)
+            assert decision.phase == "complete"
+            assert decision.redirect_allowed is True
+        finally:
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("verified", [False, True])
+def test_completion_non_zero_exit_after_acknowledgement_is_not_success(tmp_path: Path, verified):
+    async def exercise():
+        fake = _NonZeroExitProcess()
+        manager = SetupSessionManager(process_factory=lambda launch: fake, sweep_interval=0)
+        try:
+            prepared = await _connected_completion(manager, tmp_path)
+            manager._completion.exit_capability_verified = verified
+            await manager.acknowledge_completion(
+                prepared.token, _completion_command(prepared.launch_id), _REVISION
+            )
+            fake.output.put(None)
+            await _until(lambda: manager.snapshot("owner").state == "exited")
+            decision = manager.completion_decision("owner", _REVISION, True)
+            assert decision.phase == "attention"
+            assert decision.redirect_allowed is False
+        finally:
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_completion_cancelled_spawn_cancels_attempt(tmp_path: Path):
+    async def exercise():
+        release = threading.Event()
+        entered: queue.Queue[bool] = queue.Queue()
+        fake = FakeProcess()
+
+        def factory(launch):
+            entered.put(True)
+            release.wait(5)
+            return fake
+
+        manager = SetupSessionManager(process_factory=factory, sweep_interval=0)
+        try:
+            prepared = await manager.prepare_completion(
+                "owner", "copilot", tmp_path, tmp_path / "config.yaml", "http://127.0.0.1:8500"
+            )
+            launch = RuntimeLaunch(("copilot",), tmp_path, {}, "connected")
+            starting = asyncio.create_task(manager.start("owner", "copilot", launch, "fallback"))
+            await asyncio.to_thread(entered.get, True, 2)
+            starting.cancel()
+            release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await starting
+            assert manager.completion_decision("owner", _REVISION, True).phase == "cancelled"
+            with pytest.raises(SetupSessionConflict):
+                await manager.acknowledge_completion(
+                    prepared.token, _completion_command(prepared.launch_id), _REVISION
+                )
+        finally:
+            release.set()
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_completion_external_attempt_uses_explicit_fallback(tmp_path: Path):
+    async def exercise():
+        manager = SetupSessionManager(process_factory=lambda launch: FakeProcess(), sweep_interval=0)
+        try:
+            prepared = await manager.prepare_completion(
+                "owner", "codex", tmp_path, tmp_path / "config.yaml", "http://127.0.0.1:8500"
+            )
+            assert await manager._launch_external("owner", "codex", tmp_path, lambda: "launched") == "launched"
+            assert manager.snapshot("owner") is None
+            assert manager.completion_decision("owner", _REVISION, True).phase == "pending"
+            with pytest.raises(SetupSessionConflict):
+                await manager._launch_external("other", "codex", tmp_path, lambda: "launched")
+            with pytest.raises(SetupSessionConflict):
+                await manager.prepare_completion(
+                    "other", "codex", tmp_path, tmp_path / "config.yaml", "http://127.0.0.1:8500"
+                )
+            manager._completion.exit_capability_verified = True
+            decision = await manager.acknowledge_completion(
+                prepared.token, _completion_command(prepared.launch_id), _REVISION
+            )
+            assert decision.phase == "complete"
+            assert decision.redirect_allowed is True
+        finally:
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_completion_without_preparation_is_pending(tmp_path: Path):
+    async def exercise():
+        manager = SetupSessionManager(process_factory=lambda launch: FakeProcess(), sweep_interval=0)
+        try:
+            decision = manager.completion_decision("owner", _REVISION, True)
+            assert decision.launch_id is None
+            assert decision.phase == "pending"
+            assert decision.redirect_allowed is False
+            with pytest.raises(SetupSessionConflict):
+                manager.require_completion_token("anything")
+        finally:
+            await manager.shutdown()
+
+    asyncio.run(exercise())
 
 
 def test_setup_session_reuses_owner_and_transfers_single_writer(tmp_path: Path):

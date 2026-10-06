@@ -23,8 +23,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hmac
+import secrets
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Literal, TypeVar
 from uuid import uuid4
@@ -38,6 +40,11 @@ from flowgency.jobs.connected_process import (
     start_connected_process,
 )
 from flowgency.jobs.processes import ProcessStopEvidence, RuntimeProcessLifecycle
+from flowgency.web.setup_completion import (
+    SetupCompletionCommand,
+    SetupCompletionDecision,
+    SetupCompletionLaunch,
+)
 
 SetupSessionState = Literal["starting", "running", "exited", "stopped", "failed"]
 
@@ -50,6 +57,7 @@ _SWEEP_INTERVAL_SECONDS = 30.0
 _DEFAULT_REPLAY_LIMIT = 2 * 1024 * 1024
 _DEFAULT_CLIENT_LIMIT = 1 << 18
 _SANITIZED_START_FAILURE = "Setup could not be started; cleanup could not be confirmed."
+_COMPLETION_REJECTED = "Setup completion was rejected."
 
 ProcessFactory = Callable[[RuntimeLaunch], ConnectedProcess]
 _ExternalResult = TypeVar("_ExternalResult")
@@ -69,6 +77,94 @@ class SetupSessionSnapshot:
     fallback_command: str
     exit_code: int | None
     message: str
+
+
+@dataclass(frozen=True)
+class _Acknowledgement:
+    revision: str
+    scheduler_result: str
+    limitations_acknowledged: bool
+
+
+@dataclass(eq=False)
+class _CompletionAttempt:
+    """Launch-bound completion state, separate from the process state."""
+
+    owner: str
+    integration_name: str
+    data_root: Path
+    config_path: Path
+    launch: SetupCompletionLaunch = field(repr=False)
+    created: float
+    session: "_Session | None" = field(default=None, repr=False)
+    acknowledgement: _Acknowledgement | None = None
+    cancelled: bool = False
+    unexpected_failure: bool = False
+    exit_capability_verified: bool = False
+
+    @property
+    def launch_id(self) -> str:
+        return self.launch.launch_id
+
+    @property
+    def acknowledged_revision(self) -> str | None:
+        return None if self.acknowledgement is None else self.acknowledgement.revision
+
+    def selection(self) -> tuple[str, Path, Path]:
+        return self.integration_name, self.data_root, self.config_path
+
+
+def _blocked_decision(attempt: _CompletionAttempt) -> SetupCompletionDecision:
+    if attempt.cancelled:
+        return SetupCompletionDecision(
+            attempt.launch_id, "cancelled", False, "Setup was stopped before it completed."
+        )
+    return SetupCompletionDecision(
+        attempt.launch_id, "attention", False,
+        "Setup ended without reporting completion; review the terminal output.",
+    )
+
+
+def _pending_decision(attempt: _CompletionAttempt) -> SetupCompletionDecision:
+    return SetupCompletionDecision(
+        attempt.launch_id, "pending", False, "Waiting for setup to report completion."
+    )
+
+
+def _exit_is_clean(session: _Session) -> bool:
+    evidence = session.stop_evidence
+    return (
+        session.state == "exited"
+        and session.exit_code == 0
+        and evidence is not None
+        and evidence.confirmed
+    )
+
+
+def _decision_from_confirmed_exit(attempt: _CompletionAttempt) -> SetupCompletionDecision:
+    session = attempt.session
+    assert session is not None
+    if not session.finalized:
+        return SetupCompletionDecision(
+            attempt.launch_id, "acknowledged", False,
+            "Setup reported completion; waiting for the setup process to exit.",
+        )
+    if _exit_is_clean(session):
+        return SetupCompletionDecision(attempt.launch_id, "complete", True, "Setup is complete.")
+    return SetupCompletionDecision(
+        attempt.launch_id, "attention", False,
+        "The setup process did not exit cleanly; review the terminal output.",
+    )
+
+
+def _completed_fallback_decision(attempt: _CompletionAttempt) -> SetupCompletionDecision:
+    session = attempt.session
+    if session is not None and session.finalized and not _exit_is_clean(session):
+        return SetupCompletionDecision(
+            attempt.launch_id, "attention", False,
+            "The setup process did not exit cleanly; review the terminal output.",
+        )
+    return SetupCompletionDecision(attempt.launch_id, "complete", True, "Setup is complete.")
 
 
 class _Subscriber:
@@ -93,12 +189,15 @@ class _Session:
         now: Callable[[], float],
         replay_limit: int,
         client_limit: int,
+        generation: str | None = None,
     ) -> None:
         self.owner = owner
         self.integration_name = integration_name
         self.data_root = data_root
         self.fallback_command = fallback_command
-        self.lifecycle = RuntimeProcessLifecycle(job_id="setup-session", generation=uuid4().hex)
+        self.lifecycle = RuntimeProcessLifecycle(
+            job_id="setup-session", generation=generation or uuid4().hex
+        )
         self.process: ConnectedProcess | None = None
         self.cleanup: _LaunchCleanup | None = None
         self.state: SetupSessionState = "starting"
@@ -159,8 +258,137 @@ class SetupSessionManager:
         self._lifecycle_lock = asyncio.Lock()
         self._state_lock = asyncio.Lock()
         self._session: _Session | None = None
+        self._completion: _CompletionAttempt | None = None
         self._sweeper: asyncio.Task[None] | None = None
         self._closing = False
+
+    # ── Completion ───────────────────────────────────────────────────────
+
+    async def prepare_completion(
+        self,
+        owner: str,
+        integration_name: str,
+        data_root: Path,
+        config_path: Path,
+        origin: str,
+    ) -> SetupCompletionLaunch:
+        async with self._state_lock:
+            if self._closing:
+                raise SetupSessionConflict("Setup is shutting down")
+            attempt = self._completion
+            if attempt is not None and self._holds_slot(attempt):
+                if attempt.owner != owner or attempt.selection() != (
+                    integration_name, data_root, config_path
+                ):
+                    raise SetupSessionConflict("Another setup launch owns the setup session")
+                return attempt.launch
+            session = self._session
+            if session is not None:
+                if session.state == "failed":
+                    raise SetupSessionConflict(
+                        "The previous setup process could not be confirmed stopped"
+                    )
+                if session.state in {"starting", "running"}:
+                    raise SetupSessionConflict(
+                        "Stop the running setup session before preparing a new launch"
+                    )
+            launch = SetupCompletionLaunch(
+                launch_id=uuid4().hex, origin=origin, token=secrets.token_urlsafe(32)
+            )
+            self._completion = _CompletionAttempt(
+                owner, integration_name, data_root, config_path, launch, created=self._now()
+            )
+            return launch
+
+    def require_completion_token(self, token: str) -> str:
+        attempt = self._attempt_for_token(token)
+        return attempt.launch_id
+
+    async def acknowledge_completion(
+        self, token: str, command: SetupCompletionCommand, validated_revision: str
+    ) -> SetupCompletionDecision:
+        async with self._state_lock:
+            attempt = self._attempt_for_token(token)
+            if not hmac.compare_digest(
+                command.launch_id.encode("utf-8"), attempt.launch_id.encode("utf-8")
+            ):
+                raise SetupSessionConflict(_COMPLETION_REJECTED)
+            if command.revision != validated_revision:
+                raise SetupSessionConflict(_COMPLETION_REJECTED)
+            acknowledgement = _Acknowledgement(
+                validated_revision, command.scheduler_result, command.limitations_acknowledged
+            )
+            session = attempt.session
+            live = session is None or not session.finalized
+            if attempt.acknowledgement != acknowledgement:
+                if not live:
+                    raise SetupSessionConflict(_COMPLETION_REJECTED)
+                attempt.acknowledgement = acknowledgement
+            return self._decide(attempt, validated_revision, True)
+
+    def completion_decision(
+        self, owner: str, current_revision: str | None, ready: bool
+    ) -> SetupCompletionDecision:
+        attempt = self._completion
+        if attempt is None or attempt.owner != owner:
+            return SetupCompletionDecision(
+                None, "pending", False, "Waiting for setup to report completion."
+            )
+        return self._decide(attempt, current_revision, ready)
+
+    def _decide(
+        self, attempt: _CompletionAttempt, current_revision: str | None, ready: bool
+    ) -> SetupCompletionDecision:
+        if attempt.cancelled or attempt.unexpected_failure:
+            return _blocked_decision(attempt)
+        if not ready or current_revision != attempt.acknowledged_revision:
+            return _pending_decision(attempt)
+        if attempt.acknowledgement is None:
+            return _pending_decision(attempt)
+        if attempt.session is not None and attempt.exit_capability_verified:
+            return _decision_from_confirmed_exit(attempt)
+        return _completed_fallback_decision(attempt)
+
+    def _attempt_for_token(self, token: str) -> _CompletionAttempt:
+        attempt = self._completion
+        presented = token.encode("utf-8") if isinstance(token, str) else b""
+        expected = attempt.launch.token.encode("utf-8") if attempt is not None else b""
+        matches = hmac.compare_digest(presented, expected)
+        if attempt is None or not matches or attempt.cancelled or attempt.unexpected_failure:
+            raise SetupSessionConflict(_COMPLETION_REJECTED)
+        return attempt
+
+    def _holds_slot(self, attempt: _CompletionAttempt) -> bool:
+        if attempt.cancelled or attempt.unexpected_failure:
+            return False
+        if attempt.session is not None:
+            return not attempt.session.finalized
+        if attempt.acknowledgement is not None:
+            return False
+        # External exit is never observed, so an abandoned launch must expire.
+        return self._now() - attempt.created <= self._max_lifetime
+
+    def _claimable_attempt(
+        self, owner: str, integration_name: str, data_root: Path
+    ) -> _CompletionAttempt | None:
+        attempt = self._completion
+        if attempt is None or not self._holds_slot(attempt):
+            return None
+        if (
+            attempt.owner != owner
+            or attempt.integration_name != integration_name
+            or attempt.data_root != data_root
+        ):
+            raise SetupSessionConflict("Another setup launch owns the setup session")
+        return attempt if attempt.session is None else None
+
+    def _end_attempt(self, session: _Session, *, failed: bool) -> None:
+        attempt = self._completion
+        if attempt is not None and attempt.session is session:
+            if failed:
+                attempt.unexpected_failure = True
+            else:
+                attempt.cancelled = True
 
     # ── Start ────────────────────────────────────────────────────────────
 
@@ -190,16 +418,20 @@ class SetupSessionManager:
                         "The previous setup process could not be confirmed stopped"
                     )
                 # exited or stopped sessions are replaceable.
-            session = _Session(
-                owner,
-                integration_name,
-                launch.cwd,
-                fallback_command,
-                now=self._now,
-                replay_limit=self._replay_limit,
-                client_limit=self._client_limit,
-            )
             async with self._state_lock:
+                attempt = self._claimable_attempt(owner, integration_name, launch.cwd)
+                session = _Session(
+                    owner,
+                    integration_name,
+                    launch.cwd,
+                    fallback_command,
+                    now=self._now,
+                    replay_limit=self._replay_limit,
+                    client_limit=self._client_limit,
+                    generation=attempt.launch_id if attempt is not None else None,
+                )
+                if attempt is not None:
+                    attempt.session = session
                 self._session = session
             spawn_task: asyncio.Task[ConnectedProcess] = asyncio.ensure_future(
                 asyncio.to_thread(self._factory, launch)
@@ -232,6 +464,7 @@ class SetupSessionManager:
                 raise SetupSessionConflict("Setup is shutting down")
             async with self._state_lock:
                 existing = self._session
+                self._claimable_attempt(owner, integration_name, data_root)
             if existing is not None:
                 if existing.state == "failed":
                     raise SetupSessionConflict("The previous setup process could not be confirmed stopped")
@@ -251,6 +484,9 @@ class SetupSessionManager:
                     )
                     async with self._state_lock:
                         self._session = session
+                        attempt = self._claimable_attempt(owner, integration_name, data_root)
+                        if attempt is not None:
+                            attempt.session = session
                     await self._fail_spawn(session, failure)
                     if failure is error:
                         raise
@@ -287,6 +523,7 @@ class SetupSessionManager:
             # The spawn itself was cancelled; nothing was created to clean up.
             async with self._state_lock:
                 if self._session is session:
+                    self._end_attempt(session, failed=False)
                     self._close_subscribers(session)
                     self._session = None
             return
@@ -302,9 +539,11 @@ class SetupSessionManager:
             if self._session is not session:
                 return
             if evidence.confirmed:
+                self._end_attempt(session, failed=False)
                 self._close_subscribers(session)
                 self._session = None
             else:
+                self._end_attempt(session, failed=True)
                 # Keep the returned handle and the evidence so a later Stop or
                 # shutdown can retry cleanup; block the slot until the tree is
                 # proven gone rather than dropping an unconfirmed process.
@@ -321,8 +560,10 @@ class SetupSessionManager:
                 return
             if isinstance(error, ConnectedLaunchError) and error.cleanup_confirmed:
                 # A confirmed-clean failed start frees the slot for an external fallback.
+                self._end_attempt(session, failed=False)
                 self._session = None
             else:
+                self._end_attempt(session, failed=True)
                 # Only a proven-clean ConnectedLaunchError may free the slot; any
                 # other error (including an unconfirmed ConnectedLaunchError) is
                 # no evidence the process tree was cleaned up, so fail closed.
@@ -494,8 +735,15 @@ class SetupSessionManager:
                     session.exit_code = session.process.exit_code()
             if evidence.confirmed:
                 session.state = "exited" if natural else "stopped"
+                attempt = self._completion
+                if attempt is not None and attempt.session is session:
+                    if not natural:
+                        attempt.cancelled = True
+                    elif attempt.acknowledgement is None:
+                        attempt.unexpected_failure = True
             else:
                 session.state = "failed"
+                self._end_attempt(session, failed=True)
                 if not session.message:
                     session.message = evidence.reason
             self._close_subscribers(session)
