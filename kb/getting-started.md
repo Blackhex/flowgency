@@ -17,9 +17,21 @@ Start Flowgency, choose the Flowgency data root and supported AI integration, co
 
 Open setup from a browser on the same computer as Flowgency. On supported
 POSIX hosts, GitHub Copilot setup runs in the page's terminal; refresh or
-reopen the page to reconnect. When the configuration is ready, Flowgency opens
-the dashboard while Copilot may continue running. Use the dashboard's Setup
-session link to return or Stop.
+reopen the page to reconnect. A ready configuration alone does not finish
+setup: Flowgency opens the dashboard only after the guided session explicitly
+reports completion, meaning every question is answered and the summary is
+delivered. Unrelated process exit, silence, terminal text, Stop, or a crash
+never count as completion. Choosing not to install the scheduler still
+completes setup. A failed or unknown scheduler result completes only after the
+limitation is acknowledged. Enabling dispatch in the saved configuration is
+separate from an observed scheduler installation, and setup reports the two
+independently.
+
+The installed Copilot CLI offers no verified way to exit automatically, so the
+terminal may stay open after setup completes. This is the explicit fallback and
+the current measured behavior. Use the dashboard's View terminal link to open
+the terminal in an inspection view that never redirects, or Stop to end the
+session.
 The setup CLI has the server user's access to files and tools; configured
 agent sandbox permissions do not apply before the first team exists. On
 native Windows, Copilot setup runs in this browser's terminal when the
