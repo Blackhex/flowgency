@@ -185,6 +185,7 @@ export interface LiveApplyResult {
   accepted: boolean;
   deferred: boolean;
   incompatible?: boolean;
+  unavailable?: boolean;
 }
 
 export interface LiveBindingShape {
@@ -212,8 +213,10 @@ export interface LiveAdapterShape {
   headers?: () => Record<string, string>;
   capture?: () => unknown;
   isCurrent?: (captured: unknown) => boolean;
+  validate?: (data: unknown) => boolean | 'incompatible';
   apply: (snapshot: LiveSnapshotShape) => LiveApplyResult;
   status?: (value: LiveStatusKind) => void;
+  settled?: () => void;
   flushDeferred?: () => LiveApplyResult;
   invalidate?: () => void;
   dispose?: () => void;

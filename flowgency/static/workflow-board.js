@@ -1,4 +1,8 @@
 (function () {
+  function isPlainObject(value) {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+  }
+
   class TicketActionError extends Error {
     constructor(payload) {
       super(payload?.code || 'ticket-action-error');
@@ -17,13 +21,14 @@
       this.lastActionError = null;
       this.editingOverview = false;
       this.searchTimer = 0;
-      this.pollTimer = 0;
-      this.etags = { board: null, detail: null };
-      this.requestCounters = { page: 0, refresh: 0, action: 0 };
-      this.requestControllers = { page: null, refresh: null };
+      this.requestCounters = { page: 0, action: 0 };
+      this.requestControllers = { page: null };
       this.pendingAction = null;
       this.actionChain = Promise.resolve();
       this.assigneeInteraction = null;
+      this.liveHandle = null;
+      this.shellView = null;
+      this.selectedTicketMissing = false;
       this.cacheElements();
       this.createView();
       this.bindEvents();
@@ -32,7 +37,7 @@
       this.selectTab(this.selectedTab);
       this.renderAssignment();
       this.applyEditingState(true);
-      this.scheduleRefresh();
+      this.registerLiveRefresh();
     }
 
     cacheElements() {
@@ -102,9 +107,6 @@
       });
       window.addEventListener('popstate', () => {
         void this.loadPage(window.location.href, 'replace', true);
-      });
-      document.addEventListener('visibilitychange', () => {
-        void this.handleVisibilityChange();
       });
     }
 
@@ -385,7 +387,7 @@
       } else if (historyMode === 'replace') {
         window.history.replaceState({}, '', nextUrl);
       }
-      this.scheduleRefresh();
+      void this.liveHandle.invalidate();
     }
 
     async loadPage(url, historyMode = 'push', preserveErrors = true) {
@@ -401,8 +403,6 @@
           return;
         }
         this.applyPageHtml(html, response.url, pageState, historyMode);
-        this.etags.board = null;
-        this.etags.detail = null;
         if (!preserveErrors) {
           this.clearActionError();
         }
@@ -488,84 +488,91 @@
       await this.loadPage(this.currentBoardUrl(null).toString(), 'push', true);
     }
 
-    async refreshBoard() {
-      if (document.hidden) {
-        return;
+    // The shared coordinator owns the timer, visibility pause, ETag, cancellation and non-overlap;
+    // this controller keeps navigation/action generations and every reconciliation rule.
+    registerLiveRefresh() {
+      const shell = this.initial.shell;
+      if (shell && window.FlowgencyLive.LiveRegionView) {
+        this.shellView = new window.FlowgencyLive.LiveRegionView(
+          document.body,
+          { binding: shell.binding, structure: shell.structure },
+          { onDrop: () => { void this.liveHandle?.invalidate(); } },
+        );
       }
-      const pageSeq = this.requestCounters.page;
-      const actionSeq = this.requestCounters.action;
-      const snapshotUrl = this.currentSnapshotUrl().toString();
-      const request = this.beginAbortableRequest('refresh');
-      try {
-        const headers = { Accept: 'application/json' };
-        if (this.etags.board) {
-          headers['If-None-Match'] = this.etags.board;
-        }
-        const response = await fetch(snapshotUrl, {
-          headers,
-          signal: request.controller.signal,
-        });
-        const payload = response.status === 304 || !response.ok ? null : await response.json();
-        if (!this.isCurrentRefreshRequest(request, pageSeq, actionSeq, snapshotUrl)) {
-          return;
-        }
-        if (response.status === 304) {
+      this.liveHandle = window.FlowgencyLive.register({
+        key: 'workflow',
+        interval: 2000,
+        binding: () => this.initial.shell?.binding || { page: 'workflow-board' },
+        url: () => this.currentSnapshotUrl().toString(),
+        capture: () => ({
+          page: this.requestCounters.page,
+          action: this.requestCounters.action,
+          url: this.currentSnapshotUrl().toString(),
+        }),
+        isCurrent: (captured) => !this.pendingAction
+          && captured.page === this.requestCounters.page
+          && captured.action === this.requestCounters.action
+          && captured.url === this.currentSnapshotUrl().toString(),
+        validate: (payload) => (isPlainObject(payload) ? true : 'incompatible'),
+        apply: (payload) => this.applyLiveSnapshot(payload),
+        status: (kind) => this.applyLiveStatus(kind),
+        settled: () => {
+          if (this.view) {
+            this.view.flushDeferred();
+          }
+        },
+        invalidate: () => {
+          if (this.shellView) {
+            this.shellView.invalidate(this.initial.shell.binding);
+          }
+        },
+      });
+    }
+
+    // Maps the board outcome to the coordinator's apply result; the shared navigation regions
+    // ride the same snapshot and are applied only after the board was accepted.
+    applyLiveSnapshot(payload) {
+      const board = this.applyBoardSnapshot(payload);
+      this.selectedTicketMissing = board.unavailable;
+      if (!board.applied) {
+        return { accepted: false, deferred: false, incompatible: true };
+      }
+      let shell = { accepted: true, deferred: false };
+      if (this.shellView && payload.shell) {
+        shell = this.shellView.apply(payload.shell);
+      }
+      if (shell.incompatible) {
+        return { accepted: false, deferred: false, incompatible: true };
+      }
+      if (!shell.accepted) {
+        return { accepted: false, deferred: false };
+      }
+      if (board.unavailable) {
+        return { accepted: false, deferred: false, unavailable: true };
+      }
+      return { accepted: true, deferred: shell.deferred };
+    }
+
+    // The coordinator's status kinds drive the existing refresh-status element only through
+    // this table; an unknown kind leaves the current status untouched.
+    applyLiveStatus(kind) {
+      switch (kind) {
+        case 'healthy':
+          this.selectedTicketMissing = false;
           this.clearRefreshStatus();
-          return;
-        }
-        if (!response.ok) {
+          break;
+        case 'stale':
           this.setRefreshStatus('failed', 'Unable to refresh');
-          return;
-        }
-        const result = this.applyBoardSnapshot(payload);
-        if (result.applied && !result.unavailable) {
-          this.etags.board = response.headers.get('etag');
-        } else {
-          this.etags.board = null;
-        }
-      } catch (error) {
-        if (error?.name !== 'AbortError' && this.isCurrentRefreshRequest(request, pageSeq, actionSeq, snapshotUrl)) {
-          this.setRefreshStatus('failed', 'Unable to refresh');
-        }
-      } finally {
-        if (this.isLatestRequest('refresh', request.seq) && !document.hidden) {
-          this.scheduleRefresh();
-        }
+          break;
+        case 'incompatible':
+          this.setRefreshStatus('required', 'Refresh required');
+          break;
+        case 'unavailable':
+          this.setRefreshStatus('unavailable', this.selectedTicketMissing ? 'Ticket unavailable' : 'Workflow unavailable');
+          break;
+        default:
+          break;
       }
-    }
-
-    isCurrentRefreshRequest(request, pageSeq, actionSeq, snapshotUrl) {
-      return this.isLatestRequest('refresh', request.seq)
-        && !request.controller.signal.aborted
-        && !document.hidden
-        && this.requestCounters.page === pageSeq
-        && this.requestCounters.action === actionSeq
-        && !this.pendingAction
-        && this.currentSnapshotUrl().toString() === snapshotUrl;
-    }
-
-    scheduleRefresh() {
-      if (this.view) {
-        this.view.flushDeferred();
-      }
-      clearTimeout(this.pollTimer);
-      if (document.hidden) {
-        return;
-      }
-      this.pollTimer = window.setTimeout(() => {
-        void this.refreshBoard();
-      }, 2000);
-    }
-
-    async handleVisibilityChange() {
-      if (document.hidden) {
-        clearTimeout(this.pollTimer);
-        if (this.requestControllers.refresh) {
-          this.requestControllers.refresh.abort();
-        }
-        return;
-      }
-      await this.refreshBoard();
     }
 
     async handleClick(event) {

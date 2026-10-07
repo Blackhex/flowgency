@@ -14,6 +14,7 @@ from flowgency.web.dependencies import FlowgencyServices, get_services
 from flowgency.web.ticket_snapshots import board_snapshot_payload
 from flowgency.web.team_navigation import build_team_context
 from flowgency.web.workflow_context import require_team_and_workflow, require_ticket_services
+from flowgency.web.workflow_shell import workflow_shell_initial, workflow_shell_snapshot
 
 
 router = APIRouter()
@@ -68,6 +69,7 @@ def _workflow_page_context(request: Request, services: FlowgencyServices, team_i
             },
             "workflow_initial": {
                 "board": board_snapshot_payload(request, board, agent_options),
+                "shell": workflow_shell_initial(team_id, workflow_id),
                 "urls": {
                     "board": f"/{team_id}/workflows/{workflow_id}",
                     "snapshot": f"/{team_id}/workflows/{workflow_id}/snapshot",
@@ -148,4 +150,7 @@ async def workflow_board_snapshot(
         ticket_jobs=services.ticket_jobs,
     )
     snapshot = services.config_store.load()
-    return _json_with_etag(request, board_snapshot_payload(request, view, _agent_options(snapshot, team)))
+    payload = board_snapshot_payload(request, view, _agent_options(snapshot, team))
+    shell_context = await run_in_threadpool(_team_context, request, snapshot, team)
+    payload["shell"] = workflow_shell_snapshot(_templates(request), shell_context, team, workflow)
+    return _json_with_etag(request, payload)

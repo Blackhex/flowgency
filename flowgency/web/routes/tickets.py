@@ -18,6 +18,7 @@ from flowgency.web.dependencies import FlowgencyServices, get_services
 from flowgency.web.ticket_snapshots import board_snapshot_payload, ticket_snapshot_payload
 from flowgency.web.team_navigation import build_team_context
 from flowgency.web.workflow_context import require_team_and_workflow, require_ticket_jobs, require_ticket_services, user_context
+from flowgency.web.workflow_shell import workflow_shell_initial
 
 
 router = APIRouter()
@@ -432,6 +433,7 @@ async def _render_ticket_page(
             },
             "workflow_initial": {
                 "board": board_snapshot_payload(request, board, agent_options),
+                "shell": workflow_shell_initial(team, workflow),
                 "urls": {
                     "board": f"/{team}/workflows/{workflow}",
                     "snapshot": f"/{team}/workflows/{workflow}/snapshot",
@@ -493,6 +495,7 @@ async def _render_board_page(
             "new_ticket_operation_id": _form_operation_id("ticket-create"),
             "workflow_initial": {
                 "board": board_snapshot_payload(request, board, agent_options),
+                "shell": workflow_shell_initial(team, workflow),
                 "urls": {
                     "board": f"/{team}/workflows/{workflow}",
                     "snapshot": f"/{team}/workflows/{workflow}/snapshot",
@@ -578,6 +581,7 @@ async def ticket_detail_page(
             },
             "workflow_initial": {
                 "board": board_snapshot_payload(request, board, agent_options),
+                "shell": workflow_shell_initial(team, workflow),
                 "urls": {
                     "board": f"/{team}/workflows/{workflow}",
                     "snapshot": f"/{team}/workflows/{workflow}/snapshot",

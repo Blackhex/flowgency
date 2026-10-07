@@ -363,3 +363,91 @@ def test_run_route_accepts_read_only_assignee_when_live_channel_supported(workfl
 
     assert response.status_code == 303
     assert len(env.job_store.paths(env.team_id)) == 1
+
+# ── Shared navigation shell riding the workflow snapshot ──────────────────────────────────
+
+_SHELL_REGION_KEYS = [
+    "navigation-teams",
+    "navigation-primary",
+    "navigation-workflows",
+    "navigation-workspace",
+]
+
+
+def _squash(markup: str) -> str:
+    return re.sub(r">\s+<", "><", re.sub(r"\s+", " ", markup)).strip()
+
+
+def test_board_snapshot_carries_the_shared_navigation_shell(workflow_web_env):
+    env = workflow_web_env
+
+    response = env.client.get(f"{env.base_path}/snapshot")
+
+    assert response.status_code == 200
+    shell = response.json()["shell"]
+    assert shell["format"] == 1
+    assert shell["binding"] == {
+        "page": "workflow-board",
+        "team": env.team_id,
+        "entity": env.workflow_id,
+        "tab": None,
+        "query": {},
+    }
+    assert shell["structure"] == "workflow-shell:1"
+    assert [region["key"] for region in shell["regions"]] == _SHELL_REGION_KEYS
+    workflows = next(region["html"] for region in shell["regions"] if region["key"] == "navigation-workflows")
+    row = workflows.split(f'data-live-key="workflow:{env.workflow_id}"')[1].split(">")[0]
+    assert "active" in row
+
+
+def test_board_snapshot_shell_matches_the_initial_page_navigation(workflow_web_env):
+    env = workflow_web_env
+    page = _squash(env.client.get(env.base_path).text)
+
+    shell = env.client.get(f"{env.base_path}/snapshot").json()["shell"]
+
+    for region in shell["regions"]:
+        assert _squash(region["html"]) in page, region["key"]
+
+
+def test_board_snapshot_shell_does_not_change_the_board_projection(workflow_web_env):
+    env = workflow_web_env
+    page_payload = workflow_initial_payload(env.client.get(env.base_path).text)["board"]
+
+    snapshot_payload = env.client.get(f"{env.base_path}/snapshot").json()
+    shell = snapshot_payload.pop("shell")
+
+    assert shell["regions"]
+    assert snapshot_payload == page_payload
+
+
+def test_workflow_page_embeds_the_shell_identity_without_regions(workflow_web_env):
+    env = workflow_web_env
+
+    initial = workflow_initial_payload(env.client.get(env.base_path).text)
+
+    assert initial["shell"] == {
+        "format": 1,
+        "binding": {
+            "page": "workflow-board",
+            "team": env.team_id,
+            "entity": env.workflow_id,
+            "tab": None,
+            "query": {},
+        },
+        "structure": "workflow-shell:1",
+    }
+    assert "shell" not in initial["board"]
+
+
+def test_workflow_snapshot_shell_follows_the_navigation_membership(workflow_web_env):
+    env = workflow_web_env
+    first = env.client.get(f"{env.base_path}/snapshot")
+    env.create(title="Counted in the navigation")
+
+    second = env.client.get(f"{env.base_path}/snapshot")
+
+    first_nav = next(r["html"] for r in first.json()["shell"]["regions"] if r["key"] == "navigation-workflows")
+    second_nav = next(r["html"] for r in second.json()["shell"]["regions"] if r["key"] == "navigation-workflows")
+    assert first_nav != second_nav
+    assert first.headers["etag"] != second.headers["etag"]

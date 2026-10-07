@@ -14,10 +14,9 @@ type DetailSnapshot = {
   fields: Array<{ id: string; value: unknown; is_output: boolean }>;
 };
 
-type PollController = {
-  pollTimer: number;
-  refreshBoard: () => Promise<void>;
-};
+type PollProbe = typeof window & { __pollTimer?: number };
+
+const WORKFLOW_HANDLE_KEY = 'workflow';
 
 const runtimeConfigPath = path.join(__dirname, '.runtime', 'current', 'config.yaml');
 
@@ -47,25 +46,37 @@ async function waitForWorkflowController(page: Parameters<typeof test.beforeEach
   await page.waitForFunction(() => Boolean((window as typeof window & { workflowBoardController?: unknown }).workflowBoardController));
 }
 
-async function stopPollTimer(page: Page): Promise<void> {
-  await waitForWorkflowController(page);
-  await page.evaluate(() => {
-    const controller = (window as typeof window & {
-      workflowBoardController: PollController;
-    }).workflowBoardController;
-    clearTimeout(controller.pollTimer);
+// The coordinator owns the cadence, so the probe records its latest 2000 ms timer for tests to clear.
+async function installPollTimerProbe(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const nativeSetTimeout = window.setTimeout.bind(window);
+    window.setTimeout = ((handler: TimerHandler, delay?: number, ...args: unknown[]) => {
+      const id = nativeSetTimeout(handler, delay, ...args);
+      if (delay === 2000) (window as PollProbe).__pollTimer = id;
+      return id;
+    }) as typeof window.setTimeout;
   });
 }
 
+async function stopPollTimer(page: Page): Promise<void> {
+  await waitForWorkflowController(page);
+  await page.evaluate(() => clearTimeout((window as PollProbe).__pollTimer));
+}
+
 async function forcePoll(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    const controller = (window as typeof window & {
-      workflowBoardController: PollController;
-    }).workflowBoardController;
-    clearTimeout(controller.pollTimer);
-    await controller.refreshBoard();
-    clearTimeout(controller.pollTimer);
-  });
+  await page.evaluate(async (key) => {
+    clearTimeout((window as PollProbe).__pollTimer);
+    await window.FlowgencyLive.handles.get(key)!.refresh();
+    clearTimeout((window as PollProbe).__pollTimer);
+  }, WORKFLOW_HANDLE_KEY);
+}
+
+async function workflowHandleEtag(page: Page): Promise<string | null> {
+  return page.evaluate((key) => window.FlowgencyLive.handles.get(key)!.etag, WORKFLOW_HANDLE_KEY);
+}
+
+async function startPoll(page: Page): Promise<void> {
+  await page.evaluate((key) => void window.FlowgencyLive.handles.get(key)!.refresh(), WORKFLOW_HANDLE_KEY);
 }
 
 async function installHeldPollBody(page: Page): Promise<void> {
@@ -83,12 +94,16 @@ async function installHeldPollBody(page: Page): Promise<void> {
       const response = await originalFetch(input, init);
       if (!heldOnce && String(input).includes('/workflows/delivery/snapshot') && response.status === 200) {
         heldOnce = true;
-        const originalJson = response.json.bind(response);
-        response.json = async () => {
-          probeWindow.pollBodyHeld = true;
-          await held;
-          return originalJson();
-        };
+        // The shared transport reads the body as text; hold both readers.
+        const readers = response as unknown as Record<'json' | 'text', () => Promise<unknown>>;
+        for (const reader of ['json', 'text'] as const) {
+          const original = readers[reader].bind(response);
+          readers[reader] = async () => {
+            probeWindow.pollBodyHeld = true;
+            await held;
+            return original();
+          };
+        }
       }
       return response;
     };
@@ -98,6 +113,7 @@ async function installHeldPollBody(page: Page): Promise<void> {
 test.beforeEach(async ({ page, request }, testInfo) => {
   await resetUiRuntime(request);
   await installBasePageSetup(page, testInfo.project.name.endsWith('dark') ? 'dark' : 'light');
+  await installPollTimerProbe(page);
 });
 
 test.afterEach(async ({ page, request }) => {
@@ -213,6 +229,7 @@ test('focused assignment uses its original version and exposes a remote conflict
   await page.getByLabel('Acceptance criteria', { exact: true }).fill('Keep my local draft');
   const original = await detailSnapshot(request);
   await page.locator('#ticket-assignee').focus();
+  const heldAssignee = await page.locator('#ticket-assignee').elementHandle();
   const remote = await request.post('/newsletter/workflows/delivery/tickets/fixture-review/assignee', {
     headers: { Accept: 'application/json' },
     form: { payload: JSON.stringify({
@@ -223,6 +240,7 @@ test('focused assignment uses its original version and exposes a remote conflict
   });
   expect(remote.ok()).toBeTruthy();
   await forcePoll(page);
+  expect(await heldAssignee!.evaluate((node) => node.isConnected && node === document.activeElement)).toBe(true);
   await expect(page.locator('#ticket-assignee')).toHaveValue(original.ticket.assignee || '');
   const posted = page.waitForRequest((requestEvent) => requestEvent.method() === 'POST' && requestEvent.url().endsWith('/fixture-review/assignee'));
   const conflicted = page.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/fixture-review/assignee'));
@@ -904,29 +922,29 @@ test('incompatible snapshot requires explicit refresh without partial applicatio
   await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
   await stopPollTimer(page);
   htmlRequests.length = 0;
-  const previousState = await page.evaluate(() => {
+  const previousState = await page.evaluate((key) => {
     const controller = (window as typeof window & {
-      workflowBoardController: { board: unknown; ticket: { ticket: { version: unknown } }; etags: { board: string | null } };
+      workflowBoardController: { board: unknown; ticket: { ticket: { version: unknown } } };
       __task4BoardBefore?: unknown;
     }).workflowBoardController;
     (window as typeof window & { __task4BoardBefore?: unknown }).__task4BoardBefore = controller.board;
-    return { version: controller.ticket.ticket.version, etag: controller.etags.board };
-  });
+    return { version: controller.ticket.ticket.version, etag: window.FlowgencyLive.handles.get(key)!.etag };
+  }, WORKFLOW_HANDLE_KEY);
 
   await forcePoll(page);
   await page.getByRole('button', { name: 'Run', exact: true }).focus();
 
-  const currentState = await page.evaluate(() => {
+  const currentState = await page.evaluate((key) => {
     const controller = (window as typeof window & {
-      workflowBoardController: { board: unknown; ticket: { ticket: { version: unknown } }; etags: { board: string | null } };
+      workflowBoardController: { board: unknown; ticket: { ticket: { version: unknown } } };
       __task4BoardBefore?: unknown;
     }).workflowBoardController;
     return {
       sameBoard: controller.board === (window as typeof window & { __task4BoardBefore?: unknown }).__task4BoardBefore,
       version: controller.ticket.ticket.version,
-      etag: controller.etags.board,
+      etag: window.FlowgencyLive.handles.get(key)!.etag,
     };
-  });
+  }, WORKFLOW_HANDLE_KEY);
   expect(currentState.sameBoard).toBe(true);
   expect(currentState.version).toEqual(previousState.version);
   expect(currentState.etag).toBeNull();
@@ -1051,7 +1069,7 @@ test('poll body parsed after an action cannot roll back its accepted reply', asy
     });
   }, { times: 1 });
 
-  await page.evaluate(() => void (window as typeof window & { workflowBoardController: { refreshBoard: () => Promise<void> } }).workflowBoardController.refreshBoard());
+  await startPoll(page);
   await page.waitForFunction(() => Boolean((window as typeof window & { pollBodyHeld?: boolean }).pollBodyHeld));
   const assignmentResponse = page.waitForResponse((eventResponse) => eventResponse.url().includes('/tickets/fixture-review/assignee') && eventResponse.request().method() === 'POST');
   await page.getByLabel('Assigned agent', { exact: true }).selectOption('builder');
@@ -1102,7 +1120,7 @@ test('pending mutation completion resumes the next board snapshot application', 
   const heldSnapshotResponse = page.waitForResponse((eventResponse) => eventResponse.url().includes('/newsletter/workflows/delivery/snapshot') && eventResponse.request().method() === 'GET');
   await page.getByLabel('Assigned agent', { exact: true }).selectOption('builder');
   await page.waitForFunction(() => Boolean((window as typeof window & { __assignmentPending?: boolean }).__assignmentPending));
-  await page.evaluate(() => void (window as typeof window & { workflowBoardController: { refreshBoard: () => Promise<void> } }).workflowBoardController.refreshBoard());
+  await startPoll(page);
   expect((await heldSnapshotResponse).status()).toBe(200);
   await expect(page.getByRole('heading', { name: 'Delivery while mutation pending' })).toHaveCount(0);
   const resumedSnapshotResponse = page.waitForResponse((eventResponse) => eventResponse.url().includes('/newsletter/workflows/delivery/snapshot') && eventResponse.request().method() === 'GET');
@@ -1154,18 +1172,14 @@ test('hidden document rejects a snapshot whose body parsing finishes late', asyn
     });
   }, { times: 1 });
 
-  await page.evaluate(() => void (window as typeof window & { workflowBoardController: { refreshBoard: () => Promise<void> } }).workflowBoardController.refreshBoard());
+  await startPoll(page);
   await page.waitForFunction(() => Boolean((window as typeof window & { pollBodyHeld?: boolean }).pollBodyHeld));
   await page.evaluate(() => (window as typeof window & { __setTestHidden: (value: boolean) => void }).__setTestHidden(true));
   await page.evaluate(() => (window as typeof window & { releasePollBody?: () => void }).releasePollBody?.());
 
   await expect(page.getByRole('heading', { name: 'Hidden late body must not apply' })).toHaveCount(0);
   await expect(page.locator('#ticket-description')).not.toHaveValue('Hidden late body stale description');
-  const controllerState = await page.evaluate(() => {
-    const controller = (window as typeof window & { workflowBoardController: { etags: { board: string | null } } }).workflowBoardController;
-    return { etag: controller.etags.board };
-  });
-  expect(controllerState.etag).not.toBe('W/"task4-late-hidden"');
+  expect(await workflowHandleEtag(page)).not.toBe('W/"task4-late-hidden"');
 });
 
 test('polling keeps the assignee node and never fetches page html', async ({ page, request }) => {
@@ -1363,17 +1377,17 @@ test('polling rejects invalid scoped refs before adopting model or DOM changes',
     const card = await page.locator('[data-ticket-id="fixture-review"]').elementHandle();
     const inspector = await page.getByLabel('Ticket details').elementHandle();
     const input = await page.locator('#field-acceptance-criteria').elementHandle();
-    const controllerBefore = await page.evaluate(() => {
+    const controllerBefore = await page.evaluate((key) => {
       const controller = (window as typeof window & {
-        workflowBoardController: { board: unknown; ticket: { ticket: { version: unknown } }; etags: { board: string | null } };
+        workflowBoardController: { board: unknown; ticket: { ticket: { version: unknown } } };
         __task2BoardBefore?: unknown;
       }).workflowBoardController;
       (window as typeof window & { __task2BoardBefore?: unknown }).__task2BoardBefore = controller.board;
       return {
         version: controller.ticket.ticket.version,
-        etag: controller.etags.board,
+        etag: window.FlowgencyLive.handles.get(key)!.etag,
       };
-    });
+    }, WORKFLOW_HANDLE_KEY);
     expect(card).not.toBeNull();
     expect(inspector).not.toBeNull();
     expect(input).not.toBeNull();
@@ -1391,17 +1405,17 @@ test('polling rejects invalid scoped refs before adopting model or DOM changes',
 
     await forcePoll(page);
 
-    const controllerAfter = await page.evaluate(() => {
+    const controllerAfter = await page.evaluate((key) => {
       const controller = (window as typeof window & {
-        workflowBoardController: { board: unknown; ticket: { ticket: { version: unknown } }; etags: { board: string | null } };
+        workflowBoardController: { board: unknown; ticket: { ticket: { version: unknown } } };
         __task2BoardBefore?: unknown;
       }).workflowBoardController;
       return {
         sameBoard: controller.board === (window as typeof window & { __task2BoardBefore?: unknown }).__task2BoardBefore,
         version: controller.ticket.ticket.version,
-        etag: controller.etags.board,
+        etag: window.FlowgencyLive.handles.get(key)!.etag,
       };
-    });
+    }, WORKFLOW_HANDLE_KEY);
     expect(controllerAfter.sameBoard).toBe(true);
     expect(controllerAfter.version).toEqual(controllerBefore.version);
     expect(controllerAfter.etag).not.toBe(`W/"invalid-ref-${label.replaceAll(' ', '-')}"`);
@@ -1441,52 +1455,42 @@ test('hidden pages pause polling and abort an in-flight refresh without extra sn
     };
   });
   await page.goto('/newsletter/workflows/delivery/tickets/fixture-review');
-  await waitForWorkflowController(page);
-  await page.evaluate(() => clearTimeout((window as typeof window & { workflowBoardController: { pollTimer: number } }).workflowBoardController.pollTimer));
+  await stopPollTimer(page);
 
-  const paused = await page.evaluate(async () => {
-    const win = window as typeof window & {
-      __setTestHidden: (value: boolean) => void;
-      workflowBoardController: {
-        pollTimer: number;
-        requestCounters: { refresh: number };
-        requestControllers: { refresh: AbortController | null };
-        refreshBoard: () => Promise<void>;
-        scheduleRefresh: () => void;
-      };
-    };
-    const controller = win.workflowBoardController;
+  const paused = await page.evaluate(async (key) => {
+    const win = window as typeof window & { __setTestHidden: (value: boolean) => void };
+    const handle = window.FlowgencyLive.handles.get(key)!;
     let releaseSnapshot: (() => void) | null = null;
     const held = new Promise<void>((resolve) => {
       releaseSnapshot = resolve;
     });
     const originalFetch = window.fetch.bind(window);
     let snapshotRequests = 0;
+    let firstSignal: AbortSignal | null | undefined;
     window.fetch = async (input, init) => {
       const url = String(input);
       if (url.includes('/newsletter/workflows/delivery/snapshot')) {
         snapshotRequests += 1;
         if (snapshotRequests === 1) {
+          firstSignal = init?.signal;
           await held;
         }
       }
       return originalFetch(input, init);
     };
-    void controller.refreshBoard();
+    void handle.refresh();
     await Promise.resolve();
     win.__setTestHidden(true);
-    const aborted = controller.requestControllers.refresh?.signal.aborted ?? false;
-    const beforeHiddenSchedule = controller.requestCounters.refresh;
-    controller.scheduleRefresh();
-    const afterHiddenSchedule = controller.requestCounters.refresh;
+    const aborted = firstSignal?.aborted ?? false;
+    const hiddenRead = await handle.refresh();
     releaseSnapshot?.();
     window.fetch = originalFetch;
-    return { aborted, beforeHiddenSchedule, afterHiddenSchedule, snapshotRequests };
-  });
+    return { aborted, hiddenRead, snapshotRequests };
+  }, WORKFLOW_HANDLE_KEY);
 
   expect(paused.snapshotRequests).toBe(1);
   expect(paused.aborted).toBe(true);
-  expect(paused.afterHiddenSchedule).toBe(paused.beforeHiddenSchedule);
+  expect(paused.hiddenRead).toBe('hidden');
 
   const remoteUpdate = await request.post('/newsletter/workflows/delivery/tickets/fixture-review/update', {
     headers: { Accept: 'application/json' },
@@ -1518,9 +1522,8 @@ test('older selection and refresh responses cannot replace a newer ticket select
   });
 
   await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
-  await waitForWorkflowController(page);
-  await page.evaluate(() => clearTimeout((window as typeof window & { workflowBoardController: { pollTimer: number } }).workflowBoardController.pollTimer));
-  await page.evaluate(() => void (window as typeof window & { workflowBoardController: { refreshBoard: () => Promise<void> } }).workflowBoardController.refreshBoard());
+  await stopPollTimer(page);
+  await startPoll(page);
   const delayedSelectionRequested = page.waitForRequest((request) => request.url().includes('ticket=fixture-review-2'));
   await page.getByRole('link', { name: 'Review the local storage contract' }).click();
   await delayedSelectionRequested;
@@ -1803,4 +1806,146 @@ test.describe('javascript-disabled terminal output', () => {
     await page.reload();
     await assertOutputValueEscaped(page, HOSTILE_OUTPUT_VALUE);
   });
+});
+// ── Shared refresh lifecycle: one workflow loop, shell regions ride the same snapshot ────────
+
+const WORKFLOW_BOARD_URL = '/newsletter/workflows/delivery?ticket=fixture-review';
+
+// Every passive read the page makes: the workflow snapshot and any generic `?__live=1` shell read.
+function trackPassiveReads(page: Page): string[] {
+  const reads: string[] = [];
+  page.on('request', (requestEvent) => {
+    const url = new URL(requestEvent.url());
+    if (requestEvent.method() === 'GET' && (url.pathname.endsWith('/snapshot') || url.searchParams.has('__live'))) {
+      reads.push(`${url.pathname}${url.search}`);
+    }
+  });
+  return reads;
+}
+
+async function openWorkflowOnPausedClock(page: Page, url = WORKFLOW_BOARD_URL): Promise<void> {
+  await page.clock.install({ time: 0 });
+  await page.goto(url);
+  await waitForWorkflowController(page);
+  await page.clock.pauseAt(600_000);
+  await page.waitForTimeout(500);
+}
+
+async function applyLiveChange(request: APIRequestContext, change: string): Promise<void> {
+  const response = await request.post('/__ui/live/change', { data: { case: change } });
+  expect(response.status()).toBe(204);
+}
+
+// Advances the 2000 ms cadence until the assertion holds.
+async function refreshUntil(page: Page, assertion: () => Promise<void>): Promise<void> {
+  await expect(async () => {
+    await page.clock.runFor(2000);
+    await assertion();
+  }).toPass({ timeout: 15_000, intervals: [100] });
+}
+
+test('workflow data refreshes through one shared handle with one read per cycle', async ({ page }) => {
+  const reads = trackPassiveReads(page);
+  await openWorkflowOnPausedClock(page);
+
+  expect(await page.evaluate(() => Array.from(window.FlowgencyLive.handles.keys()))).toEqual([WORKFLOW_HANDLE_KEY]);
+  await expect(page.locator('#live-initial')).toHaveCount(0);
+
+  const base = reads.length;
+  for (let cycle = 1; cycle <= 3; cycle += 1) {
+    await page.clock.runFor(2000);
+    await expect.poll(() => reads.length).toBe(base + cycle);
+    await page.waitForTimeout(250);
+    // A second loop would have issued its own read on the same tick.
+    expect(reads).toHaveLength(base + cycle);
+  }
+  expect(reads.every((read) => read.startsWith('/newsletter/workflows/delivery/snapshot?'))).toBe(true);
+  expect(reads.some((read) => read.includes('__live'))).toBe(false);
+});
+
+test('navigation keeps one loop and retargets its reads to the new selection', async ({ page }) => {
+  const reads = trackPassiveReads(page);
+  await openWorkflowOnPausedClock(page);
+
+  await page.getByRole('link', { name: 'Review the local storage contract' }).click();
+  await expect(page).toHaveURL(/ticket=fixture-review-2/);
+  await expect.poll(() => reads.some((read) => read.includes('ticket=fixture-review-2'))).toBe(true);
+  await page.waitForTimeout(300);
+
+  expect(await page.evaluate(() => Array.from(window.FlowgencyLive.handles.keys()))).toEqual([WORKFLOW_HANDLE_KEY]);
+  const marker = reads.length;
+  await page.clock.runFor(2000);
+  await expect.poll(() => reads.length).toBe(marker + 1);
+  await page.waitForTimeout(250);
+  expect(reads).toHaveLength(marker + 1);
+  expect(reads.at(-1)).toContain('ticket=fixture-review-2');
+});
+
+test('shared navigation refreshes from the workflow snapshot without another read', async ({ page, request }) => {
+  const reads = trackPassiveReads(page);
+  await openWorkflowOnPausedClock(page);
+  const badge = page.locator('#sidebar [data-live-key="workflow:delivery"] [data-workflow-state="count"]');
+  const before = Number(await badge.textContent());
+  const sidebar = await page.locator('#sidebar').elementHandle();
+  const row = await page.locator('#sidebar [data-live-key="workflow:delivery"]').elementHandle();
+  const boardPage = await page.locator('.workflow-board-page').elementHandle();
+  const inspector = await page.getByLabel('Ticket details').elementHandle();
+  await page.getByLabel('Acceptance criteria', { exact: true }).fill('Draft survives the shell refresh');
+  const readsBefore = reads.length;
+
+  await applyLiveChange(request, 'navigation-workflow-count');
+  await refreshUntil(page, () => expect(badge).toHaveText(String(before + 1), { timeout: 1500 }));
+
+  await expect(page.getByText(`${before + 1} tickets`, { exact: true })).toBeVisible();
+  expect(await sidebar!.evaluate((node) => node.isConnected)).toBe(true);
+  expect(await row!.evaluate((node) => node.isConnected)).toBe(true);
+  expect(await boardPage!.evaluate((node) => node.isConnected && node === document.querySelector('.workflow-board-page'))).toBe(true);
+  expect(await inspector!.evaluate((node) => node.isConnected && node === document.querySelector('[aria-label="Ticket details"]'))).toBe(true);
+  await expect(page.getByLabel('Acceptance criteria', { exact: true })).toHaveValue('Draft survives the shell refresh');
+  const newReads = reads.slice(readsBefore);
+  expect(newReads.length).toBeGreaterThan(0);
+  expect(newReads.every((read) => read.startsWith('/newsletter/workflows/delivery/snapshot?'))).toBe(true);
+  expect(reads.some((read) => read.includes('__live'))).toBe(false);
+  await assertNoConsoleErrors(page);
+});
+
+test('a shell-only change reaches the navigation through the workflow snapshot only', async ({ page, request }) => {
+  const reads = trackPassiveReads(page);
+  await openWorkflowOnPausedClock(page);
+  await expect(page.locator('#sidebar')).not.toContainText('Research updated');
+  const field = page.getByLabel('Acceptance criteria', { exact: true });
+  await field.fill('Draft kept while the team label changes');
+  const fieldNode = await page.locator('#field-acceptance-criteria').elementHandle();
+
+  await applyLiveChange(request, 'navigation-membership');
+  await refreshUntil(page, () => expect(page.locator('#sidebar')).toContainText('Research updated', { timeout: 1500 }));
+
+  await expect(page.locator('#team-switcher option[value="research"]')).toHaveText('Research updated');
+  await expect(page.locator('#team-switcher')).toHaveValue('newsletter');
+  await expect(page.locator('#sidebar a[href="/newsletter/workflows/delivery"]')).toHaveClass(/active/);
+  expect(await fieldNode!.evaluate((node) => node.isConnected && node === document.getElementById('field-acceptance-criteria'))).toBe(true);
+  await expect(field).toHaveValue('Draft kept while the team label changes');
+  expect(reads.some((read) => read.includes('__live'))).toBe(false);
+  // Only the declared navigation regions are ever reconciled; nothing of the board is a live region.
+  await expect(page.locator('[data-live-region]:not(#sidebar [data-live-region])')).toHaveCount(0);
+  await assertNoConsoleErrors(page);
+});
+
+test('a snapshot that reports the workflow gone shows a workflow-unavailable status and recovers', async ({ page }) => {
+  await page.route('**/newsletter/workflows/delivery/snapshot?*', async (route) => {
+    await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ detail: 'Unknown workflow' }) });
+  }, { times: 1 });
+  await page.goto(WORKFLOW_BOARD_URL);
+  await stopPollTimer(page);
+  await page.getByLabel('Acceptance criteria', { exact: true }).fill('Draft survives an unavailable workflow');
+
+  await forcePoll(page);
+
+  await expect(page.locator('#workflow-refresh-status')).toContainText('Workflow unavailable');
+  await expect(page.locator('#workflow-refresh-status')).toHaveAttribute('data-refresh-kind', 'unavailable');
+  await expect(page.getByLabel('Acceptance criteria', { exact: true })).toHaveValue('Draft survives an unavailable workflow');
+
+  await forcePoll(page);
+
+  await expect(page.locator('#workflow-refresh-status')).toBeHidden();
 });

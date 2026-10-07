@@ -23,6 +23,8 @@ declare global {
     __finish: (() => void) | null;
     __pending: Promise<LiveRefreshOutcome> | null;
     __blurs: number;
+    __raw: { applied: unknown[]; statuses: string[]; settled: number };
+    __mountRaw: () => void;
     __pwned?: boolean;
   }
 }
@@ -168,6 +170,25 @@ window.__releaseBody = null;
 window.__finish = null;
 window.__pending = null;
 window.__blurs = 0;
+window.__raw = { applied: [], statuses: [], settled: 0 };
+// An adapter whose payload is its own document rather than a region snapshot.
+window.__mountRaw = () => {
+  FlowgencyLive.register({
+    key: 'raw',
+    binding: () => ({ page: 'raw' }),
+    url: () => '${SNAPSHOT_PATH}?raw=1',
+    validate: (data) => {
+      if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
+      return data.incompatible ? 'incompatible' : true;
+    },
+    apply: (data) => {
+      window.__raw.applied.push(data);
+      return data.unavailable ? { accepted: false, deferred: false, unavailable: true } : { accepted: true, deferred: false };
+    },
+    status: (value) => window.__raw.statuses.push(value),
+    settled: () => { window.__raw.settled += 1; },
+  });
+};
 const originalText = Response.prototype.text;
 Response.prototype.text = async function () {
   const body = await originalText.call(this);
@@ -960,6 +981,75 @@ test('invalidating a binding drops the ETag and the pending read', async ({ page
   gate.release();
   expect(await page.evaluate(() => window.__pending)).toBe('superseded');
   expect(server.requests[2].ifNoneMatch).toBeUndefined();
+});
+
+const rawRefresh = (page: Page) => page.evaluate(() => window.FlowgencyLive.handles.get('raw')!.refresh());
+const rawEtag = (page: Page) => page.evaluate(() => window.FlowgencyLive.handles.get('raw')!.etag);
+
+test('a validating adapter receives its own payload shape and decides compatibility', async ({ page }) => {
+  const server = await openLive(page);
+  await page.evaluate(() => window.__mountRaw());
+
+  server.script.push({ body: { board: 'one' }, etag: '"raw-1"' });
+  expect(await rawRefresh(page)).toBe('applied');
+  expect(await page.evaluate(() => window.__raw.applied)).toEqual([{ board: 'one' }]);
+  expect(await rawEtag(page)).toBe('"raw-1"');
+
+  server.script.push({ body: { incompatible: true }, etag: '"raw-2"' });
+  expect(await rawRefresh(page)).toBe('incompatible');
+  server.script.push({ body: ['not', 'an', 'object'], etag: '"raw-3"' });
+  expect(await rawRefresh(page)).toBe('failed');
+
+  expect(await page.evaluate(() => window.__raw.applied)).toEqual([{ board: 'one' }]);
+  expect(await rawEtag(page)).toBe('"raw-1"');
+  expect(await page.evaluate(() => window.__raw.statuses)).toEqual(['healthy', 'incompatible', 'stale']);
+});
+
+test('an apply result that reports the target unavailable sets the unavailable status and keeps no ETag', async ({ page }) => {
+  const server = await openLive(page);
+  await page.evaluate(() => window.__mountRaw());
+
+  server.script.push({ body: { unavailable: true }, etag: '"raw-gone"' });
+  expect(await rawRefresh(page)).toBe('unavailable');
+  expect(await rawEtag(page)).toBeNull();
+  expect(await page.evaluate(() => window.FlowgencyLive.handles.get('raw')!.status)).toBe('unavailable');
+
+  server.script.push({ body: { board: 'back' }, etag: '"raw-back"' });
+  expect(await rawRefresh(page)).toBe('applied');
+  expect(await page.evaluate(() => window.__raw.statuses)).toEqual(['unavailable', 'healthy']);
+});
+
+test('settled runs after every read that finishes while visible, not for superseded or hidden reads', async ({ page }) => {
+  const server = await openLive(page);
+  await page.evaluate(() => window.__mountRaw());
+  const settled = () => page.evaluate(() => window.__raw.settled);
+
+  server.script.push({ body: { board: 'one' }, etag: '"raw-1"' });
+  await rawRefresh(page);
+  expect(await settled()).toBe(1);
+  await rawRefresh(page);
+  expect(await settled()).toBe(2);
+  server.script.push({ status: 500, body: 'boom' });
+  await rawRefresh(page);
+  expect(await settled()).toBe(3);
+
+  const slow = deferred();
+  server.script.push({ body: { board: 'slow' }, gate: slow.promise });
+  await page.evaluate(() => { window.__pending = window.FlowgencyLive.handles.get('raw')!.refresh(); });
+  await expect.poll(() => server.requests.length).toBe(4);
+  server.script.push({ body: { board: 'fast' }, etag: '"raw-fast"' });
+  await rawRefresh(page);
+  slow.release();
+  expect(await page.evaluate(() => window.__pending)).toBe('superseded');
+  expect(await settled()).toBe(4);
+
+  const gate = deferred();
+  server.script.push({ body: { board: 'hidden' }, gate: gate.promise });
+  await page.evaluate(() => { window.__pending = window.FlowgencyLive.handles.get('raw')!.refresh(); });
+  await setVisibility(page, 'hidden');
+  gate.release();
+  await page.evaluate(() => window.__pending);
+  expect(await settled()).toBe(4);
 });
 
 test('the handles registry is read-only and each key can be registered once', async ({ page }) => {

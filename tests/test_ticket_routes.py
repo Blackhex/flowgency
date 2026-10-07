@@ -2325,3 +2325,24 @@ def test_live_git_evidence_snapshot_reports_damaged_storage_without_regenerating
     assert damaged.status_code == 500
     assert stored.read_bytes() == original
     assert env.client.get(f"{base_url}/diff?__live=1").status_code == 200
+
+
+def test_workflow_pages_share_one_refresh_registration_and_embed_the_shell_identity(workflow_web_env):
+    env = workflow_web_env
+    ticket = env.create(title="Shell identity")
+
+    for path in (
+        env.base_path,
+        f"{env.base_path}?ticket={ticket.ref.ticket_id}",
+        f"{env.base_path}/tickets/{ticket.ref.ticket_id}",
+    ):
+        response = env.client.get(path)
+        assert response.status_code == 200
+        initial = workflow_initial_payload(response.text)
+        assert initial["shell"]["structure"] == "workflow-shell:1"
+        assert initial["shell"]["binding"]["entity"] == env.workflow_id
+        assert "regions" not in initial["shell"]
+        # The workflow controller registers the only handle; no generic page registration exists.
+        assert 'id="live-initial"' not in response.text
+        assert response.text.count('src="/static/live-refresh.js"') == 1
+        assert response.text.index("/static/live-refresh.js") < response.text.index("/static/workflow-board.js")

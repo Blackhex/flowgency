@@ -101,6 +101,14 @@ document.addEventListener('visibilitychange', onVisibilityChange);
 //     changed its binding passes the new one to LiveRegionView.invalidate(binding) here
 //     so a pending target from the previous entity is dropped.
 //   dispose().
+//   validate(data)  for a controller whose snapshot is its own document rather than a region
+//     snapshot: returns true (compatible), false (malformed, a stale read) or 'incompatible'.
+//     It replaces the built-in format, region-snapshot and binding checks; binding() is then
+//     informational and the controller owns identity checks in apply().
+//   apply() may also return {accepted:false, unavailable:true}: the read reported the viewed
+//     target unavailable (status 'unavailable', no ETag retained).
+//   settled()  called when a non-superseded read finishes while the document is visible, whatever
+//     its outcome, before the next read is scheduled.
 function register(adapter) {
   if (!adapter || typeof adapter.key !== 'string' || adapter.key === '') {
     throw new TypeError('FlowgencyLive.register requires an adapter with a key');
@@ -214,17 +222,29 @@ function register(adapter) {
         setStatus('stale');
         return 'failed';
       }
-      if (data && typeof data === 'object' && 'format' in data && data.format !== VERSION) {
-        setStatus('incompatible');
-        return 'incompatible';
-      }
-      if (!isSnapshot(data)) {
-        setStatus('stale');
-        return 'failed';
-      }
-      if (bindingKey(data.binding) !== expected) {
-        setStatus('incompatible');
-        return 'incompatible';
+      if (adapter.validate) {
+        const shape = adapter.validate(data);
+        if (shape === 'incompatible') {
+          setStatus('incompatible');
+          return 'incompatible';
+        }
+        if (!shape) {
+          setStatus('stale');
+          return 'failed';
+        }
+      } else {
+        if (data && typeof data === 'object' && 'format' in data && data.format !== VERSION) {
+          setStatus('incompatible');
+          return 'incompatible';
+        }
+        if (!isSnapshot(data)) {
+          setStatus('stale');
+          return 'failed';
+        }
+        if (bindingKey(data.binding) !== expected) {
+          setStatus('incompatible');
+          return 'incompatible';
+        }
       }
 
       let result;
@@ -238,6 +258,10 @@ function register(adapter) {
       if (result.incompatible) {
         setStatus('incompatible');
         return 'incompatible';
+      }
+      if (result.unavailable) {
+        setStatus('unavailable');
+        return 'unavailable';
       }
       if (!result.accepted) {
         setStatus('stale');
@@ -255,7 +279,16 @@ function register(adapter) {
     } finally {
       clearTimeout(timeoutId);
       if (active === controller) active = null;
-      if (generation === readGeneration) schedule();
+      if (generation === readGeneration) {
+        if (adapter.settled && !disposed && !isHidden()) {
+          try {
+            adapter.settled();
+          } catch (error) {
+            reportError(error);
+          }
+        }
+        schedule();
+      }
     }
   }
 
