@@ -215,6 +215,7 @@ export interface LiveAdapterShape {
   apply: (snapshot: LiveSnapshotShape) => LiveApplyResult;
   status?: (value: LiveStatusKind) => void;
   flushDeferred?: () => LiveApplyResult;
+  invalidate?: () => void;
   dispose?: () => void;
 }
 
@@ -235,6 +236,7 @@ export interface LiveRegionViewShape {
   allowUpdate(current: Element, next: Element): boolean;
   allowDiscard(node: Node): boolean;
   flushDeferred(): LiveApplyResult;
+  invalidate(binding?: LiveBindingShape, structure?: string): void;
   dispose(): void;
 }
 
@@ -247,6 +249,7 @@ declare global {
       LiveRegionView: new (
         root: Element,
         initial: { binding: LiveBindingShape; structure: string; snapshotUrl?: string },
+        options?: { onDrop?: (result: LiveApplyResult) => void },
       ) => LiveRegionViewShape;
     };
   }

@@ -6,6 +6,7 @@ import {
   assertNoConsoleErrors,
   installBasePageSetup,
   type LiveApplyResult,
+  type LiveBindingShape,
   type LiveRefreshOutcome,
   type LiveSnapshotShape,
 } from './layout';
@@ -13,6 +14,7 @@ import {
 declare global {
   interface Window {
     __mount: (interval?: number, timeout?: number) => void;
+    __navigate: (binding: LiveBindingShape) => void;
     __applied: LiveApplyResult[];
     __statuses: string[];
     __generation: number;
@@ -167,12 +169,16 @@ Response.prototype.text = async function () {
 window.__mount = (interval = 2000, timeout = 15000) => {
   const root = document.getElementById('app');
   const initial = JSON.parse(document.getElementById('initial').textContent);
-  const view = new FlowgencyLive.LiveRegionView(root, initial);
+  let current = initial.binding;
+  window.__navigate = (binding) => { current = binding; };
+  const view = new FlowgencyLive.LiveRegionView(root, initial, {
+    onDrop: () => { FlowgencyLive.handles.get('test').invalidate(); },
+  });
   FlowgencyLive.register({
     key: 'test',
     interval,
     timeout,
-    binding: () => initial.binding,
+    binding: () => current,
     url: () => initial.snapshotUrl,
     headers: () => ({ Accept: 'application/json' }),
     capture: () => window.__generation,
@@ -187,6 +193,7 @@ window.__mount = (interval = 2000, timeout = 15000) => {
       view.setStatus(value);
     },
     flushDeferred: () => view.flushDeferred(),
+    invalidate: () => view.invalidate(current),
     dispose: () => view.dispose(),
   });
 };
@@ -307,9 +314,11 @@ test('a focused item removed remotely stays until released and only the latest t
   await select(page).focus();
   const original = await select(page).elementHandle();
 
-  server.current = snapshot({ other: 'First', keys: ['other', 'tail'] });
+  server.current = snapshot({ other: 'First', keys: ['other', 'tail', 'dialog', 'owned'] });
   expect(await handleRefresh(page)).toBe('deferred');
-  server.current = snapshot({ other: 'Second', tail: 'Latest tail', keys: ['other', 'tail', 'disclosure'] });
+  server.current = snapshot({
+    other: 'Second', tail: 'Latest tail', keys: ['other', 'tail', 'disclosure', 'dialog', 'owned'],
+  });
   expect(await handleRefresh(page)).toBe('deferred');
 
   await expect(page.getByTestId('other')).toHaveText('Second');
@@ -317,7 +326,7 @@ test('a focused item removed remotely stays until released and only the latest t
 
   await page.evaluate(() => (document.activeElement as HTMLElement).blur());
   expect(await handleFlush(page)).toEqual({ accepted: true, deferred: false });
-  expect(await regionKeys(page)).toEqual(['other', 'tail', 'disclosure']);
+  expect(await regionKeys(page)).toEqual(['other', 'tail', 'disclosure', 'dialog-host', 'owned-host']);
   await expect(page.getByTestId('tail')).toHaveText('Latest tail');
   expect(await original!.evaluate((node) => node.isConnected)).toBe(false);
 });
@@ -325,14 +334,14 @@ test('a focused item removed remotely stays until released and only the latest t
 test('releasing focus applies the deferred target without another network read', async ({ page }) => {
   const server = await openLive(page);
   await select(page).focus();
-  server.current = snapshot({ other: 'Deferred', keys: ['other', 'tail'] });
+  server.current = snapshot({ other: 'Deferred', keys: ['other', 'tail', 'dialog', 'owned'] });
   expect(await handleRefresh(page)).toBe('deferred');
   const requests = server.requests.length;
 
   await page.evaluate(() => (document.activeElement as HTMLElement).blur());
   await page.clock.runFor(10);
 
-  await expect.poll(() => regionKeys(page)).toEqual(['other', 'tail']);
+  await expect.poll(() => regionKeys(page)).toEqual(['other', 'tail', 'dialog-host', 'owned-host']);
   expect(server.requests.length).toBe(requests);
 });
 
@@ -355,11 +364,14 @@ test('local details and dialog state is preserved while the item with an open di
   expect(await dialog!.evaluate((node: HTMLDialogElement) => node.isConnected && node.open)).toBe(true);
 
   await page.evaluate(() => {
-    (document.getElementById('dlg') as HTMLDialogElement).close();
+    const dlg = document.getElementById('dlg') as HTMLDialogElement;
+    dlg.close();
+    dlg.remove();
     (document.activeElement as HTMLElement).blur();
   });
   expect(await handleFlush(page)).toEqual({ accepted: true, deferred: false });
   expect(await dialog!.evaluate((node) => node.isConnected)).toBe(false);
+  await expect(page.locator('[data-live-key="dialog-host"]')).toHaveCount(0);
 });
 
 test('details remain closed locally even when the server renders them open', async ({ page }) => {
@@ -388,6 +400,130 @@ test('controller-owned forms and subtrees are never morphed', async ({ page }) =
   server.current = snapshot({ keys: ['held', 'other', 'tail', 'disclosure', 'dialog', 'log'] });
   expect(await handleRefresh(page)).toBe('deferred');
   await expect(page.locator('#owned-name')).toHaveValue('typed');
+});
+
+const OWNED_REMOVAL_CASES = [
+  {
+    name: 'a clean xterm', host: 'owned-host', omit: 'owned', keep: '[data-testid="xterm"]',
+    others: ['[data-testid="owned-form"]', '[data-testid="owned-sub"]'],
+  },
+  {
+    name: 'a clean data-live-owned subtree', host: 'owned-host', omit: 'owned', keep: '[data-testid="owned-sub"]',
+    others: ['[data-testid="owned-form"]', '[data-testid="xterm"]'],
+  },
+  {
+    name: 'a clean form', host: 'owned-host', omit: 'owned', keep: '[data-testid="owned-form"]',
+    others: ['[data-testid="owned-sub"]', '[data-testid="xterm"]'],
+  },
+  { name: 'a closed dialog', host: 'dialog-host', omit: 'dialog', keep: '#dlg', others: [] as string[] },
+];
+
+for (const owned of OWNED_REMOVAL_CASES) {
+  test(`a snapshot never destroys ${owned.name} inside a removed keyed item`, async ({ page }) => {
+    const server = await openLive(page);
+    await page.evaluate((selectors) => {
+      for (const selector of selectors) document.querySelector(selector)!.remove();
+    }, owned.others);
+    const hostSelector = `[data-live-key="${owned.host}"]`;
+    const host = await page.locator(hostSelector).elementHandle();
+    const kept = await page.locator(`${hostSelector} ${owned.keep}`).elementHandle();
+
+    server.current = snapshot({
+      other: 'Remote change',
+      keys: ALL_KEYS.filter((key) => key !== owned.omit && key !== 'tail'),
+    });
+    expect(await handleRefresh(page)).toBe('deferred');
+
+    await expect(page.getByTestId('other')).toHaveText('Remote change');
+    await expect(page.locator('[data-live-key="tail"]')).toHaveCount(0);
+    expect(await host!.evaluate((node) => node.isConnected)).toBe(true);
+    expect(await kept!.evaluate((node) => node.isConnected)).toBe(true);
+    expect(await page.evaluate(() => window.FlowgencyLive.handles.get('test')!.etag)).toBe(etagOf(server.current));
+
+    // The controller disposes the owned content; only then may the item go.
+    await kept!.evaluate((node) => node.remove());
+    expect(await handleFlush(page)).toEqual({ accepted: true, deferred: false });
+    expect(await host!.evaluate((node) => node.isConnected)).toBe(false);
+  });
+}
+
+test('a navigation drops the pending target of the previous binding', async ({ page }) => {
+  const server = await openLive(page);
+  await select(page).focus();
+  server.current = snapshot({ other: 'Old record', keys: ['other', 'tail'] });
+  expect(await handleRefresh(page)).toBe('deferred');
+
+  const next = { ...BINDING, entity: 'record-2' };
+  await page.evaluate((binding) => window.__navigate(binding), next);
+  server.script.push({ status: 404, body: { detail: 'gone' } });
+  expect(await page.evaluate(() => window.FlowgencyLive.handles.get('test')!.invalidate())).toBe('unavailable');
+  expect(server.requests.at(-1)!.ifNoneMatch).toBeUndefined();
+
+  await page.evaluate(() => (document.activeElement as HTMLElement).blur());
+  expect(await handleFlush(page)).toEqual({ accepted: true, deferred: false });
+  expect(await regionKeys(page)).toEqual(['held', 'other', 'tail', 'disclosure', 'dialog-host', 'log', 'owned-host']);
+
+  server.current = snapshot({ other: 'New record' }, { binding: next });
+  expect(await handleRefresh(page)).toBe('applied');
+  await expect(page.getByTestId('other')).toHaveText('New record');
+});
+
+async function deferThenBreakTail(page: Page, server: LiveServer) {
+  await select(page).focus();
+  server.current = snapshot({
+    other: 'Deferred', tail: 'Deferred tail', keys: ['other', 'held', 'tail', 'disclosure', 'dialog', 'log', 'owned'],
+  });
+  expect(await handleRefresh(page)).toBe('deferred');
+  expect(await page.evaluate(() => window.FlowgencyLive.handles.get('test')!.etag)).toBe(etagOf(server.current));
+  await page.evaluate(() => {
+    const replacement = document.createElement('section');
+    replacement.setAttribute('data-live-key', 'tail');
+    replacement.textContent = 'Local tail';
+    document.querySelector('[data-live-key="tail"]')!.replaceWith(replacement);
+    (document.activeElement as HTMLElement).blur();
+  });
+}
+
+async function restoreTail(page: Page) {
+  await page.evaluate(() => {
+    const replacement = document.createElement('div');
+    replacement.setAttribute('data-live-key', 'tail');
+    replacement.setAttribute('data-testid', 'tail');
+    replacement.textContent = 'Local tail';
+    document.querySelector('[data-live-key="tail"]')!.replaceWith(replacement);
+  });
+}
+
+test('a deferred region that can no longer apply reports a rejection and the next poll converges', async ({ page }) => {
+  const server = await openLive(page);
+  await deferThenBreakTail(page, server);
+
+  const result = await handleFlush(page);
+  expect(result.accepted).toBe(false);
+  expect(await page.evaluate(() => window.FlowgencyLive.handles.get('test')!.etag)).toBeNull();
+  await expect.poll(() => statuses(page)).toContain('incompatible');
+  expect(server.requests.at(-1)!.ifNoneMatch).toBeUndefined();
+
+  await restoreTail(page);
+  expect(await handleRefresh(page)).toBe('applied');
+  expect(server.requests.at(-1)!.ifNoneMatch).toBeUndefined();
+  await expect(page.getByTestId('other')).toHaveText('Deferred');
+  expect((await regionKeys(page))[0]).toBe('other');
+});
+
+test('a release that drops a deferred region clears the ETag so the next read is a full 200', async ({ page }) => {
+  const server = await openLive(page);
+  await deferThenBreakTail(page, server);
+
+  await page.clock.runFor(10);
+  await expect.poll(() => statuses(page)).toContain('incompatible');
+  expect(server.requests.at(-1)!.ifNoneMatch).toBeUndefined();
+  expect(await page.evaluate(() => window.FlowgencyLive.handles.get('test')!.etag)).toBeNull();
+
+  await restoreTail(page);
+  expect(await handleRefresh(page)).toBe('applied');
+  expect(server.requests.at(-1)!.ifNoneMatch).toBeUndefined();
+  await expect(page.getByTestId('other')).toHaveText('Deferred');
 });
 
 test('a followed scroller stays at the bottom and an unfollowed one keeps its position', async ({ page }) => {

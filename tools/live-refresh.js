@@ -11,6 +11,11 @@ const OWNED_SELECTOR = [
   'form', 'input', 'select', 'textarea', 'button', 'dialog',
   '[contenteditable]:not([contenteditable="false"])', '.xterm', '[data-live-owned]',
 ].join(', ');
+// Stateful owned content a passive snapshot must never destroy: an item that holds
+// one stays until the controller disposes it (then flushDeferred() removes the item).
+const PROTECTED_SELECTOR = [
+  'form', 'dialog', '[contenteditable]:not([contenteditable="false"])', '.xterm', '[data-live-owned]',
+].join(', ');
 // Attributes that carry local disclosure state; a server render never overrides them.
 const LOCAL_ATTRIBUTES = ['open', 'aria-expanded'];
 
@@ -82,6 +87,16 @@ function onVisibilityChange() {
 }
 document.addEventListener('visibilitychange', onVisibilityChange);
 
+// Adapter contract beyond the required binding/url/apply:
+//   capture(), isCurrent(captured)  navigation/action generations across body parsing.
+//   status(kind), timeout, headers().
+//   flushDeferred()  re-apply the retained target; handle.flushDeferred() delegates here.
+//     A result with accepted:false means a deferred region was dropped, so the handle
+//     clears its ETag and re-reads; the next read is a full 200, never a 304.
+//   invalidate()  called by handle.invalidate() before the re-read; a controller that
+//     changed its binding passes the new one to LiveRegionView.invalidate(binding) here
+//     so a pending target from the previous entity is dropped.
+//   dispose().
 function register(adapter) {
   if (!adapter || typeof adapter.key !== 'string' || adapter.key === '') {
     throw new TypeError('FlowgencyLive.register requires an adapter with a key');
@@ -249,6 +264,13 @@ function register(adapter) {
       bindingGeneration += 1;
       etag = null;
       abortActive();
+      if (adapter.invalidate) {
+        try {
+          adapter.invalidate();
+        } catch (error) {
+          reportError(error);
+        }
+      }
       return read();
     },
     beginAction() {
@@ -267,7 +289,12 @@ function register(adapter) {
       };
     },
     flushDeferred() {
-      return adapter.flushDeferred ? adapter.flushDeferred() : ACCEPTED;
+      const result = adapter.flushDeferred ? adapter.flushDeferred() : ACCEPTED;
+      if (result && result.accepted === false && !disposed) {
+        etag = null;
+        read().catch(reportError);
+      }
+      return result;
     },
     dispose() {
       if (disposed) return;
@@ -415,21 +442,35 @@ class LiveRegionView {
 
   #disposed = false;
 
+  #retained = false;
+
+  #onDrop;
+
   #onRelease = () => {
     if (!this.#pending || this.#releaseTimer !== null || this.#disposed) return;
     this.#releaseTimer = setTimeout(() => {
       this.#releaseTimer = null;
-      this.flushDeferred();
+      const result = this.flushDeferred();
+      if (!result.accepted && !this.#disposed && this.#onDrop) {
+        try {
+          this.#onDrop(result);
+        } catch (error) {
+          reportError(error);
+        }
+      }
     }, 0);
   };
 
-  constructor(root, initial) {
+  // options.onDrop(result) runs when a release-triggered flush drops a deferred
+  // region; wire it to handle.invalidate() so the dropped content converges.
+  constructor(root, initial, options = {}) {
     if (!(root instanceof Element)) throw new TypeError('LiveRegionView requires a root element');
     if (!initial || typeof initial.structure !== 'string' || !initial.binding) {
       throw new TypeError('LiveRegionView requires the initial binding and structure');
     }
     this.#root = root;
     this.#initial = initial;
+    this.#onDrop = typeof options.onDrop === 'function' ? options.onDrop : null;
     for (const type of ['focusout', 'change', 'input', 'reset', 'submit', 'close', 'toggle']) {
       root.addEventListener(type, this.#onRelease, true);
     }
@@ -490,7 +531,24 @@ class LiveRegionView {
   allowDiscard(node) {
     if (node.nodeType !== Node.ELEMENT_NODE) return true;
     const chain = this.#chain || this.#chainFor(node.closest(REGION_SELECTOR));
-    return !chain.has(node);
+    if (chain.has(node) || node.matches(PROTECTED_SELECTOR) || node.querySelector(PROTECTED_SELECTOR)) {
+      this.#retained = true;
+      return false;
+    }
+    return true;
+  }
+
+  // A controller that navigated calls this with its new binding (and structure) so a
+  // pending target from the previous entity is never applied to the next one.
+  invalidate(binding, structure) {
+    if (this.#releaseTimer !== null) clearTimeout(this.#releaseTimer);
+    this.#releaseTimer = null;
+    this.#pending = null;
+    this.#initial = {
+      ...this.#initial,
+      ...(binding ? { binding } : {}),
+      ...(typeof structure === 'string' ? { structure } : {}),
+    };
   }
 
   flushDeferred() {
@@ -504,13 +562,17 @@ class LiveRegionView {
     }
     const elements = this.#regionElements();
     const stillDeferred = new Map();
+    let dropped = false;
     for (const [key, fragment] of pending.regions) {
       const element = elements.get(key);
-      if (!element || !this.#compatible(element, fragment)) continue;
+      if (!element || !this.#compatible(element, fragment)) {
+        dropped = true;
+        continue;
+      }
       if (this.#applyRegion(element, fragment)) stillDeferred.set(key, fragment);
     }
     this.#pending = stillDeferred.size > 0 ? { binding: pending.binding, regions: stillDeferred } : null;
-    return { accepted: true, deferred: stillDeferred.size > 0 };
+    return { accepted: !dropped, deferred: stillDeferred.size > 0 };
   }
 
   dispose() {
@@ -601,12 +663,15 @@ class LiveRegionView {
 
     let deferred = false;
     this.#chain = chain;
+    this.#retained = false;
     try {
       if (chain.size === 0) this.#morph(region, next, true);
       else deferred = this.#reconcileChildren(region, next);
     } finally {
       this.#chain = null;
     }
+    if (this.#retained) deferred = true;
+    this.#retained = false;
     for (const { element, follow } of following) {
       if (follow && element.isConnected) element.scrollTop = element.scrollHeight;
     }
