@@ -274,6 +274,41 @@ test.describe('jobs live regions', () => {
     await expect(cancelForms(page)).toHaveCount(0);
   });
 
+  test('a job that finishes with a session swaps the cancel action for resume in one snapshot', async ({ page, request }) => {
+    await page.goto('/newsletter/jobs/job-waiting');
+    const resumeForms = page.locator('main form[action$="/resume"]');
+    await expect(cancelForms(page)).toHaveCount(1);
+    await expect(resumeForms).toHaveCount(0);
+
+    await change(request, 'job-finishes-with-session');
+
+    await expect(jobStatus(page)).toContainText('Complete');
+    await expect(cancelForms(page)).toHaveCount(0);
+    await expect(resumeForms).toHaveCount(1);
+    await expect(page.getByRole('button', { name: /^Resume in / })).toBeVisible();
+    await expect(page.locator('#resume-command')).toHaveValue(/job-waiting-session/);
+    await expect(pageStatus(page)).toBeHidden();
+  });
+
+  test('a held cancel button defers the resume swap until it is released', async ({ page, request }) => {
+    await page.goto('/newsletter/jobs/job-waiting');
+    const resumeForms = page.locator('main form[action$="/resume"]');
+    const cancel = page.getByRole('button', { name: 'Cancel', exact: true });
+    await cancel.focus();
+
+    await change(request, 'job-finishes-with-session');
+
+    await expect(jobStatus(page)).toContainText('Complete');
+    await expect(cancel).toBeFocused();
+    await expect(cancelForms(page)).toHaveCount(1);
+    await expect(resumeForms).toHaveCount(0);
+
+    await cancel.evaluate((element) => (element as HTMLElement).blur());
+
+    await expect(cancelForms(page)).toHaveCount(0);
+    await expect(resumeForms).toHaveCount(1);
+  });
+
   test('retained artifacts and the memory publication state follow the job', async ({ page, request }) => {
     await page.goto('/newsletter/jobs/job-failed');
     const artifacts = page.locator('[data-live-region="job-artifacts"]');

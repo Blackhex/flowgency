@@ -84,6 +84,7 @@ LIVE_CHANGE_CASES = frozenset(
         "agent-team-runtime",
         "agent-permissions",
         "job-finishes",
+        "job-finishes-with-session",
         "job-added",
         "job-removed",
         "job-failure-artifacts",
@@ -719,6 +720,18 @@ def _job_finishes(runtime: Path) -> None:
     )
 
 
+def _job_finishes_with_session(runtime: Path) -> None:
+    path = _job_store(runtime).path("newsletter", "job-waiting")
+    transition_job(
+        path,
+        "waiting_for_memory",
+        "complete",
+        completed_at="2026-07-16T12:00:30+00:00",
+        duration_seconds=30,
+        session_id="job-waiting-session",
+    )
+
+
 def _job_added(runtime: Path) -> None:
     write_job(
         _job_store(runtime).path("newsletter", "job-live-added"),
@@ -755,6 +768,7 @@ def _job_memory_published(runtime: Path) -> None:
 
 _JOB_LIVE_CHANGES = {
     "job-finishes": _job_finishes,
+    "job-finishes-with-session": _job_finishes_with_session,
     "job-added": _job_added,
     "job-removed": _job_removed,
     "job-failure-artifacts": _job_failure_artifacts,

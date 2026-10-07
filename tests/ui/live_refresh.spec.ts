@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { expect, test, type Page, type Route } from '@playwright/test';
+import { expect, test, type ElementHandle, type Page, type Route } from '@playwright/test';
 
 import {
   assertNoConsoleErrors,
@@ -79,6 +79,14 @@ function region(overrides: Partial<Model> = {}): string {
       + `<form data-testid="owned-form" class="${m.formClass}"><label>Name <input id="owned-name" name="name"></label></form>`
       + `<div data-live-owned data-testid="owned-sub">${m.ownedText}</div>`
       + `<div class="xterm" data-testid="xterm">${m.ownedText}</div></div>`,
+    cancel: '<form method="post" action="/jobs/1/cancel" data-live-disposable data-live-key="job-action:cancel" data-testid="cancel-form">'
+      + '<button type="submit" data-testid="cancel-button">Cancel</button></form>',
+    resume: '<form method="post" action="/jobs/1/resume" data-live-disposable data-live-key="job-action:resume" data-testid="resume-form">'
+      + '<button type="submit" data-testid="resume-button">Resume</button></form>',
+    'plain-a': '<form method="post" action="/a" data-live-key="plain:a" data-testid="plain-a"><button type="submit">A</button></form>',
+    'plain-b': '<form method="post" action="/b" data-live-key="plain:b" data-testid="plain-b"><button type="submit">B</button></form>',
+    'unkeyed-a': '<form method="post" action="/a" data-testid="unkeyed-a"><button type="submit">A</button></form>',
+    'unkeyed-b': '<form method="post" action="/b" data-testid="unkeyed-b"><button type="submit">B</button></form>',
   };
   return m.keys.map((key) => parts[key]).join('\n');
 }
@@ -400,6 +408,150 @@ test('controller-owned forms and subtrees are never morphed', async ({ page }) =
   server.current = snapshot({ keys: ['held', 'other', 'tail', 'disclosure', 'dialog', 'log'] });
   expect(await handleRefresh(page)).toBe('deferred');
   await expect(page.locator('#owned-name')).toHaveValue('typed');
+});
+
+// Reduces the page to `other` plus the given action forms; the default owned
+// content (which a passive snapshot would defer) is disposed first.
+async function showActions(page: Page, server: LiveServer, ...keys: string[]) {
+  await page.evaluate(() => {
+    for (const host of document.querySelectorAll('[data-live-key="owned-host"], [data-live-key="dialog-host"]')) host.remove();
+  });
+  server.current = snapshot({ keys: ['other', ...keys] });
+  expect(await handleRefresh(page)).toBe('applied');
+}
+
+const testId = (page: Page, id: string) => page.getByTestId(id);
+const connected = (handle: ElementHandle) => handle.evaluate((node) => node.isConnected);
+const etagRetained = (page: Page) => page.evaluate(() => window.FlowgencyLive.handles.get('test')!.etag);
+
+test.describe('disposable action forms', () => {
+  test('a disposable form with the same key keeps its node while the rest updates', async ({ page }) => {
+    const server = await openLive(page);
+    await showActions(page, server, 'cancel');
+    const form = await testId(page, 'cancel-form').elementHandle();
+
+    server.current = snapshot({ other: 'Changed', keys: ['other', 'cancel'] });
+    expect(await handleRefresh(page)).toBe('applied');
+
+    await expect(testId(page, 'other')).toHaveText('Changed');
+    expect(await connected(form!)).toBe(true);
+    expect(await regionKeys(page)).toEqual(['other', 'job-action:cancel']);
+  });
+
+  test('a snapshot replacing one disposable form with another removes the old and inserts the new', async ({ page }) => {
+    const server = await openLive(page);
+    await showActions(page, server, 'cancel');
+    const cancel = await testId(page, 'cancel-form').elementHandle();
+
+    server.current = snapshot({ keys: ['other', 'resume'] });
+    expect(await handleRefresh(page)).toBe('applied');
+
+    expect(await connected(cancel!)).toBe(false);
+    expect(await regionKeys(page)).toEqual(['other', 'job-action:resume']);
+    await expect(testId(page, 'resume-form')).toHaveAttribute('action', '/jobs/1/resume');
+    expect((await page.evaluate(() => window.__applied)).at(-1)).toEqual({ accepted: true, deferred: false });
+    expect(await etagRetained(page)).toBe(etagOf(server.current));
+  });
+
+  test('a held disposable form defers the swap until it is released, then the new form appears', async ({ page }) => {
+    const server = await openLive(page);
+    await showActions(page, server, 'cancel');
+    const cancel = await testId(page, 'cancel-form').elementHandle();
+    await testId(page, 'cancel-button').focus();
+
+    server.current = snapshot({ other: 'Swapped', keys: ['other', 'resume'] });
+    expect(await handleRefresh(page)).toBe('deferred');
+
+    await expect(testId(page, 'other')).toHaveText('Swapped');
+    expect(await connected(cancel!)).toBe(true);
+    await expect(testId(page, 'cancel-button')).toBeFocused();
+    await expect(testId(page, 'resume-form')).toHaveCount(0);
+    expect(await etagRetained(page)).toBe(etagOf(server.current));
+
+    await page.evaluate(() => (document.activeElement as HTMLElement).blur());
+    expect(await handleFlush(page)).toEqual({ accepted: true, deferred: false });
+
+    expect(await connected(cancel!)).toBe(false);
+    expect(await regionKeys(page)).toEqual(['other', 'job-action:resume']);
+  });
+
+  test('a held disposable form the server dropped stays until it is released', async ({ page }) => {
+    const server = await openLive(page);
+    await showActions(page, server, 'resume');
+    const resume = await testId(page, 'resume-form').elementHandle();
+    await testId(page, 'resume-button').focus();
+
+    server.current = snapshot({ keys: ['other'] });
+    expect(await handleRefresh(page)).toBe('deferred');
+    expect(await connected(resume!)).toBe(true);
+    await expect(testId(page, 'resume-button')).toBeFocused();
+
+    await page.evaluate(() => (document.activeElement as HTMLElement).blur());
+    expect(await handleFlush(page)).toEqual({ accepted: true, deferred: false });
+    expect(await connected(resume!)).toBe(false);
+  });
+
+  test('an idle disposable form the server dropped is removed at once', async ({ page }) => {
+    const server = await openLive(page);
+    await showActions(page, server, 'cancel');
+    const cancel = await testId(page, 'cancel-form').elementHandle();
+
+    server.current = snapshot({ keys: ['other'] });
+    expect(await handleRefresh(page)).toBe('applied');
+
+    expect(await connected(cancel!)).toBe(false);
+    expect(await regionKeys(page)).toEqual(['other']);
+  });
+
+  test('a form without data-live-disposable is never discarded by a passive snapshot', async ({ page }) => {
+    const server = await openLive(page);
+    await showActions(page, server, 'plain-a');
+    const form = await testId(page, 'plain-a').elementHandle();
+
+    server.current = snapshot({ keys: ['other'] });
+    expect(await handleRefresh(page)).toBe('deferred');
+
+    expect(await connected(form!)).toBe(true);
+    expect(await etagRetained(page)).toBe(etagOf(server.current));
+  });
+
+  test('a different owned form is reported as deferred instead of being swallowed', async ({ page }) => {
+    const server = await openLive(page);
+    await showActions(page, server, 'plain-a');
+    const form = await testId(page, 'plain-a').elementHandle();
+
+    server.current = snapshot({ keys: ['other', 'plain-b'] });
+    expect(await handleRefresh(page)).toBe('deferred');
+
+    expect(await connected(form!)).toBe(true);
+    await expect(testId(page, 'plain-b')).toHaveCount(0);
+    expect((await page.evaluate(() => window.__applied)).at(-1)).toEqual({ accepted: true, deferred: true });
+  });
+
+  test('a different unkeyed owned form is reported as deferred instead of being swallowed', async ({ page }) => {
+    const server = await openLive(page);
+    await showActions(page, server, 'unkeyed-a');
+    const form = await testId(page, 'unkeyed-a').elementHandle();
+
+    server.current = snapshot({ keys: ['other', 'unkeyed-b'] });
+    expect(await handleRefresh(page)).toBe('deferred');
+
+    expect(await connected(form!)).toBe(true);
+    await expect(testId(page, 'unkeyed-a')).toHaveAttribute('action', '/a');
+    expect((await page.evaluate(() => window.__applied)).at(-1)).toEqual({ accepted: true, deferred: true });
+  });
+
+  test('the same unkeyed owned form is kept and the snapshot is applied', async ({ page }) => {
+    const server = await openLive(page);
+    await showActions(page, server, 'unkeyed-a');
+    const form = await testId(page, 'unkeyed-a').elementHandle();
+
+    server.current = snapshot({ other: 'Same form', keys: ['other', 'unkeyed-a'] });
+    expect(await handleRefresh(page)).toBe('applied');
+
+    expect(await connected(form!)).toBe(true);
+    await expect(testId(page, 'other')).toHaveText('Same form');
+  });
 });
 
 const OWNED_REMOVAL_CASES = [

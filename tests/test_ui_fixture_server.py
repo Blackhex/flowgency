@@ -510,6 +510,23 @@ def test_live_change_job_finishes_completes_the_waiting_job(monkeypatch):
         assert "Waiting for memory" in _region(client, detail, "job-status")
 
 
+def test_live_change_job_finishes_with_session_swaps_cancel_for_resume_and_reset_restores_it(monkeypatch):
+    with _live_fixture(monkeypatch) as (client, _runtime):
+        detail = "/newsletter/jobs/job-waiting"
+        before = _region(client, detail, "job-actions")
+        assert 'data-live-key="job-action:cancel"' in before
+        assert 'data-live-key="job-action:resume"' not in before
+
+        _apply(client, "job-finishes-with-session")
+        after = _region(client, detail, "job-actions")
+        assert 'data-live-key="job-action:resume"' in after
+        assert 'data-live-key="job-action:cancel"' not in after
+        assert "Complete" in _region(client, detail, "job-status")
+
+        _reset(client)
+        assert _region(client, detail, "job-actions") == before
+
+
 def test_live_change_job_added_and_removed_change_the_list_and_reset_restores_it(monkeypatch):
     with _live_fixture(monkeypatch) as (client, _runtime):
         jobs = "/newsletter/jobs"

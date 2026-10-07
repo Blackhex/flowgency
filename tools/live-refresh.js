@@ -339,6 +339,19 @@ function isInsideOwned(node) {
   return false;
 }
 
+// A disposable form is matched by its key like any item, so a different keyed form is
+// removed and inserted instead of being paired with it (and silently swallowed).
+function isDisposable(node) {
+  return node.localName === 'form' && node.hasAttribute('data-live-disposable');
+}
+
+// A snapshot never rewrites an owned node, so a counterpart that is a different action
+// must be reported as not applied rather than consumed unnoticed.
+function ownedCounterpartDiffers(current, next) {
+  return current.getAttribute('data-live-key') !== next.getAttribute('data-live-key')
+    || current.getAttribute('action') !== next.getAttribute('action');
+}
+
 function isDirtyControl(control) {
   if (control instanceof HTMLSelectElement) {
     const options = Array.from(control.options);
@@ -533,7 +546,10 @@ class LiveRegionView {
   }
 
   allowUpdate(current, next) {
-    if (isInsideOwned(current)) return false;
+    if (isInsideOwned(current)) {
+      if (isOwned(current) && ownedCounterpartDiffers(current, next)) this.#retained = true;
+      return false;
+    }
     const chain = this.#chain || this.#chainFor(current.closest(REGION_SELECTOR));
     if (chain.has(current)) return false;
     for (const name of localAttributeNames(current)) {
@@ -623,7 +639,7 @@ class LiveRegionView {
       nextTags.set(key, element.localName);
     }
     for (const element of region.querySelectorAll('[data-live-key]')) {
-      if (isInsideOwned(element)) continue;
+      if (isInsideOwned(element) && !isDisposable(element)) continue;
       const tag = nextTags.get(element.getAttribute('data-live-key'));
       if (tag !== undefined && tag !== element.localName) return false;
     }
@@ -699,7 +715,8 @@ class LiveRegionView {
     morphdom(current, next, {
       childrenOnly,
       getNodeKey: (node) => {
-        if (node.nodeType !== Node.ELEMENT_NODE || isInsideOwned(node)) return undefined;
+        if (node.nodeType !== Node.ELEMENT_NODE) return undefined;
+        if (isInsideOwned(node) && !isDisposable(node)) return undefined;
         return elementKey(node) || undefined;
       },
       onBeforeElUpdated: (from, to) => this.allowUpdate(from, to),
@@ -742,7 +759,7 @@ class LiveRegionView {
   }
 
   #reconcileElement(current, next) {
-    if (isOwned(current)) return false;
+    if (isOwned(current)) return ownedCounterpartDiffers(current, next);
     if (!this.#chain.has(current)) {
       this.#morph(current, next, false);
       return false;
