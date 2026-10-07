@@ -755,22 +755,6 @@ const PAGE_STATUS_TEXT = Object.freeze({
   unavailable: 'This page is no longer available. Refresh to check.',
 });
 
-let iconScriptRequested = false;
-
-function renderStatusIcons() {
-  const lucide = window.lucide;
-  if (lucide && typeof lucide.createIcons === 'function') {
-    lucide.createIcons({ attrs: { 'aria-hidden': 'true', focusable: 'false' } });
-    return;
-  }
-  if (iconScriptRequested) return;
-  iconScriptRequested = true;
-  const script = document.createElement('script');
-  script.src = '/static/lucide.min.js';
-  script.addEventListener('load', renderStatusIcons);
-  document.head.append(script);
-}
-
 function readPageRegistration() {
   const holder = document.getElementById('live-initial');
   if (!holder) return null;
@@ -832,7 +816,6 @@ function registerPage() {
       }
       if (label) label.textContent = PAGE_STATUS_TEXT[next] || '';
       shell.hidden = false;
-      renderStatusIcons();
     },
   });
 

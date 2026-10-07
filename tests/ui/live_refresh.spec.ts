@@ -904,6 +904,30 @@ test('a passive failure shows the status shell and only a click retries', async 
   expect(navigations).toBe(0);
 });
 
+test('a server outage still renders a refresh glyph with no lucide fetch', async ({ page }) => {
+  const lucideRequests: string[] = [];
+  await page.route('**/lucide.min.js', (route) => {
+    lucideRequests.push(route.request().url());
+    return route.abort();
+  });
+  await openRoster(page);
+  await page.clock.pauseAt(60_000);
+  await expect.poll(() => page.evaluate(() => window.FlowgencyLive.handles.get('page')!.status)).toBe('healthy');
+
+  await page.route(ROSTER_SNAPSHOT, (route) => route.fulfill({ status: 500, body: 'down' }));
+  await page.clock.runFor(2000);
+
+  const shell = page.locator('[data-live-status]');
+  await expect(shell).toBeVisible();
+  await expect(shell).toHaveAttribute('data-live-status', 'stale');
+  const icon = shell.locator('[data-live-manual-refresh] svg');
+  await expect(icon).toHaveCount(1);
+  const box = await icon.boundingBox();
+  expect(box?.width).toBeGreaterThan(0);
+  expect(box?.height).toBeGreaterThan(0);
+  expect(lucideRequests).toEqual([]);
+});
+
 test('an incompatible snapshot asks for a reload instead of mutating the page', async ({ page }) => {
   await openRoster(page);
   await page.clock.pauseAt(60_000);

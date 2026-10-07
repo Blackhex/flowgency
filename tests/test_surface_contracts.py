@@ -333,7 +333,7 @@ def test_base_template_renders_shared_navigation_through_live_regions():
         assert f'data-live-region="{key}"' in base
     assert '<div data-live-status role="status" hidden' in base
     assert "data-live-manual-refresh" in base
-    assert 'data-lucide="refresh-cw"' in base
+    assert 'd="M21 3v5h-5"' in base
     assert 'id="live-initial"' in base and "live_registration | tojson" in base
     assert "{% if live_registration %}" in base
 
