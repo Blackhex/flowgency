@@ -42,7 +42,7 @@ flowgency serve
 The dashboard opens at `http://127.0.0.1:8500`. Set `FLOWGENCY_CONFIG` to select
 the one authoritative config file.
 
-Start Flowgency, choose the Flowgency data root and supported AI integration, complete the flowgency-setup conversation, and return to the dashboard automatically.
+Start Flowgency, choose the Flowgency data root and supported AI integration, and complete the flowgency-setup conversation.
 Users may enter home syntax such as `~/Flowgency`; setup expands it to the
 user's home directory before deriving canonical paths. The guided conversation asks
 for the project workspace as its first question, then names your team and

@@ -340,7 +340,7 @@ def test_non_domain_group_tokens_remain_unchanged():
 def test_readme_and_getting_started_describe_the_data_root_handoff():
     expected = (
         "Start Flowgency, choose the Flowgency data root and supported AI integration, "
-        "complete the flowgency-setup conversation, and return to the dashboard automatically."
+        "and complete the flowgency-setup conversation."
     )
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     getting_started = (REPO_ROOT / "kb" / "getting-started.md").read_text(
@@ -352,6 +352,7 @@ def test_readme_and_getting_started_describe_the_data_root_handoff():
     for text in (readme, getting_started):
         assert "project workspace as its first question" in text
         assert "choose the project folder" not in text.lower()
+        assert "return to the dashboard automatically" not in text
 
 
 def test_local_links_in_active_documentation_resolve():
