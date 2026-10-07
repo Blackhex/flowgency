@@ -12,7 +12,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 import markdown
 import nh3
@@ -1919,16 +1919,59 @@ async def decision_verify(request: Request, team: str, slug: str):
     raise HTTPException(status_code=410, detail="Retired pipeline routes are unavailable")
 
 
+LOGS_LIST_STRUCTURE = "logs-list:1"
+LOGS_LIST_REGION_MACROS = {"logs-list": "live_logs_listing"}
+LOG_VIEW_STRUCTURE = "log-view:1"
+LOG_VIEW_REGION_MACROS = {
+    "log-status": "live_log_status",
+    "log-content": "live_log_content",
+}
+
+
+def _logs_list_policy(team: str, context: dict) -> LivePagePolicy:
+    policy = LivePagePolicy(
+        template_name="logs.html",
+        binding=LiveBinding(page="logs", team=team),
+        structure=LOGS_LIST_STRUCTURE,
+        region_macros=LOGS_LIST_REGION_MACROS,
+        snapshot_url=f"/{team}/logs?__live=1",
+    )
+    return replace(policy, region_macros=shared_region_macros(context, policy))
+
+
+def _log_view_policy(
+    team: str, path: str, agent: str | None, source: str | None, context: dict
+) -> LivePagePolicy:
+    # The selectors are part of the binding, so a snapshot never answers for another file or scope.
+    query = {"path": path}
+    if agent is not None:
+        query["agent"] = agent
+    if source is not None:
+        query["source"] = source
+    policy = LivePagePolicy(
+        template_name="log_view.html",
+        binding=LiveBinding(page="log-view", team=team, query=query),
+        structure=LOG_VIEW_STRUCTURE,
+        region_macros=LOG_VIEW_REGION_MACROS,
+        snapshot_url=f"/{quote(team, safe='')}/logs/view?{urlencode({**query, '__live': '1'})}",
+    )
+    return replace(policy, region_macros=shared_region_macros(context, policy))
+
+
 @app.get("/{team}/logs", response_class=HTMLResponse)
 async def logs_list(request: Request, team: str):
-    """Browse execution logs by date."""
+    """Browse execution logs by date; ``?__live=1`` returns the live region snapshot."""
     g = get_team(team)
     logs = with_log_links(collect_logs(g), team)
-    return templates.TemplateResponse(request, "logs.html", {
+    context = {
         "request": request,
         **team_context(g),
+        "active": "logs",
         "logs": logs,
-    })
+    }
+    return respond_live_or_html(request, templates, context, _logs_list_policy(team, context))
+
+
 def _log_view_context(
     team: str,
     path: str,
@@ -1995,10 +2038,10 @@ async def log_view(
     source: str | None = None,
 ):
     context = await run_in_threadpool(_log_view_context, team, path, agent, source)
-    return templates.TemplateResponse(request, "log_view.html", {
-        "request": request,
-        **context,
-    })
+    page_context = {"request": request, "active": "logs", **context}
+    return respond_live_or_html(
+        request, templates, page_context, _log_view_policy(team, path, agent, source, page_context)
+    )
 
 
 @app.get("/{team}/workspaces", response_class=HTMLResponse)

@@ -1,21 +1,20 @@
 {% extends "base.html" %}
 {% set active = "jobs" %}
 
-{% block title %}Jobs - {{ team_name }}{% endblock %}
+{#- Live regions. The page and every live snapshot render these same macros from the same context.
+    Cancel forms hold no draft, so they are disposable: a held (focused) one stays until released. -#}
+{% macro jobs_count_label() -%}
+{{ jobs|length }} job{{ 's' if jobs|length != 1 else '' }}
+{%- endmacro %}
 
-{% block content %}
-<div class="flex items-baseline justify-between mb-6 gap-4 flex-wrap">
-  <div>
-    <h1 class="text-2xl font-bold text-gray-900">Jobs in {{ team_name }}</h1>
-    <p class="text-sm text-gray-500 mt-1">Active and recent durable job records for this team.</p>
-  </div>
-  <span class="text-sm text-gray-500">{{ jobs|length }} job{{ 's' if jobs|length != 1 else '' }}</span>
-</div>
+{% macro jobs_queue_status() -%}
+Queue: {{ queue_waiting }} waiting
+{%- endmacro %}
 
+{% macro jobs_rows() -%}
 {% if jobs %}
-<div class="space-y-4">
   {% for job in jobs %}
-  <div class="bg-white rounded-xl border border-gray-200 p-5">
+  <div data-live-key="job:{{ job.job_id }}" class="bg-white rounded-xl border border-gray-200 p-5">
     <div class="flex items-start justify-between gap-4 flex-wrap">
       <div class="min-w-0">
         <div class="flex items-center gap-3 flex-wrap">
@@ -36,7 +35,7 @@
         <a href="{{ job.activity_href }}" class="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Activity</a>
         {% endif %}
         {% if job.can_cancel %}
-        <form method="POST" action="{{ job.detail_href }}/cancel">
+        <form method="POST" action="{{ job.detail_href }}/cancel" data-live-disposable>
           <button type="submit" class="px-3 py-2 text-sm font-medium text-white bg-amber-700 rounded-lg hover:bg-amber-800 transition-colors">Cancel</button>
         </form>
         {% endif %}
@@ -45,8 +44,22 @@
     </div>
   </div>
   {% endfor %}
-</div>
 {% else %}
-<div class="bg-white rounded-lg border border-gray-200 p-8 text-center text-gray-500">No jobs found.</div>
+<div data-live-key="jobs:empty" class="bg-white rounded-lg border border-gray-200 p-8 text-center text-gray-500">No jobs found.</div>
 {% endif %}
+{%- endmacro %}
+
+{% block title %}Jobs - {{ team_name }}{% endblock %}
+
+{% block content %}
+<div class="flex items-baseline justify-between mb-6 gap-4 flex-wrap">
+  <div>
+    <h1 class="text-2xl font-bold text-gray-900">Jobs in {{ team_name }}</h1>
+    <p class="text-sm text-gray-500 mt-1">Active and recent durable job records for this team.</p>
+  </div>
+  <span data-live-region="jobs-count" class="text-sm text-gray-500">{{ jobs_count_label() }}</span>
+</div>
+<div data-live-region="jobs-queue" class="sr-only" role="status" aria-live="polite" aria-atomic="true">{{ jobs_queue_status() }}</div>
+
+<div data-live-region="jobs-list" class="space-y-4">{{ jobs_rows() }}</div>
 {% endblock %}

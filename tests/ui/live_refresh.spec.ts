@@ -848,7 +848,8 @@ test('a page without live regions registers nothing and sends no periodic reques
   const live: string[] = [];
   page.on('request', (request) => { if (request.url().includes('__live=1')) live.push(request.url()); });
   await page.clock.install({ time: 0 });
-  await page.goto('/newsletter/logs');
+  const response = await page.goto('/newsletter/workspaces');
+  expect(response?.status()).toBe(200);
   await page.clock.pauseAt(600_000);
   await page.clock.runFor(10_000);
 

@@ -220,3 +220,124 @@ test.describe('inbox live regions', () => {
     await expect(label).toHaveText('30m ago');
   });
 });
+
+test.describe('jobs live regions', () => {
+  async function resetRuntime(request: APIRequestContext) {
+    expect((await request.post('/__ui/reset')).status()).toBe(204);
+  }
+
+  async function change(request: APIRequestContext, name: string) {
+    expect((await request.post('/__ui/live/change', { data: { case: name } })).status()).toBe(204);
+  }
+
+  const jobStatus = (page: Page) => page.locator('[data-live-region="job-status"]');
+  const cancelForms = (page: Page) => page.locator('main form[action$="/cancel"]');
+  const pageStatus = (page: Page) => page.locator('[data-live-status][role="status"]');
+
+  test.beforeEach(async ({ request }) => resetRuntime(request));
+  test.afterEach(async ({ request }) => resetRuntime(request));
+
+  test('a finished job updates in place and keeps the open diagnostics node', async ({ page, request }) => {
+    await page.goto('/newsletter/jobs/job-waiting');
+    await page.getByText('Diagnostics', { exact: true }).click();
+    const diagnostics = await page.locator('main details').elementHandle();
+    const main = await page.locator('main').elementHandle();
+    await expect(jobStatus(page)).toContainText('Waiting for memory');
+    await expect(cancelForms(page)).toHaveCount(1);
+
+    await change(request, 'job-finishes');
+
+    await expect(jobStatus(page)).toContainText('Complete');
+    await expect(jobStatus(page)).not.toContainText('Waiting for memory');
+    await expect(cancelForms(page)).toHaveCount(0);
+    expect(await diagnostics!.evaluate(
+      (node) => node.isConnected && node instanceof HTMLDetailsElement && node.open,
+    )).toBe(true);
+    expect(await main!.evaluate((node) => node.isConnected)).toBe(true);
+    await expect(page.getByText(/Memory hash: 2222/)).toBeVisible();
+  });
+
+  test('a held cancel button survives the finish until it is released', async ({ page, request }) => {
+    await page.goto('/newsletter/jobs/job-waiting');
+    const cancel = page.getByRole('button', { name: 'Cancel', exact: true });
+    await cancel.focus();
+    await expect(cancel).toBeFocused();
+
+    await change(request, 'job-finishes');
+
+    await expect(jobStatus(page)).toContainText('Complete');
+    await expect(cancel).toBeFocused();
+    await expect(cancelForms(page)).toHaveCount(1);
+
+    await cancel.evaluate((element) => (element as HTMLElement).blur());
+
+    await expect(cancelForms(page)).toHaveCount(0);
+  });
+
+  test('retained artifacts and the memory publication state follow the job', async ({ page, request }) => {
+    await page.goto('/newsletter/jobs/job-failed');
+    const artifacts = page.locator('[data-live-region="job-artifacts"]');
+    const publication = page.locator('[data-live-region="job-publication"]');
+    await expect(artifacts).toContainText('Failed memory snapshot');
+    await expect(publication).toContainText('1 retained artifact');
+
+    await change(request, 'job-failure-artifacts');
+
+    await expect(artifacts).toContainText('Second Draft');
+    await expect(publication).toContainText('2 retained artifacts');
+
+    await change(request, 'job-memory-published');
+
+    await expect(artifacts).not.toContainText('Failed memory snapshot');
+    await expect(publication).toHaveText('');
+  });
+
+  test('new and removed jobs reconcile the list by identity and keep untouched rows', async ({ page, request }) => {
+    await page.goto('/newsletter/jobs');
+    const count = page.locator('[data-live-region="jobs-count"]');
+    await expect(page.locator('[data-live-key="job:job-waiting"]')).toBeVisible();
+    await expect(page.locator('[data-live-key="job:job-failed"]')).toBeVisible();
+    await page.locator('[data-live-key="job:job-waiting"]').evaluate((element) => {
+      (element as unknown as { __kept: boolean }).__kept = true;
+    });
+    const before = Number(/(\d+)/.exec((await count.textContent()) ?? '')?.[1]);
+
+    await change(request, 'job-added');
+    await expect(page.locator('[data-live-key="job:job-live-added"]')).toBeVisible();
+    await expect(count).toHaveText(`${before + 1} jobs`);
+
+    await change(request, 'job-removed');
+    await expect(page.locator('[data-live-key="job:job-failed"]')).toHaveCount(0);
+    await expect(count).toHaveText(`${before} jobs`);
+    expect(await page.locator('[data-live-key="job:job-waiting"]').evaluate(
+      (element) => (element as unknown as { __kept?: boolean }).__kept,
+    )).toBe(true);
+  });
+
+  test('a row status updates while its focused cancel button is held', async ({ page, request }) => {
+    await page.goto('/newsletter/jobs');
+    const row = page.locator('[data-live-key="job:job-waiting"]');
+    const cancel = row.getByRole('button', { name: 'Cancel', exact: true });
+    await cancel.focus();
+
+    await change(request, 'job-finishes');
+
+    await expect(row.locator('span.rounded-full').first()).toHaveText('Complete');
+    await expect(cancel).toBeFocused();
+
+    await cancel.evaluate((element) => (element as HTMLElement).blur());
+
+    await expect(row.locator('form')).toHaveCount(0);
+  });
+
+  test('a removed job reports the page as unavailable without replacing it', async ({ page, request }) => {
+    await page.goto('/newsletter/jobs/job-failed');
+    await expect(jobStatus(page)).toContainText('Failed');
+
+    await change(request, 'job-removed');
+
+    await expect(pageStatus(page)).toBeVisible();
+    await expect(pageStatus(page)).toContainText('This page is no longer available');
+    await expect(jobStatus(page)).toContainText('Failed');
+  });
+});

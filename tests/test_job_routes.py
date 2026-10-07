@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import replace
+import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 from urllib.parse import quote, urlencode
@@ -14,6 +16,12 @@ from flowgency import app as app_mod
 from flowgency.jobs.authority import JobStore
 from flowgency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from flowgency.jobs.store import read_job, transition_job, write_job
+from flowgency.web.routes.jobs import (
+    JOB_DETAIL_REGION_MACROS,
+    JOB_DETAIL_STRUCTURE,
+    JOBS_LIST_REGION_MACROS,
+    JOBS_LIST_STRUCTURE,
+)
 from tests._git_evidence_helpers import requires_git
 from tests._team_helpers import apply_team_paths, create_team_environment
 
@@ -907,6 +915,298 @@ def test_a_later_reviewer_reusing_the_evidence_never_becomes_its_producer(
     assert producer.text.count(diff_path) == 1
     assert reviewer_page.status_code == 200
     assert captured.artifact.value not in reviewer_page.text
+
+
+_LIVE_INITIAL = re.compile(r'<script type="application/json" id="live-initial">(.*?)</script>', re.S)
+
+
+def _live_regions(response) -> dict[str, str]:
+    assert response.status_code == 200, response.text
+    return {region["key"]: region["html"] for region in response.json()["regions"]}
+
+
+def _page_region_keys(page: str) -> list[str]:
+    return re.findall(r'data-live-region="([^"]+)"', page)
+
+
+def _assert_snapshot_matches_page(page: str, regions: dict[str, str]) -> None:
+    assert sorted(regions) == sorted(_page_region_keys(page))
+    for key, html in regions.items():
+        assert html in page, key
+
+
+def _write_failed_job(team_root, config_path, *, job_id: str, summary: str = "Memory publication failed."):
+    job_store = JobStore(team_root.parent.parent / "memory-store")
+    path = _write_job_record(team_root, config_path, job_id=job_id, status="queued")
+    record = read_job(path)
+    log_dir = team_root / "logs" / "2026-07-16"
+    stdout_log = log_dir / f"advisor-scheduled_prompt-{job_id}.out"
+    stdout_log.write_text("stdout", encoding="utf-8")
+    artifact_dir = job_store.artifact_root("newsletter", job_id)
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    (artifact_dir / "memory.md").write_text("snapshot", encoding="utf-8")
+    failed = replace(
+        record,
+        status="failed",
+        stdout_path=str(stdout_log.resolve()),
+        changed_files=[{"path": "docs/brief.md", "status": "modified", "lines_added": 3, "lines_removed": 1}],
+        execution_summary=summary,
+        memory_publication={
+            "failed_artifacts": [
+                {"name": "memory.md", "path": str((artifact_dir / "memory.md").resolve()), "size": 8}
+            ]
+        },
+    )
+    write_job(path, failed)
+    return path, artifact_dir
+
+
+def test_live_job_list_snapshot_renders_the_same_regions_as_the_page(monkeypatch, tmp_path, raw_config):
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    _write_job_record(team_root, config_path, job_id="job-live-a", status="queued")
+
+    page = client.get("/newsletter/jobs")
+    snapshot = client.get("/newsletter/jobs?__live=1")
+    regions = _live_regions(snapshot)
+    body = snapshot.json()
+
+    assert body["binding"] == {"page": "jobs", "team": "newsletter", "entity": None, "tab": None, "query": {}}
+    assert body["structure"] == JOBS_LIST_STRUCTURE
+    assert set(JOBS_LIST_REGION_MACROS) <= set(regions)
+    _assert_snapshot_matches_page(page.text, regions)
+    assert 'data-live-key="job:job-live-a"' in regions["jobs-list"]
+    assert regions["jobs-count"] == "1 job"
+    assert "Queue: 1 waiting" in regions["jobs-queue"]
+    registration = json.loads(_LIVE_INITIAL.search(page.text).group(1))
+    assert registration["url"] == "/newsletter/jobs?__live=1"
+    assert registration["binding"] == body["binding"]
+    assert registration["structure"] == body["structure"]
+
+
+def test_live_job_list_snapshot_follows_lifecycle_additions_and_removals(monkeypatch, tmp_path, raw_config):
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    waiting = _write_job_record(team_root, config_path, job_id="job-live-w", status="waiting_for_memory")
+    first = client.get("/newsletter/jobs?__live=1")
+    cancel_action = 'action="/newsletter/jobs/job-live-w/cancel"'
+    assert cancel_action in _live_regions(first)["jobs-list"]
+    assert client.get(
+        "/newsletter/jobs?__live=1", headers={"If-None-Match": first.headers["etag"]}
+    ).status_code == 304
+
+    transition_job(waiting, "waiting_for_memory", "complete")
+    finished = client.get("/newsletter/jobs?__live=1", headers={"If-None-Match": first.headers["etag"]})
+    assert finished.status_code == 200
+    assert finished.headers["etag"] != first.headers["etag"]
+    html = _live_regions(finished)["jobs-list"]
+    assert "Complete" in html
+    assert cancel_action not in html
+
+    added = _write_job_record(team_root, config_path, job_id="job-live-n", status="queued")
+    regions = _live_regions(client.get("/newsletter/jobs?__live=1"))
+    assert 'data-live-key="job:job-live-n"' in regions["jobs-list"]
+    assert regions["jobs-count"] == "2 jobs"
+
+    added.unlink()
+    regions = _live_regions(client.get("/newsletter/jobs?__live=1"))
+    assert 'data-live-key="job:job-live-n"' not in regions["jobs-list"]
+    assert regions["jobs-count"] == "1 job"
+
+
+def test_live_job_list_snapshot_skips_a_job_that_vanishes_while_listing(monkeypatch, tmp_path, raw_config):
+    import flowgency.web.routes.jobs as jobs_mod
+
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    _write_job_record(team_root, config_path, job_id="job-live-keep", status="queued")
+    gone = _write_job_record(team_root, config_path, job_id="job-live-gone", status="queued")
+    original = jobs_mod.read_job
+
+    def vanishing(path, **kwargs):
+        if Path(path) == gone:
+            gone.unlink()
+        return original(path, **kwargs)
+
+    monkeypatch.setattr(jobs_mod, "read_job", vanishing)
+
+    regions = _live_regions(client.get("/newsletter/jobs?__live=1"))
+
+    assert 'data-live-key="job:job-live-keep"' in regions["jobs-list"]
+    assert "job-live-gone" not in regions["jobs-list"]
+
+
+def test_live_job_list_cancel_form_is_a_disposable_button_only_form(monkeypatch, tmp_path, raw_config):
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    _write_job_record(team_root, config_path, job_id="job-live-c", status="queued")
+
+    regions = _live_regions(client.get("/newsletter/jobs?__live=1"))
+
+    assert re.search(r'<form method="POST" action="/newsletter/jobs/job-live-c/cancel" data-live-disposable[^>]*>', regions["jobs-list"])
+    assert "<input" not in regions["jobs-list"]
+
+
+def test_live_job_list_snapshot_for_an_unknown_team_is_not_found(monkeypatch, tmp_path, raw_config):
+    client, _config_path, _team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+
+    assert client.get("/missing/jobs?__live=1").status_code == 404
+
+
+def test_live_job_detail_snapshot_renders_the_same_regions_as_the_page(monkeypatch, tmp_path, raw_config):
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    _write_failed_job(team_root, config_path, job_id="job-live-f")
+
+    page = client.get("/newsletter/jobs/job-live-f")
+    snapshot = client.get("/newsletter/jobs/job-live-f?__live=1")
+    regions = _live_regions(snapshot)
+    body = snapshot.json()
+
+    assert body["binding"] == {
+        "page": "job-detail", "team": "newsletter", "entity": "job-live-f", "tab": None, "query": {},
+    }
+    assert body["structure"] == JOB_DETAIL_STRUCTURE
+    assert set(JOB_DETAIL_REGION_MACROS) <= set(regions)
+    _assert_snapshot_matches_page(page.text, regions)
+    assert "Failed" in regions["job-status"]
+    assert "Brand Strategist" in regions["job-header"]
+    assert "Routine: Daily review" in regions["job-meta"]
+    assert "docs/brief.md" in regions["job-changes"]
+    assert "Failed memory snapshot" in regions["job-artifacts"]
+    assert "/newsletter/jobs/job-live-f?artifact=memory.md" in regions["job-artifacts"]
+    assert "advisor-scheduled_prompt-job-live-f.out" in regions["job-logs"]
+    assert "1 retained artifact" in regions["job-publication"]
+    assert "Memory publication failed." in regions["job-summary"]
+    registration = json.loads(_LIVE_INITIAL.search(page.text).group(1))
+    assert registration["url"] == "/newsletter/jobs/job-live-f?__live=1"
+    assert registration["binding"] == body["binding"]
+
+
+def test_live_job_detail_diagnostics_is_a_closed_keyed_disclosure(monkeypatch, tmp_path, raw_config):
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    _write_job_record(team_root, config_path, job_id="job-live-d", status="waiting_for_memory")
+
+    html = _live_regions(client.get("/newsletter/jobs/job-live-d?__live=1"))["job-diagnostics"]
+
+    assert re.search(r'<details data-live-key="job-diagnostics:details"[^>]*>', html)
+    assert " open" not in re.search(r"<details[^>]*>", html).group(0)
+    assert "Memory hash:" in html
+
+
+def test_live_job_detail_status_and_actions_follow_the_job_lifecycle(monkeypatch, tmp_path, raw_config):
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    path = _write_job_record(team_root, config_path, job_id="job-live-s", status="waiting_for_memory")
+    url = "/newsletter/jobs/job-live-s?__live=1"
+    before = client.get(url)
+    regions = _live_regions(before)
+    assert "Waiting for memory" in regions["job-status"]
+    assert re.search(r'<form method="POST" action="/newsletter/jobs/job-live-s/cancel" data-live-disposable[^>]*>', regions["job-actions"])
+    assert client.get(url, headers={"If-None-Match": before.headers["etag"]}).status_code == 304
+
+    transition_job(path, "waiting_for_memory", "complete")
+    after = client.get(url, headers={"If-None-Match": before.headers["etag"]})
+    regions = _live_regions(after)
+
+    assert after.headers["etag"] != before.headers["etag"]
+    assert "Complete" in regions["job-status"]
+    assert "Waiting for memory" not in regions["job-status"]
+    assert "/cancel" not in regions["job-actions"]
+
+
+def test_live_job_detail_offers_resume_as_a_disposable_form_and_keeps_the_notice_static(monkeypatch, tmp_path, raw_config):
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    _write_resumable_job(team_root, config_path, job_id="job-live-r", session_id="sess-live")
+
+    page = client.get("/newsletter/jobs/job-live-r?resume=failed")
+    regions = _live_regions(client.get("/newsletter/jobs/job-live-r?__live=1"))
+
+    assert re.search(r'<form method="POST" action="/newsletter/jobs/job-live-r/resume" data-live-disposable[^>]*>', regions["job-actions"])
+    assert 'id="resume-command"' in regions["job-resume"]
+    assert "sess-live" in regions["job-resume"]
+    assert "Could not open a terminal" in page.text
+    assert not any("Could not open a terminal" in html for html in regions.values())
+    assert "navigator.clipboard" not in page.text
+    assert '<script src="/static/job-actions.js"></script>' in page.text
+
+
+def test_live_job_detail_artifacts_and_publication_follow_the_retained_files(monkeypatch, tmp_path, raw_config):
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    path, artifact_dir = _write_failed_job(team_root, config_path, job_id="job-live-a")
+    url = "/newsletter/jobs/job-live-a?__live=1"
+    (artifact_dir / "second-draft.md").write_text("second", encoding="utf-8")
+    record = read_job(path)
+    publication = {
+        "failed_artifacts": [
+            *record.memory_publication["failed_artifacts"],
+            {"name": "second-draft.md", "path": str((artifact_dir / "second-draft.md").resolve()), "size": 6},
+        ]
+    }
+    write_job(path, replace(record, memory_publication=publication))
+
+    regions = _live_regions(client.get(url))
+
+    assert "Second Draft" in regions["job-artifacts"]
+    assert "2 retained artifacts" in regions["job-publication"]
+
+    (artifact_dir / "memory.md").unlink()
+    (artifact_dir / "second-draft.md").unlink()
+    write_job(path, replace(read_job(path), memory_publication={}))
+    regions = _live_regions(client.get(url))
+
+    assert regions["job-artifacts"].strip() == ""
+    assert regions["job-publication"].strip() == ""
+
+
+def test_live_job_detail_summary_is_sanitized_before_it_reaches_a_region(monkeypatch, tmp_path, raw_config):
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    hostile = '**kept**\n\n<script>window.hit=1</script><img src=x onerror="window.hit=1"><a href="javascript:alert(1)">go</a>'
+    _write_failed_job(team_root, config_path, job_id="job-live-x", summary=hostile)
+
+    snapshot = client.get("/newsletter/jobs/job-live-x?__live=1")
+    page = client.get("/newsletter/jobs/job-live-x")
+
+    summary = _live_regions(snapshot)["job-summary"]
+    assert "<strong>kept</strong>" in summary
+    for text in (summary, page.text):
+        assert "<script>window.hit" not in text
+        assert "onerror" not in text
+        assert "javascript:" not in text
+
+
+def test_live_job_detail_never_serves_an_artifact_as_a_snapshot(monkeypatch, tmp_path, raw_config):
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    _write_failed_job(team_root, config_path, job_id="job-live-dl")
+
+    download = client.get("/newsletter/jobs/job-live-dl?__live=1&artifact=memory.md")
+    traversal = client.get("/newsletter/jobs/job-live-dl?__live=1&artifact=..%2F..%2Fsecret.txt")
+    missing = client.get("/newsletter/jobs/job-live-dl?__live=1&artifact=absent.md")
+
+    assert download.status_code == 200
+    assert download.text == "snapshot"
+    assert "json" not in download.headers["content-type"]
+    assert traversal.status_code in {400, 403}
+    assert missing.status_code == 404
+
+
+def test_live_job_detail_snapshot_never_runs_resume_or_cancel(monkeypatch, tmp_path, raw_config):
+    import flowgency.web.routes.jobs as jobs_mod
+
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    path = _write_job_record(team_root, config_path, job_id="job-live-n", status="waiting_for_memory")
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("a snapshot must not run an action")
+
+    monkeypatch.setattr(jobs_mod, "spawn_interactive_terminal", forbidden)
+    monkeypatch.setattr(jobs_mod, "cancel_job", forbidden)
+
+    assert client.get("/newsletter/jobs/job-live-n?__live=1").status_code == 200
+    assert client.get("/newsletter/jobs?__live=1").status_code == 200
+    assert read_job(path).status == "waiting_for_memory"
+
+
+def test_live_job_detail_snapshot_rejects_unknown_jobs_and_teams(monkeypatch, tmp_path, raw_config):
+    client, _config_path, _team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+
+    assert client.get("/newsletter/jobs/job-live-none?__live=1").status_code == 404
+    assert client.get("/missing/jobs/job-live-none?__live=1").status_code == 404
+    assert client.get("/newsletter/jobs/..%5Cjob?__live=1").status_code == 404
 
 
 

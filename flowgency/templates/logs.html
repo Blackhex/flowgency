@@ -1,6 +1,15 @@
 {% extends "base.html" %}
 {% set active = "logs" %}
 
+{#- The page and every live snapshot render this same macro from the same context. -#}
+{% macro live_logs_listing() -%}
+{% if logs %}
+{% include "log_entries.html" %}
+{% else %}
+<div data-live-key="logs:empty" class="bg-white rounded-lg border border-gray-200 p-8 text-center text-gray-500">No logs found.</div>
+{% endif %}
+{%- endmacro %}
+
 {% block title %}Logs - {{ team_name }}{% endblock %}
 
 {% block content %}
@@ -8,11 +17,5 @@
   <h1 class="text-2xl font-bold text-gray-900">Execution Logs</h1>
 </div>
 
-{% if logs %}
-{% include "log_entries.html" %}
-{% endif %}
-
-{% if not logs %}
-<div class="bg-white rounded-lg border border-gray-200 p-8 text-center text-gray-500">No logs found.</div>
-{% endif %}
+<div data-live-region="logs-list">{{ live_logs_listing() }}</div>
 {% endblock %}

@@ -13,8 +13,11 @@ const OWNED_SELECTOR = [
 ].join(', ');
 // Stateful owned content a passive snapshot must never destroy: an item that holds
 // one stays until the controller disposes it (then flushDeferred() removes the item).
+// A form marked data-live-disposable carries no draft (a button-only action form), so
+// it goes when the server drops it unless it is held (focus, dirty control, selection).
 const PROTECTED_SELECTOR = [
-  'form', 'dialog', '[contenteditable]:not([contenteditable="false"])', '.xterm', '[data-live-owned]',
+  'form:not([data-live-disposable])', 'dialog', '[contenteditable]:not([contenteditable="false"])', '.xterm',
+  '[data-live-owned]',
 ].join(', ');
 // Attributes that carry local disclosure state; a server render never overrides them.
 const LOCAL_ATTRIBUTES = ['open', 'aria-expanded'];
@@ -430,6 +433,17 @@ function isScrolledToEnd(element) {
   return element.scrollHeight - element.scrollTop - element.clientHeight <= 2;
 }
 
+// data-live-follow follows the element's own scroll; data-live-follow="scroller" follows the
+// nearest scrolling ancestor instead (the page's real scroll container, not the document).
+function followScroller(element) {
+  if (element.getAttribute('data-live-follow') !== 'scroller') return element;
+  for (let node = element.parentElement; node; node = node.parentElement) {
+    const overflow = getComputedStyle(node).overflowY;
+    if ((overflow === 'auto' || overflow === 'scroll') && node.scrollHeight > node.clientHeight) return node;
+  }
+  return document.scrollingElement || document.documentElement;
+}
+
 class LiveRegionView {
   #root;
 
@@ -660,7 +674,7 @@ class LiveRegionView {
     const chain = this.#chainFor(region);
     const following = [region, ...region.querySelectorAll('[data-live-follow]')]
       .filter((element) => element.hasAttribute('data-live-follow'))
-      .map((element) => ({ element, follow: isScrolledToEnd(element) }));
+      .map((element) => ({ element, follow: isScrolledToEnd(followScroller(element)) }));
 
     let deferred = false;
     this.#chain = chain;
@@ -674,7 +688,9 @@ class LiveRegionView {
     if (this.#retained) deferred = true;
     this.#retained = false;
     for (const { element, follow } of following) {
-      if (follow && element.isConnected) element.scrollTop = element.scrollHeight;
+      if (!follow || !element.isConnected) continue;
+      const scroller = followScroller(element);
+      scroller.scrollTop = scroller.scrollHeight;
     }
     return deferred;
   }

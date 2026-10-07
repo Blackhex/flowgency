@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -26,12 +27,58 @@ from flowgency.web.job_presentation import friendly_status as _friendly_status
 from flowgency.web.job_presentation import friendly_trigger as _friendly_trigger
 from flowgency.web.job_presentation import routine_title as _routine_title
 from flowgency.web.job_presentation import status_badge_classes as _status_badge_classes
+from flowgency.web.live import LiveBinding, LivePagePolicy, respond_live_or_html, shared_region_macros
 from flowgency.web.logs import log_href as _shared_log_href
 from flowgency.web.team_navigation import build_team_context
 from flowgency.web.workflow_context import user_context
 
 
 router = APIRouter()
+
+JOBS_LIST_STRUCTURE = "jobs-list:1"
+JOBS_LIST_REGION_MACROS = {
+    "jobs-count": "jobs_count_label",
+    "jobs-queue": "jobs_queue_status",
+    "jobs-list": "jobs_rows",
+}
+JOB_DETAIL_STRUCTURE = "job-detail:1"
+JOB_DETAIL_REGION_MACROS = {
+    "job-header": "job_header_body",
+    "job-status": "job_status_badge",
+    "job-meta": "job_meta_body",
+    "job-notices": "job_notices_body",
+    "job-diagnostics": "job_diagnostics_body",
+    "job-actions": "job_actions_body",
+    "job-resume": "job_resume_body",
+    "job-changes": "job_changes_body",
+    "job-git-evidence": "job_git_evidence_body",
+    "job-artifacts": "job_artifacts_body",
+    "job-logs": "job_logs_body",
+    "job-publication": "job_publication_body",
+    "job-summary": "job_summary_body",
+}
+
+
+def _jobs_list_policy(team_id: str, context: dict[str, Any]) -> LivePagePolicy:
+    policy = LivePagePolicy(
+        template_name="jobs.html",
+        binding=LiveBinding(page="jobs", team=team_id),
+        structure=JOBS_LIST_STRUCTURE,
+        region_macros=JOBS_LIST_REGION_MACROS,
+        snapshot_url=f"/{team_id}/jobs?__live=1",
+    )
+    return replace(policy, region_macros=shared_region_macros(context, policy))
+
+
+def _job_detail_policy(team_id: str, job_id: str, context: dict[str, Any]) -> LivePagePolicy:
+    policy = LivePagePolicy(
+        template_name="job_detail.html",
+        binding=LiveBinding(page="job-detail", team=team_id, entity=job_id),
+        structure=JOB_DETAIL_STRUCTURE,
+        region_macros=JOB_DETAIL_REGION_MACROS,
+        snapshot_url=f"/{team_id}/jobs/{job_id}?__live=1",
+    )
+    return replace(policy, region_macros=shared_region_macros(context, policy))
 
 
 def _templates(request: Request):
@@ -145,8 +192,17 @@ def _job_rows(snapshot, job_store: JobStore, team_id: str) -> list[dict[str, Any
         for index, entry in enumerate(view.waiting)
     }
     rows: list[dict[str, Any]] = []
-    for path in sorted(job_store.paths(team_id), key=lambda item: item.stat().st_mtime, reverse=True):
-        record = read_job(path)
+    listed: list[tuple[float, Path]] = []
+    for path in job_store.paths(team_id):
+        try:
+            listed.append((path.stat().st_mtime, path))
+        except FileNotFoundError:
+            continue
+    for _mtime, path in sorted(listed, key=lambda item: item[0], reverse=True):
+        try:
+            record = read_job(path)
+        except FileNotFoundError:
+            continue
         instance = team_cfg.agents.get(record.spec.agent_name)
         agent_name = record.spec.agent_name
         rows.append(
@@ -237,16 +293,15 @@ async def jobs_list(request: Request, team: str, services: FlowgencyServices = D
         raise HTTPException(status_code=404, detail="Unknown team")
     if services.job_store is None:
         raise HTTPException(status_code=409, detail="Job store unavailable")
-    return _templates(request).TemplateResponse(
-        request,
-        "jobs.html",
-        {
-            "request": request,
-            **_team_context(request, snapshot, team),
-            "active": "jobs",
-            "jobs": _job_rows(snapshot, services.job_store, team),
-        },
-    )
+    jobs = _job_rows(snapshot, services.job_store, team)
+    context = {
+        "request": request,
+        **_team_context(request, snapshot, team),
+        "active": "jobs",
+        "jobs": jobs,
+        "queue_waiting": sum(1 for job in jobs if job["queue_position"]),
+    }
+    return respond_live_or_html(request, _templates(request), context, _jobs_list_policy(team, context))
 
 
 @router.get("/{team}/jobs/{job_id}", response_class=HTMLResponse)
@@ -262,24 +317,26 @@ async def job_detail(request: Request, team: str, job_id: str, artifact: str = "
     path = _job_path(services.job_store, team, job_id)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Job not found")
-    record = read_job(path)
+    try:
+        record = read_job(path)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Job not found") from None
     # The context build scans the team's tickets and reads retained artifacts.
     context = await run_in_threadpool(
         _job_detail_context, snapshot, team, record, services.tickets
     )
-    return _templates(request).TemplateResponse(
-        request,
-        "job_detail.html",
-        {
-            "request": request,
-            **_team_context(request, snapshot, team),
-            "active": "jobs",
-            **context,
-            "resume_notice": {
-                "launched": "Opening the session in a new terminal.",
-                "failed": "Could not open a terminal. Copy the command below and run it yourself.",
-            }.get(resume, ""),
-        },
+    page_context = {
+        "request": request,
+        **_team_context(request, snapshot, team),
+        "active": "jobs",
+        **context,
+        "resume_notice": {
+            "launched": "Opening the session in a new terminal.",
+            "failed": "Could not open a terminal. Copy the command below and run it yourself.",
+        }.get(resume, ""),
+    }
+    return respond_live_or_html(
+        request, _templates(request), page_context, _job_detail_policy(team, job_id, page_context)
     )
 
 

@@ -428,3 +428,166 @@ test.describe('javascript-disabled agent activity and log viewer', () => {
     await assertNoConsoleErrors(page);
   });
 });
+
+
+test.describe('live log view', () => {
+  const logDay = path.join(newsletterLogsRoot, '2026-07-16');
+  const tailLog = path.join(logDay, 'advisor-live-tail.out');
+  const viewUrl = (file: string, extra = '') => '/newsletter/logs/view?path=' + encodeURIComponent(file) + extra;
+
+  async function change(request: APIRequestContext, name: string): Promise<void> {
+    expect((await request.post('/__ui/live/change', { data: { case: name } })).status()).toBe(204);
+  }
+
+  const content = (page: Page) => page.locator('[data-live-region="log-content"]');
+  const status = (page: Page) => page.locator('[data-live-region="log-status"]');
+  const pageStatus = (page: Page) => page.locator('[data-live-status][role="status"]');
+  const scrollState = (page: Page) => page.locator('main').evaluate((main) => ({
+    top: main.scrollTop,
+    gap: main.scrollHeight - main.scrollTop - main.clientHeight,
+    scrolls: main.scrollHeight > main.clientHeight,
+  }));
+
+  test('growing output follows the bottom only for a reader already following it', async ({ page, request }) => {
+    await change(request, 'log-tall');
+    await page.goto(viewUrl(tailLog));
+    await expect(content(page)).toContainText('tail line 120');
+    await page.locator('main').evaluate((main) => { main.scrollTop = main.scrollHeight; });
+    expect((await scrollState(page)).scrolls).toBe(true);
+
+    await change(request, 'log-appended');
+
+    await expect(content(page)).toContainText('appended line 10');
+    await expect.poll(async () => (await scrollState(page)).gap).toBeLessThanOrEqual(2);
+  });
+
+  test('a reader scrolled away from the bottom keeps their position while output grows', async ({ page, request }) => {
+    await change(request, 'log-tall');
+    await page.goto(viewUrl(tailLog));
+    await expect(content(page)).toContainText('tail line 120');
+    await page.locator('main').evaluate((main) => { main.scrollTop = 200; });
+    const before = await scrollState(page);
+    expect(before.scrolls).toBe(true);
+    expect(before.gap).toBeGreaterThan(50);
+    const main = await page.locator('main').elementHandle();
+
+    await change(request, 'log-appended');
+
+    await expect(content(page)).toContainText('appended line 10');
+    expect((await scrollState(page)).top).toBe(before.top);
+    expect(await main!.evaluate((node) => node.isConnected)).toBe(true);
+  });
+
+  test('selected text and its node survive growth until the selection is released', async ({ page, request }) => {
+    await change(request, 'log-tall');
+    await page.goto(viewUrl(tailLog));
+    await expect(content(page)).toContainText('tail line 120');
+    const block = await page.locator('[data-log-content] > p').first().elementHandle();
+    await page.evaluate(() => {
+      const target = document.querySelector('[data-log-content] > p')!;
+      const range = document.createRange();
+      range.selectNodeContents(target);
+      const selection = window.getSelection()!;
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
+    const selected = await page.evaluate(() => String(window.getSelection()));
+
+    await change(request, 'log-appended');
+    await page.waitForTimeout(2600);
+
+    expect(await page.evaluate(() => String(window.getSelection()))).toBe(selected);
+    expect(await block!.evaluate((node) => node.isConnected)).toBe(true);
+    await expect(content(page)).not.toContainText('appended line 10');
+
+    await page.evaluate(() => window.getSelection()!.removeAllRanges());
+
+    await expect(content(page)).toContainText('appended line 10');
+    expect(await block!.evaluate((node) => node.isConnected)).toBe(true);
+  });
+
+  test('horizontal preview scroll and node identity survive growth', async ({ page }) => {
+    const wide = path.join(logDay, 'advisor-live-wide.out');
+    const source = '```\n' + 'W'.repeat(600) + '\n```\n\nfirst paragraph\n';
+    await mkdir(logDay, { recursive: true });
+    await writeFile(wide, source, 'utf8');
+    await page.goto(viewUrl(wide));
+    const block = content(page).locator('pre').first();
+    await expect(block).toBeVisible();
+    const handle = await block.elementHandle();
+    await block.evaluate((node) => { node.scrollLeft = 150; });
+    const left = await block.evaluate((node) => node.scrollLeft);
+    expect(left).toBeGreaterThan(0);
+
+    await writeFile(wide, source + '\nappended paragraph\n', 'utf8');
+
+    await expect(content(page)).toContainText('appended paragraph');
+    expect(await handle!.evaluate((node) => node.isConnected)).toBe(true);
+    expect(await handle!.evaluate((node) => node.scrollLeft)).toBe(left);
+  });
+
+  test('a rotated log replaces the preview and an oversized one reports truncation', async ({ page, request }) => {
+    await change(request, 'log-tall');
+    await page.goto(viewUrl(tailLog));
+    await expect(content(page)).toContainText('tail line 120');
+    await expect(status(page)).toHaveText('');
+
+    await change(request, 'log-truncated');
+
+    await expect(content(page)).toContainText('rotated line');
+    await expect(content(page)).not.toContainText('tail line 120');
+
+    await change(request, 'log-oversized');
+
+    await expect(status(page)).toContainText('Preview truncated');
+    await expect(page.getByRole('status').filter({ hasText: 'Preview truncated' })).toHaveCount(1);
+  });
+
+  test('a disappearing log reports the page as unavailable and keeps its last content', async ({ page, request }) => {
+    await change(request, 'log-tall');
+    await page.goto(viewUrl(tailLog));
+    await expect(content(page)).toContainText('tail line 120');
+
+    await change(request, 'log-removed');
+
+    await expect(pageStatus(page)).toBeVisible();
+    await expect(pageStatus(page)).toContainText('This page is no longer available');
+    await expect(content(page)).toContainText('tail line 120');
+  });
+
+  test('snapshot requests that change the selectors outside the allowed scope are rejected', async ({ request }) => {
+    const outside = path.resolve('tests/ui/outside-live-log.out');
+    await writeFile(outside, 'outside secret\n', 'utf8');
+    const owned = path.join(logDay, 'advisor-job-failed.out');
+    try {
+      const cases = [
+        viewUrl(outside, '&__live=1'),
+        viewUrl(outside, '&agent=advisor&source=logs&__live=1'),
+        viewUrl(owned, '&agent=reviewer&source=logs&__live=1'),
+        viewUrl(path.join(logDay, '..', '..', '..', '..', 'outside-live-log.out'), '&__live=1'),
+      ];
+      for (const url of cases) {
+        const response = await request.get(url);
+        expect(response.status(), url).toBe(403);
+        expect(await response.text()).not.toContain('outside secret');
+      }
+      expect((await request.get(viewUrl(owned, '&agent=advisor&__live=1'))).status()).toBe(400);
+      expect((await request.get(viewUrl(owned, '&agent=advisor&source=logs&__live=1'))).status()).toBe(200);
+    } finally {
+      await rm(outside, { force: true });
+    }
+  });
+
+  test('the log listing gains and loses entries in place', async ({ page, request }) => {
+    await page.goto('/newsletter/logs');
+    const listing = page.locator('[data-live-region="logs-list"]');
+    await expect(listing.getByRole('link', { name: 'advisor-job-failed.err', exact: true })).toBeVisible();
+    await listing.evaluate((node) => { (node as unknown as { __kept: boolean }).__kept = true; });
+
+    await change(request, 'log-listing-membership');
+
+    await expect(listing.getByRole('link', { name: 'advisor-live-membership.out', exact: true })).toBeVisible();
+    await expect(listing.getByRole('link', { name: 'advisor-job-failed.err', exact: true })).toHaveCount(0);
+    expect(await listing.evaluate((node) => (node as unknown as { __kept?: boolean }).__kept)).toBe(true);
+  });
+});

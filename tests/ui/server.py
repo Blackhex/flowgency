@@ -32,7 +32,7 @@ from flowgency.jobs.connected_process import connected_process_available as _REA
 from flowgency.jobs.models import JobHandle
 from flowgency.jobs.authority import JobStore
 from flowgency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
-from flowgency.jobs.store import cancel_job, transition_job, write_job
+from flowgency.jobs.store import cancel_job, read_job, transition_job, write_job
 from flowgency.memory import MemoryStore, resolve_memory_selector
 from flowgency.prompts import PromptStore
 from flowgency.tickets.models import ActiveTicketRun, StorageBinding, TicketEvent, TicketOperation, TicketRecord, TicketRef
@@ -83,6 +83,17 @@ LIVE_CHANGE_CASES = frozenset(
         "agent-report-history",
         "agent-team-runtime",
         "agent-permissions",
+        "job-finishes",
+        "job-added",
+        "job-removed",
+        "job-failure-artifacts",
+        "job-memory-published",
+        "log-tall",
+        "log-appended",
+        "log-truncated",
+        "log-oversized",
+        "log-removed",
+        "log-listing-membership",
     }
 )
 INBOX_CLOCK_ADVANCE = timedelta(minutes=30)
@@ -410,6 +421,10 @@ def _apply_live_change(runtime: Path, case: str) -> None:
         _INBOX_LIVE_CHANGES[case](runtime)
     elif case in _AGENT_LIVE_CHANGES:
         _AGENT_LIVE_CHANGES[case](runtime)
+    elif case in _JOB_LIVE_CHANGES:
+        _JOB_LIVE_CHANGES[case](runtime)
+    elif case in _LOG_LIVE_CHANGES:
+        _LOG_LIVE_CHANGES[case](runtime)
     else:
         raise ValueError(f"Unknown live change case: {case}")
 
@@ -677,6 +692,126 @@ _AGENT_LIVE_CHANGES = {
     "agent-report-history": _agent_report_history,
     "agent-team-runtime": _agent_team_runtime,
     "agent-permissions": _agent_permissions,
+}
+
+LIVE_LOG_DAY = "2026-07-16"
+LIVE_TAIL_LOG_NAME = "advisor-live-tail.out"
+LIVE_TAIL_LOG_LINES = 120
+LIVE_APPENDED_LINES = 10
+LIVE_MEMBERSHIP_LOG_NAME = "advisor-live-membership.out"
+LIVE_SECOND_ARTIFACT = "second-draft.md"
+# Larger than the log preview's display limit, so the viewer reports truncation.
+LIVE_OVERSIZED_LINES = 6000
+
+
+def _job_store(runtime: Path) -> JobStore:
+    return JobStore(runtime / "memory-store")
+
+
+def _job_finishes(runtime: Path) -> None:
+    path = _job_store(runtime).path("newsletter", "job-waiting")
+    transition_job(
+        path,
+        "waiting_for_memory",
+        "complete",
+        completed_at="2026-07-16T12:00:30+00:00",
+        duration_seconds=30,
+    )
+
+
+def _job_added(runtime: Path) -> None:
+    write_job(
+        _job_store(runtime).path("newsletter", "job-live-added"),
+        JobRecord.from_spec(_job_spec(runtime, runtime / "config.yaml", "job-live-added")),
+    )
+
+
+def _job_removed(runtime: Path) -> None:
+    path = _job_store(runtime).path("newsletter", "job-failed")
+    path.unlink(missing_ok=True)
+    Path(f"{path}.lock").unlink(missing_ok=True)
+
+
+def _job_failure_artifacts(runtime: Path) -> None:
+    authority = _job_store(runtime)
+    path = authority.path("newsletter", "job-failed")
+    artifact = authority.artifact_root("newsletter", "job-failed") / LIVE_SECOND_ARTIFACT
+    _write(artifact, "# Second retained draft\n")
+    record = read_job(path)
+    retained = [
+        *record.memory_publication["failed_artifacts"],
+        {"name": artifact.name, "path": str(artifact.resolve()), "size": artifact.stat().st_size},
+    ]
+    write_job(path, dataclasses.replace(record, memory_publication={"failed_artifacts": retained}))
+
+
+def _job_memory_published(runtime: Path) -> None:
+    authority = _job_store(runtime)
+    path = authority.path("newsletter", "job-failed")
+    for artifact in authority.artifact_root("newsletter", "job-failed").glob("*.md"):
+        artifact.unlink()
+    write_job(path, dataclasses.replace(read_job(path), memory_publication={}))
+
+
+_JOB_LIVE_CHANGES = {
+    "job-finishes": _job_finishes,
+    "job-added": _job_added,
+    "job-removed": _job_removed,
+    "job-failure-artifacts": _job_failure_artifacts,
+    "job-memory-published": _job_memory_published,
+}
+
+
+def _live_log_dir(runtime: Path) -> Path:
+    return runtime / "teams" / "newsletter" / "logs" / LIVE_LOG_DAY
+
+
+def _log_tall(runtime: Path) -> None:
+    lines = (f"tail line {number}" for number in range(1, LIVE_TAIL_LOG_LINES + 1))
+    _write_log(
+        _live_log_dir(runtime) / LIVE_TAIL_LOG_NAME,
+        "\n".join(lines) + "\n",
+        mtime="2026-07-16T11:50:00+00:00",
+    )
+
+
+def _log_appended(runtime: Path) -> None:
+    lines = "".join(f"appended line {number}\n" for number in range(1, LIVE_APPENDED_LINES + 1))
+    with (_live_log_dir(runtime) / LIVE_TAIL_LOG_NAME).open("a", encoding="utf-8", newline="\n") as stream:
+        stream.write(lines)
+
+
+def _log_truncated(runtime: Path) -> None:
+    _write(_live_log_dir(runtime) / LIVE_TAIL_LOG_NAME, "rotated line\n")
+
+
+def _log_oversized(runtime: Path) -> None:
+    _write(
+        _live_log_dir(runtime) / LIVE_TAIL_LOG_NAME,
+        "# oversized\n\n" + "oversized line\n" * LIVE_OVERSIZED_LINES,
+    )
+
+
+def _log_removed(runtime: Path) -> None:
+    (_live_log_dir(runtime) / LIVE_TAIL_LOG_NAME).unlink(missing_ok=True)
+
+
+def _log_listing_membership(runtime: Path) -> None:
+    _write_log(
+        _live_log_dir(runtime) / LIVE_MEMBERSHIP_LOG_NAME,
+        "membership log\n",
+        mtime="2026-07-16T11:55:00+00:00",
+    )
+    (_live_log_dir(runtime) / "advisor-job-failed.err").unlink(missing_ok=True)
+
+
+_LOG_LIVE_CHANGES = {
+    "log-tall": _log_tall,
+    "log-appended": _log_appended,
+    "log-truncated": _log_truncated,
+    "log-oversized": _log_oversized,
+    "log-removed": _log_removed,
+    "log-listing-membership": _log_listing_membership,
 }
 
 

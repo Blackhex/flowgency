@@ -1,6 +1,22 @@
 {% extends "base.html" %}
 {% set active = "logs" %}
 
+{#- The page and every live snapshot render these same macros from the same context.
+    Plain output is escaped; the markdown preview is already sanitized by read_log_preview. -#}
+{% macro live_log_status() -%}
+{% if truncated %}
+<p role="status" class="mb-3 text-sm text-amber-700 dark:text-amber-300">Preview truncated</p>
+{% endif %}
+{%- endmacro %}
+
+{% macro live_log_content() -%}
+{% if content_html is not none %}
+{{ content_html | safe }}
+{% else %}
+<pre class="whitespace-pre-wrap text-sm">{{ raw }}</pre>
+{% endif %}
+{%- endmacro %}
+
 {% block title %}{{ filename }} - Logs{% endblock %}
 
 {% block content %}
@@ -13,15 +29,7 @@
     <h1 class="min-w-0 flex-1 text-lg font-bold text-gray-900 font-mono break-words" style="overflow-wrap:anywhere;word-break:break-word;">{{ filename }}</h1>
   </div>
 
-  {% if truncated %}
-  <p role="status" class="mb-3 text-sm text-amber-700 dark:text-amber-300">Preview truncated</p>
-  {% endif %}
-  <div data-log-content class="prose max-w-none min-w-0 [&_pre]:overflow-x-auto" style="overflow-wrap:anywhere;word-break:break-word;">
-    {% if content_html is not none %}
-    {{ content_html | safe }}
-    {% else %}
-    <pre class="whitespace-pre-wrap text-sm">{{ raw }}</pre>
-    {% endif %}
-  </div>
+  <div data-live-region="log-status">{{ live_log_status() }}</div>
+  <div data-log-content data-live-region="log-content" data-live-follow="scroller" class="prose max-w-none min-w-0 [&_pre]:overflow-x-auto" style="overflow-wrap:anywhere;word-break:break-word;">{{ live_log_content() }}</div>
 </div>
 {% endblock %}

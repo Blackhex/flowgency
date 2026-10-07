@@ -7,15 +7,26 @@ from types import SimpleNamespace
 import yaml
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 import flowgency.app as app_mod
-from flowgency.app import build_agent_timeline, collect_logs, get_agent_logs
+from flowgency.app import (
+    LOG_VIEW_REGION_MACROS,
+    LOG_VIEW_STRUCTURE,
+    LOGS_LIST_REGION_MACROS,
+    LOGS_LIST_STRUCTURE,
+    build_agent_timeline,
+    collect_logs,
+    get_agent_logs,
+)
+from flowgency.web.log_preview import DISPLAY_LIMIT
 from flowgency.web.logs import collect_agent_logs
 from tests.test_agent_detail import _seed_activity_app
+from tests.test_job_routes import _LIVE_INITIAL, _assert_snapshot_matches_page, _live_regions
 from tests.test_local_ticket_storage import _make_reparse
 
 
@@ -534,3 +545,192 @@ def test_log_work_does_not_block_event_loop(preview_team, monkeypatch):
                 released.set()
                 await pending
     asyncio.run(check())
+
+
+_TEAM = "newsletter-prod"
+
+
+def _log_view_url(log_file: Path, **selectors: str) -> str:
+    return f"/{_TEAM}/logs/view?" + urlencode({"path": str(log_file), **selectors})
+
+
+def test_live_logs_list_snapshot_matches_the_page_and_follows_membership(monkeypatch, tmp_path, raw_config):
+    client, _config_path, log_file = _seed_activity_app(monkeypatch, tmp_path, raw_config)
+    url = f"/{_TEAM}/logs?__live=1"
+
+    page = client.get(f"/{_TEAM}/logs")
+    first = client.get(url)
+    regions = _live_regions(first)
+    body = first.json()
+
+    assert body["binding"] == {"page": "logs", "team": _TEAM, "entity": None, "tab": None, "query": {}}
+    assert body["structure"] == LOGS_LIST_STRUCTURE
+    assert set(LOGS_LIST_REGION_MACROS) <= set(regions)
+    _assert_snapshot_matches_page(page.text, regions)
+    assert 'data-live-key="log:2026-07-16:advisor-run.out"' in regions["logs-list"]
+    registration = json.loads(_LIVE_INITIAL.search(page.text).group(1))
+    assert registration["url"] == url
+    assert client.get(url, headers={"If-None-Match": first.headers["etag"]}).status_code == 304
+
+    added = log_file.parent / "advisor-added.out"
+    added.write_text("added", encoding="utf-8")
+    changed = client.get(url, headers={"If-None-Match": first.headers["etag"]})
+    assert changed.status_code == 200
+    assert 'data-live-key="log:2026-07-16:advisor-added.out"' in _live_regions(changed)["logs-list"]
+
+    log_file.unlink()
+    added.unlink()
+    emptied = _live_regions(client.get(url))["logs-list"]
+    assert "log:2026-07-16" not in emptied
+    assert "No logs found." in emptied
+
+
+def test_live_log_view_snapshot_binds_the_selectors_and_matches_the_page(monkeypatch, tmp_path, raw_config):
+    client, _config_path, log_file = _seed_activity_app(monkeypatch, tmp_path, raw_config)
+    selectors = {"agent": "advisor", "source": "logs"}
+    url = _log_view_url(log_file, **selectors)
+
+    page = client.get(url)
+    snapshot = client.get(url + "&__live=1")
+    regions = _live_regions(snapshot)
+    body = snapshot.json()
+
+    assert body["binding"] == {
+        "page": "log-view",
+        "team": _TEAM,
+        "entity": None,
+        "tab": None,
+        "query": {"path": str(log_file), **selectors},
+    }
+    assert body["structure"] == LOG_VIEW_STRUCTURE
+    assert set(LOG_VIEW_REGION_MACROS) <= set(regions)
+    _assert_snapshot_matches_page(page.text, regions)
+    assert "<h1>log</h1>" in regions["log-content"]
+    registration = json.loads(_LIVE_INITIAL.search(page.text).group(1))
+    parsed = urlsplit(registration["url"])
+    assert parsed.path == f"/{_TEAM}/logs/view"
+    assert dict(parse_qsl(parsed.query)) == {"path": str(log_file), **selectors, "__live": "1"}
+    assert registration["binding"] == body["binding"]
+
+    plain = client.get(_log_view_url(log_file) + "&__live=1").json()["binding"]
+    assert plain["query"] == {"path": str(log_file)}
+
+
+def test_live_log_view_content_grows_shrinks_and_reports_truncation(monkeypatch, tmp_path, raw_config):
+    client, _config_path, log_file = _seed_activity_app(monkeypatch, tmp_path, raw_config)
+    url = _log_view_url(log_file) + "&__live=1"
+    first = client.get(url)
+    assert client.get(url, headers={"If-None-Match": first.headers["etag"]}).status_code == 304
+    assert _live_regions(first)["log-status"].strip() == ""
+
+    log_file.write_text("# log\n\nappended tail line\n", encoding="utf-8")
+    grown = client.get(url, headers={"If-None-Match": first.headers["etag"]})
+    assert grown.status_code == 200
+    assert "appended tail line" in _live_regions(grown)["log-content"]
+
+    log_file.write_text("# log\n\n" + "x" * (DISPLAY_LIMIT + 10), encoding="utf-8")
+    truncated = _live_regions(client.get(url))
+    assert '<p role="status"' in truncated["log-status"]
+    assert "Preview truncated" in truncated["log-status"]
+
+    log_file.write_text("# log\n", encoding="utf-8")
+    shrunk = _live_regions(client.get(url))
+    assert shrunk["log-status"].strip() == ""
+    assert "appended tail line" not in shrunk["log-content"]
+
+
+def test_live_log_view_of_a_disappearing_file_is_unavailable_without_other_content(monkeypatch, tmp_path, raw_config):
+    client, _config_path, log_file = _seed_activity_app(monkeypatch, tmp_path, raw_config)
+    neighbour = log_file.parent / "advisor-neighbour.out"
+    neighbour.write_text("neighbour secret", encoding="utf-8")
+    url = _log_view_url(log_file) + "&__live=1"
+    assert client.get(url).status_code == 200
+
+    log_file.unlink()
+    response = client.get(url)
+
+    assert response.status_code == 404
+    assert "neighbour secret" not in response.text
+    assert "regions" not in response.json()
+
+
+@pytest.mark.parametrize("suffix", [".out", ".err"])
+def test_live_log_view_escapes_plain_output_and_keeps_the_sanitized_preview(monkeypatch, tmp_path, raw_config, suffix):
+    client, _config_path, log_file = _seed_activity_app(monkeypatch, tmp_path, raw_config)
+    hostile = log_file.parent / f"advisor-hostile{suffix}"
+    hostile.write_text(
+        '<script>window.hit=1</script><img src=x onerror="window.hit=1">\x1b[31mred\x1b[0m',
+        encoding="utf-8",
+    )
+
+    html = _live_regions(client.get(_log_view_url(hostile) + "&__live=1"))["log-content"]
+
+    assert "<script" not in html
+    assert "<img" not in html
+    if suffix == ".err":
+        assert "&lt;script&gt;" in html
+        assert "&lt;img" in html
+    else:
+        assert "onerror" not in html
+
+
+@pytest.mark.parametrize(
+    ("selectors", "expected_status"),
+    [
+        ({"agent": "advisor"}, 400),
+        ({"source": "logs"}, 400),
+        ({"agent": "advisor", "source": "bad"}, 400),
+        ({"agent": "missing", "source": "logs"}, 404),
+    ],
+)
+def test_live_log_view_rejects_invalid_selectors_before_reading_content(
+    monkeypatch, tmp_path, raw_config, selectors, expected_status
+):
+    client, _config_path, log_file = _seed_activity_app(monkeypatch, tmp_path, raw_config)
+
+    def fail_preview(_path: Path):
+        raise AssertionError("read_log_preview must not run for a rejected snapshot")
+
+    monkeypatch.setattr(app_mod, "read_log_preview", fail_preview)
+
+    response = client.get(_log_view_url(log_file, **selectors) + "&__live=1")
+
+    assert response.status_code == expected_status
+
+
+def test_live_log_view_rejects_changed_paths_outside_the_allowed_scope_before_reading(monkeypatch, tmp_path, raw_config):
+    client, config_path, log_file = _seed_activity_app(monkeypatch, tmp_path, raw_config)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["teams"][_TEAM]["agents"].append({**raw["teams"][_TEAM]["agents"][0], "name": "advisor-extra"})
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    app_mod.refresh_services()
+    app_mod.app.state.services = app_mod.build_services(config_path)
+    team_root = log_file.parents[2]
+    other_agent = log_file.parent / "advisor-extra-run.out"
+    other_agent.write_text("other agent secret", encoding="utf-8")
+    outside = tmp_path / "outside-live.out"
+    outside.write_text("outside secret", encoding="utf-8")
+    hidden = team_root / "logs" / ".hidden"
+    hidden.mkdir()
+    hidden_log = hidden / "advisor-run.out"
+    hidden_log.write_text("hidden secret", encoding="utf-8")
+    unsupported = log_file.parent / "advisor-notes.md"
+    unsupported.write_text("notes secret", encoding="utf-8")
+    traversal = log_file.parent / ".." / ".." / ".." / ".." / "outside-live.out"
+
+    def fail_preview(_path: Path):
+        raise AssertionError("read_log_preview must not run for a rejected snapshot")
+
+    monkeypatch.setattr(app_mod, "read_log_preview", fail_preview)
+
+    for rejected, selectors in (
+        (outside, {}),
+        (outside, {"agent": "advisor", "source": "logs"}),
+        (other_agent, {"agent": "advisor", "source": "logs"}),
+        (hidden_log, {}),
+        (unsupported, {}),
+        (traversal, {}),
+    ):
+        response = client.get(_log_view_url(rejected, **selectors) + "&__live=1")
+        assert response.status_code == 403, (rejected, selectors)
+        assert "secret" not in response.text

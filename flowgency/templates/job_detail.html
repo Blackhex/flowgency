@@ -1,6 +1,152 @@
 {% extends "base.html" %}
 {% set active = "jobs" %}
 
+{#- Live regions. The page and every live snapshot render these same macros from the same context.
+    The resume notice stays outside them: it comes from the redirect that launched the terminal.
+    Resume and cancel forms hold no draft, so they are disposable: a held (focused) one stays until released. -#}
+{% macro job_header_body() -%}
+<h1 class="text-xl font-bold text-gray-900 dark:text-gray-100">{{ display_name }}</h1>
+{% if title %}<div class="text-sm text-gray-500 mt-1">{{ title }}</div>{% endif %}
+{%- endmacro %}
+
+{% macro job_status_badge() -%}
+<span data-live-key="job-status:badge" class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {{ job_status_classes }}">{{ job_status_label }}</span>
+{%- endmacro %}
+
+{% macro job_meta_body() -%}
+<span>Blueprint: <strong>{{ blueprint }}</strong></span>
+<span>Integration: <strong>{{ integration }}</strong></span>
+<span>Routine: {{ routine_title }}</span>
+<span>Memory: {{ memory_label }}</span>
+{%- endmacro %}
+
+{% macro job_notices_body() -%}
+{% if instance_missing %}<div data-live-key="job-notice:instance-missing" class="mb-6 text-sm text-amber-700">Instance no longer belongs to this team</div>{% endif %}
+{%- endmacro %}
+
+{% macro job_diagnostics_body() -%}
+<details data-live-key="job-diagnostics:details" class="mb-6">
+  <summary class="text-sm text-gray-500 cursor-pointer">Diagnostics</summary>
+  <div class="mt-2 text-xs font-mono text-gray-500">Job: {{ job.spec.job_id }}</div>
+  <div class="text-xs font-mono text-gray-500">Memory hash: {{ diagnostic_memory_hash }}</div>
+  <div class="text-xs text-gray-500">Artifact access is constrained to this job's canonical directory.</div>
+</details>
+{%- endmacro %}
+
+{% macro job_actions_body() -%}
+{% if profile_href %}
+<a data-live-key="job-action:profile" href="{{ profile_href }}" class="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Agent Detail</a>
+{% endif %}
+{% if activity_href %}
+<a data-live-key="job-action:activity" href="{{ activity_href }}" class="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Activity</a>
+{% endif %}
+{% if routine_href %}
+<a data-live-key="job-action:routines" href="{{ routine_href }}" class="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Routines</a>
+{% endif %}
+{% if resume_available %}
+<form method="POST" action="/{{ team }}/jobs/{{ job.spec.job_id }}/resume" data-live-disposable data-live-key="job-action:resume">
+  <button type="submit" class="px-3 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors">{{ resume_label }}</button>
+</form>
+{% endif %}
+{% if can_cancel %}
+<form method="POST" action="/{{ team }}/jobs/{{ job.spec.job_id }}/cancel" data-live-disposable data-live-key="job-action:cancel">
+  <button type="submit" class="px-3 py-2 text-sm font-medium text-white bg-amber-700 rounded-lg hover:bg-amber-800 transition-colors">Cancel</button>
+</form>
+{% endif %}
+{%- endmacro %}
+
+{% macro job_resume_body() -%}
+{% if resume_command %}
+<div data-live-key="job-resume:command" class="mb-6 space-y-2">
+  <label for="resume-command" class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Resume command</label>
+  <input id="resume-command" type="text" readonly value="{{ resume_command }}" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono text-gray-900 bg-gray-50 dark:bg-gray-800 dark:text-gray-100 dark:border-gray-600">
+  <div class="flex flex-wrap gap-3 items-center">
+    <button type="button" id="copy-resume" class="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Copy command</button>
+    <span id="copy-resume-feedback" data-live-owned class="text-sm text-gray-500"></span>
+  </div>
+</div>
+{% endif %}
+{%- endmacro %}
+
+{% macro job_changes_body() -%}
+{% if job.changed_files %}
+<div data-live-key="job-changes:list" class="mt-3 mb-6">
+  <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Changed files</div>
+  <div class="font-mono text-sm space-y-1">
+    {% for f in job.changed_files %}
+    <div data-live-key="job-file:{{ f.path }}" class="flex items-center gap-2">
+      <span class="text-gray-800 dark:text-gray-200">{{ f.path }}</span>
+      {% if f.lines_added %}<span class="text-emerald-700 dark:text-emerald-300">+{{ f.lines_added }}</span>{% endif %}
+      {% if f.lines_removed %}<span class="text-red-700 dark:text-red-300">&minus;{{ f.lines_removed }}</span>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+{%- endmacro %}
+
+{% macro job_git_evidence_body() -%}
+{% if git_evidence_links or git_evidence_issues %}
+<div data-live-key="job-git-evidence:list" class="mb-6" data-git-evidence-links>
+  <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Git evidence</div>
+  <div class="space-y-2 text-sm">
+    {% for link in git_evidence_links %}
+    <div class="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
+      <a href="{{ link.href }}" class="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 break-words min-w-0">{{ link.label }}</a>
+      <a href="{{ link.ticket_href }}" class="text-gray-500 hover:text-gray-700 dark:text-gray-400">Ticket</a>
+    </div>
+    {% endfor %}
+    {% for issue in git_evidence_issues %}
+    <div class="text-gray-500 dark:text-gray-400">{{ issue.message }}</div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+{%- endmacro %}
+
+{% macro job_artifacts_body() -%}
+{% if failed_artifacts %}
+<div data-live-key="job-artifacts:list" class="mb-6">
+  <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Artifacts</div>
+  <div class="space-y-2 text-sm">
+    {% for artifact in failed_artifacts %}
+    <div data-live-key="job-artifact:{{ artifact.name }}"><a href="{{ artifact.href }}" class="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400">{{ artifact.label }}</a></div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+{%- endmacro %}
+
+{% macro job_logs_body() -%}
+{% if stdout_href or stderr_href %}
+<div data-live-key="job-logs:links" class="mb-6 text-sm text-gray-600 dark:text-gray-300">
+  {% if stdout_href %}
+  <div>Stdout log: <a href="{{ stdout_href }}" title="{{ job.stdout_path }}" class="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400">{{ stdout_name }}</a></div>
+  {% endif %}
+  {% if stderr_href %}
+  <div>Stderr log: <a href="{{ stderr_href }}" title="{{ job.stderr_path }}" class="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400">{{ stderr_name }}</a></div>
+  {% endif %}
+</div>
+{% endif %}
+{%- endmacro %}
+
+{% macro job_publication_body() -%}
+{% if publication_receipt %}
+<div data-live-key="job-publication:receipt" class="mb-6 text-sm text-gray-600 dark:text-gray-300">
+  <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Publication receipt</div>
+  {% if publication_receipt.failed_artifacts %}
+  <div>{{ publication_receipt.failed_artifacts|length }} retained artifact{{ 's' if publication_receipt.failed_artifacts|length != 1 else '' }}</div>
+  {% endif %}
+</div>
+{% endif %}
+{%- endmacro %}
+
+{% macro job_summary_body() -%}
+{% if job.execution_summary %}
+<div data-live-key="job-summary:text" class="prose dark:prose-invert prose-sm max-w-none">{{ job.execution_summary | ticket_markdown }}</div>
+{% endif %}
+{%- endmacro %}
+
 {% block title %}Job Detail - {{ team_name }}{% endblock %}
 
 {% block content %}
@@ -10,152 +156,36 @@
 
 <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
   <div class="flex items-start justify-between mb-4 gap-4 flex-wrap">
-    <div>
-      <h1 class="text-xl font-bold text-gray-900 dark:text-gray-100">{{ display_name }}</h1>
-      {% if title %}<div class="text-sm text-gray-500 mt-1">{{ title }}</div>{% endif %}
-    </div>
-    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {{ job_status_classes }}">{{ job_status_label }}</span>
+    <div data-live-region="job-header">{{ job_header_body() }}</div>
+    <div data-live-region="job-status" class="flex">{{ job_status_badge() }}</div>
   </div>
 
-  <div class="flex flex-wrap gap-x-6 gap-y-1 text-sm text-gray-500 dark:text-gray-400 mb-6 pb-4 border-b border-gray-100 dark:border-gray-700">
-    <span>Blueprint: <strong>{{ blueprint }}</strong></span>
-    <span>Integration: <strong>{{ integration }}</strong></span>
-    <span>Routine: {{ routine_title }}</span>
-    <span>Memory: {{ memory_label }}</span>
-  </div>
-  {% if instance_missing %}<div class="mb-6 text-sm text-amber-700">Instance no longer belongs to this team</div>{% endif %}
+  <div data-live-region="job-meta" class="flex flex-wrap gap-x-6 gap-y-1 text-sm text-gray-500 dark:text-gray-400 mb-6 pb-4 border-b border-gray-100 dark:border-gray-700">{{ job_meta_body() }}</div>
+  <div data-live-region="job-notices">{{ job_notices_body() }}</div>
 
-  <details class="mb-6">
-    <summary class="text-sm text-gray-500 cursor-pointer">Diagnostics</summary>
-    <div class="mt-2 text-xs font-mono text-gray-500">Job: {{ job.spec.job_id }}</div>
-    <div class="text-xs font-mono text-gray-500">Memory hash: {{ diagnostic_memory_hash }}</div>
-    <div class="text-xs text-gray-500">Artifact access is constrained to this job's canonical directory.</div>
-  </details>
+  <div data-live-region="job-diagnostics">{{ job_diagnostics_body() }}</div>
 
-  <div class="flex gap-2 flex-wrap mb-6">
-    {% if profile_href %}
-    <a href="{{ profile_href }}" class="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Agent Detail</a>
-    {% endif %}
-    {% if activity_href %}
-    <a href="{{ activity_href }}" class="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Activity</a>
-    {% endif %}
-    {% if routine_href %}
-    <a href="{{ routine_href }}" class="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Routines</a>
-    {% endif %}
-    {% if resume_available %}
-    <form method="POST" action="/{{ team }}/jobs/{{ job.spec.job_id }}/resume">
-      <button type="submit" class="px-3 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors">{{ resume_label }}</button>
-    </form>
-    {% endif %}
-    {% if can_cancel %}
-    <form method="POST" action="/{{ team }}/jobs/{{ job.spec.job_id }}/cancel">
-      <button type="submit" class="px-3 py-2 text-sm font-medium text-white bg-amber-700 rounded-lg hover:bg-amber-800 transition-colors">Cancel</button>
-    </form>
-    {% endif %}
-  </div>
+  <div data-live-region="job-actions" class="flex gap-2 flex-wrap mb-6">{{ job_actions_body() }}</div>
 
   {% if resume_notice %}
   <div class="mb-4 text-sm text-gray-600 dark:text-gray-300">{{ resume_notice }}</div>
   {% endif %}
 
-  {% if resume_command %}
-  <div class="mb-6 space-y-2">
-    <label for="resume-command" class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Resume command</label>
-    <input id="resume-command" type="text" readonly value="{{ resume_command }}" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono text-gray-900 bg-gray-50 dark:bg-gray-800 dark:text-gray-100 dark:border-gray-600">
-    <div class="flex flex-wrap gap-3 items-center">
-      <button type="button" id="copy-resume" class="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Copy command</button>
-      <span id="copy-resume-feedback" class="text-sm text-gray-500"></span>
-    </div>
-  </div>
-  {% endif %}
+  <div data-live-region="job-resume">{{ job_resume_body() }}</div>
 
-  {% if job.changed_files %}
-  <div class="mt-3 mb-6">
-    <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Changed files</div>
-    <div class="font-mono text-sm space-y-1">
-      {% for f in job.changed_files %}
-      <div class="flex items-center gap-2">
-        <span class="text-gray-800 dark:text-gray-200">{{ f.path }}</span>
-        {% if f.lines_added %}<span class="text-emerald-700 dark:text-emerald-300">+{{ f.lines_added }}</span>{% endif %}
-        {% if f.lines_removed %}<span class="text-red-700 dark:text-red-300">&minus;{{ f.lines_removed }}</span>{% endif %}
-      </div>
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
+  <div data-live-region="job-changes">{{ job_changes_body() }}</div>
 
-  {% if git_evidence_links or git_evidence_issues %}
-  <div class="mb-6" data-git-evidence-links>
-    <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Git evidence</div>
-    <div class="space-y-2 text-sm">
-      {% for link in git_evidence_links %}
-      <div class="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
-        <a href="{{ link.href }}" class="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 break-words min-w-0">{{ link.label }}</a>
-        <a href="{{ link.ticket_href }}" class="text-gray-500 hover:text-gray-700 dark:text-gray-400">Ticket</a>
-      </div>
-      {% endfor %}
-      {% for issue in git_evidence_issues %}
-      <div class="text-gray-500 dark:text-gray-400">{{ issue.message }}</div>
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
+  <div data-live-region="job-git-evidence">{{ job_git_evidence_body() }}</div>
 
-  {% if failed_artifacts %}
-  <div class="mb-6">
-    <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Artifacts</div>
-    <div class="space-y-2 text-sm">
-      {% for artifact in failed_artifacts %}
-      <div><a href="{{ artifact.href }}" class="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400">{{ artifact.label }}</a></div>
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
+  <div data-live-region="job-artifacts">{{ job_artifacts_body() }}</div>
 
-  {% if stdout_href or stderr_href %}
-  <div class="mb-6 text-sm text-gray-600 dark:text-gray-300">
-    {% if stdout_href %}
-    <div>Stdout log: <a href="{{ stdout_href }}" title="{{ job.stdout_path }}" class="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400">{{ stdout_name }}</a></div>
-    {% endif %}
-    {% if stderr_href %}
-    <div>Stderr log: <a href="{{ stderr_href }}" title="{{ job.stderr_path }}" class="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400">{{ stderr_name }}</a></div>
-    {% endif %}
-  </div>
-  {% endif %}
+  <div data-live-region="job-logs">{{ job_logs_body() }}</div>
 
-  {% if publication_receipt %}
-  <div class="mb-6 text-sm text-gray-600 dark:text-gray-300">
-    <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Publication receipt</div>
-    {% if publication_receipt.failed_artifacts %}
-    <div>{{ publication_receipt.failed_artifacts|length }} retained artifact{{ 's' if publication_receipt.failed_artifacts|length != 1 else '' }}</div>
-    {% endif %}
-  </div>
-  {% endif %}
+  <div data-live-region="job-publication">{{ job_publication_body() }}</div>
 
-  {% if job.execution_summary %}
-  <div class="prose dark:prose-invert prose-sm max-w-none">{{ job.execution_summary | render_md }}</div>
-  {% endif %}
+  <div data-live-region="job-summary">{{ job_summary_body() }}</div>
 
 </div>
-
-<script>
-  (function () {
-    const field = document.getElementById("resume-command");
-    const button = document.getElementById("copy-resume");
-    const feedback = document.getElementById("copy-resume-feedback");
-    if (!field || !button || !feedback) {
-      return;
-    }
-    button.addEventListener("click", async () => {
-      try {
-        await navigator.clipboard.writeText(field.value);
-        feedback.textContent = "Copied.";
-      } catch (error) {
-        field.focus();
-        field.select();
-        feedback.textContent = "Copy failed. Select the command and copy it manually.";
-      }
-    });
-  })();
-</script>
 {% endblock %}
+
+{% block page_scripts %}<script src="/static/job-actions.js"></script>{% endblock %}

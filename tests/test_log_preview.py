@@ -184,3 +184,27 @@ def test_plain_text_source_cut_inside_unicode_is_safe(tmp_path, monkeypatch):
     preview = log_preview.read_log_preview(path)
     assert preview.text == "1234567\ufffd"
     assert preview.truncated
+
+
+def test_live_preview_is_stable_between_reads_and_tracks_growth_and_shrinkage(tmp_path, monkeypatch):
+    path = tmp_path / "growing.err"
+    monkeypatch.setattr(log_preview, "SOURCE_LIMIT", 64)
+    monkeypatch.setattr(log_preview, "DISPLAY_LIMIT", 16)
+    path.write_bytes(b"abc")
+    first = log_preview.read_log_preview(path)
+    assert log_preview.read_log_preview(path) == first
+    assert not first.truncated
+
+    path.write_bytes(b"abc def ghi jkl mno pqr")
+    cut = log_preview.read_log_preview(path)
+    assert cut.truncated
+    assert cut.text == "abc def ghi jkl "
+
+    # Growth beyond the display limit leaves the preview unchanged, so a live snapshot stays unchanged too.
+    path.write_bytes(b"abc def ghi jkl mno pqr stu vwx")
+    assert log_preview.read_log_preview(path) == cut
+
+    path.write_bytes(b"abc")
+    shrunk = log_preview.read_log_preview(path)
+    assert shrunk == first
+    assert not shrunk.truncated

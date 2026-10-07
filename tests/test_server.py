@@ -2733,8 +2733,10 @@ def test_sidebar_roster_page_registers_the_live_page_with_its_status_shell(workf
 
 
 def test_sidebar_pages_without_a_live_policy_do_not_register(workflow_web_env):
-    page = workflow_web_env.client.get("/newsletter/logs").text
+    response = workflow_web_env.client.get("/newsletter/workspaces")
+    page = response.text
 
+    assert response.status_code == 200
     assert 'id="live-initial"' not in page
     assert "live-refresh.js" not in page
     assert "data-live-status" not in page

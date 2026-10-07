@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import threading
+from urllib.parse import urlencode
 
 import pytest
 from fastapi.testclient import TestClient
@@ -406,6 +408,8 @@ def test_live_change_cases_all_have_a_dispatcher():
         "navigation-workflow-count",
         *server._INBOX_LIVE_CHANGES,
         *server._AGENT_LIVE_CHANGES,
+        *server._JOB_LIVE_CHANGES,
+        *server._LOG_LIVE_CHANGES,
     }
     assert dispatched == set(server.LIVE_CHANGE_CASES)
 
@@ -452,3 +456,175 @@ def test_live_change_agent_cases_update_the_roster_and_reset_restores_every_sour
             assert not (runtime / "teams" / "newsletter" / "logs" / "2026-07-16" / "advisor-live-refresh.out").exists()
     finally:
         server._safe_remove_runtime(runtime)
+
+
+@contextlib.contextmanager
+def _live_fixture(monkeypatch):
+    import flowgency.app as app_mod
+
+    runtime, config_path = server._prepare_runtime()
+    try:
+        monkeypatch.setenv("FLOWGENCY_CONFIG", str(config_path))
+        monkeypatch.setenv("FLOWGENCY_UI_RUNTIME", str(runtime))
+        monkeypatch.setenv("FLOWGENCY_FIXED_NOW", server.FIXED_NOW)
+        monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
+        server._install_ui_test_runtime()
+        app_mod.refresh_services()
+        with TestClient(app_mod.app) as client:
+            yield client, runtime
+    finally:
+        server._safe_remove_runtime(runtime)
+
+
+def _apply(client, case: str) -> None:
+    assert client.post(server.LIVE_CHANGE_PATH, json={"case": case}).status_code == 204, case
+
+
+def _reset(client) -> None:
+    assert client.post(server.UI_RESET_PATH).status_code == 204
+
+
+def _region(client, path: str, key: str) -> str:
+    separator = "&" if "?" in path else "?"
+    response = client.get(f"{path}{separator}__live=1")
+    assert response.status_code == 200, response.text
+    return next(region["html"] for region in response.json()["regions"] if region["key"] == key)
+
+
+def _log_view_path(runtime, name: str = server.LIVE_TAIL_LOG_NAME) -> str:
+    log = runtime / "teams" / "newsletter" / "logs" / "2026-07-16" / name
+    return "/newsletter/logs/view?" + urlencode({"path": str(log)})
+
+
+def test_live_change_job_finishes_completes_the_waiting_job(monkeypatch):
+    with _live_fixture(monkeypatch) as (client, _runtime):
+        detail = "/newsletter/jobs/job-waiting"
+        assert "Waiting for memory" in _region(client, detail, "job-status")
+
+        _apply(client, "job-finishes")
+        assert "Complete" in _region(client, detail, "job-status")
+        assert "Waiting for memory" not in _region(client, detail, "job-status")
+        assert "/cancel" not in _region(client, detail, "job-actions")
+
+        _reset(client)
+        assert "Waiting for memory" in _region(client, detail, "job-status")
+
+
+def test_live_change_job_added_and_removed_change_the_list_and_reset_restores_it(monkeypatch):
+    with _live_fixture(monkeypatch) as (client, _runtime):
+        jobs = "/newsletter/jobs"
+        before = _region(client, jobs, "jobs-list")
+        assert 'data-live-key="job:job-live-added"' not in before
+
+        _apply(client, "job-added")
+        added = _region(client, jobs, "jobs-list")
+        assert 'data-live-key="job:job-live-added"' in added
+        assert 'data-live-key="job:job-failed"' in added
+
+        _apply(client, "job-removed")
+        removed = _region(client, jobs, "jobs-list")
+        assert 'data-live-key="job:job-failed"' not in removed
+        assert 'data-live-key="job:job-live-added"' in removed
+
+        _reset(client)
+        assert _region(client, jobs, "jobs-list") == before
+
+
+def test_live_change_job_failure_artifacts_adds_a_retained_artifact_and_reset_restores_it(monkeypatch):
+    with _live_fixture(monkeypatch) as (client, _runtime):
+        detail = "/newsletter/jobs/job-failed"
+        before = _region(client, detail, "job-artifacts")
+        assert "Failed memory snapshot" in before
+        assert "Second Draft" not in before
+
+        _apply(client, "job-failure-artifacts")
+        assert "Second Draft" in _region(client, detail, "job-artifacts")
+        assert "2 retained artifacts" in _region(client, detail, "job-publication")
+
+        _reset(client)
+        assert _region(client, detail, "job-artifacts") == before
+
+
+def test_live_change_job_memory_published_clears_the_publication_state_and_reset_restores_it(monkeypatch):
+    with _live_fixture(monkeypatch) as (client, _runtime):
+        detail = "/newsletter/jobs/job-failed"
+        assert "1 retained artifact" in _region(client, detail, "job-publication")
+
+        _apply(client, "job-memory-published")
+        assert _region(client, detail, "job-publication").strip() == ""
+        assert _region(client, detail, "job-artifacts").strip() == ""
+
+        _reset(client)
+        assert "1 retained artifact" in _region(client, detail, "job-publication")
+
+
+def test_live_change_log_tall_creates_a_log_longer_than_the_viewport_and_reset_removes_it(monkeypatch):
+    with _live_fixture(monkeypatch) as (client, runtime):
+        view = _log_view_path(runtime)
+        assert client.get(f"{view}&__live=1").status_code == 404
+
+        _apply(client, "log-tall")
+        content = _region(client, view, "log-content")
+        assert f"tail line {server.LIVE_TAIL_LOG_LINES}" in content
+
+        _reset(client)
+        assert client.get(f"{view}&__live=1").status_code == 404
+
+
+def test_live_change_log_appended_adds_lines_to_the_tail_log(monkeypatch):
+    with _live_fixture(monkeypatch) as (client, runtime):
+        view = _log_view_path(runtime)
+        _apply(client, "log-tall")
+        assert "appended line" not in _region(client, view, "log-content")
+
+        _apply(client, "log-appended")
+        content = _region(client, view, "log-content")
+        assert f"appended line {server.LIVE_APPENDED_LINES}" in content
+        assert f"tail line {server.LIVE_TAIL_LOG_LINES}" in content
+
+
+def test_live_change_log_truncated_shrinks_the_tail_log(monkeypatch):
+    with _live_fixture(monkeypatch) as (client, runtime):
+        view = _log_view_path(runtime)
+        _apply(client, "log-tall")
+        _apply(client, "log-truncated")
+
+        content = _region(client, view, "log-content")
+        assert "rotated line" in content
+        assert "tail line" not in content
+
+
+def test_live_change_log_oversized_exceeds_the_preview_limit(monkeypatch):
+    with _live_fixture(monkeypatch) as (client, runtime):
+        view = _log_view_path(runtime)
+        _apply(client, "log-tall")
+        assert _region(client, view, "log-status").strip() == ""
+
+        _apply(client, "log-oversized")
+        assert "Preview truncated" in _region(client, view, "log-status")
+
+
+def test_live_change_log_removed_makes_the_tail_log_unavailable(monkeypatch):
+    with _live_fixture(monkeypatch) as (client, runtime):
+        view = _log_view_path(runtime)
+        _apply(client, "log-tall")
+        assert client.get(f"{view}&__live=1").status_code == 200
+
+        _apply(client, "log-removed")
+        assert client.get(f"{view}&__live=1").status_code == 404
+
+
+def test_live_change_log_listing_membership_adds_and_removes_entries(monkeypatch):
+    with _live_fixture(monkeypatch) as (client, _runtime):
+        listing = "/newsletter/logs"
+        before = _region(client, listing, "logs-list")
+        assert 'data-live-key="log:2026-07-16:advisor-job-failed.err"' in before
+        assert server.LIVE_MEMBERSHIP_LOG_NAME not in before
+
+        _apply(client, "log-listing-membership")
+        changed = _region(client, listing, "logs-list")
+        assert f'data-live-key="log:2026-07-16:{server.LIVE_MEMBERSHIP_LOG_NAME}"' in changed
+        assert 'data-live-key="log:2026-07-16:advisor-job-failed.err"' not in changed
+
+        _reset(client)
+        assert _region(client, listing, "logs-list") == before
