@@ -1,6 +1,7 @@
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 
 import { assertNoConsoleErrors, assertNoLayoutIssues, installBasePageSetup } from './layout';
+import { expectNoNotice, expectOnlyNotice, expectQuietPolls, notices } from './live_notice';
 
 const advisorPath = '/newsletter/agents/advisor/permissions';
 const fixturePath = '/research/agents/permissions-editor/permissions';
@@ -642,5 +643,29 @@ test.describe('permissions live refresh', () => {
     await expect(page.getByRole('button', { name: 'Reload page' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Save permissions' })).toBeDisabled();
     await expect(page.locator('[data-rule-path]').first()).toHaveValue('C:/draft/only/path2');
+  });
+
+  test('a remote permission change is announced while the draft and loaded baseline stay', async ({ page, request }) => {
+    await page.goto(advisorPath);
+    await expectNoNotice(page);
+    const saved = page.locator('[data-live-region="agent-permissions-saved"]');
+    await expect(saved).toHaveAttribute('role', 'status');
+    await expect(saved).toHaveAttribute('aria-live', 'polite');
+    await expect(saved).toHaveAttribute('aria-atomic', 'true');
+    const loadedBaseline = await page.locator('#permissions-initial').textContent();
+    const loadedPayload = await page.locator('#permissions-form input[name="payload"]').inputValue();
+    const pathField = page.locator('[data-rule-path]').first();
+    await pathField.fill('C:/draft/only/path');
+
+    expect((await request.post('/__ui/live/change', { data: { case: 'agent-permissions' } })).status()).toBe(204);
+
+    await expectOnlyNotice(page, 'Saved permissions changed since this form loaded. Reload to see the latest.');
+    await expect(pathField).toHaveValue('C:/draft/only/path');
+    expect(await page.locator('#permissions-initial').textContent()).toBe(loadedBaseline);
+    await expect(page.locator('#permissions-form input[name="payload"]')).toHaveValue(loadedPayload);
+    await expectQuietPolls(page, [saved, notices(page)]);
+
+    expect((await request.post('/__ui/reset')).status()).toBe(204);
+    await expectNoNotice(page);
   });
 });

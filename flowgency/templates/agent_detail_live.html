@@ -23,11 +23,13 @@
   </div>
 {%- endmacro %}
 
-{#- Screen-reader status: the configuration revision is shown separately from every form's loaded one. -#}
+{#- Screen-reader status: the configuration revision is shown separately from every form's loaded one.
+    On tabs whose form saves against it, the revision marker lets the notice controller (agent-detail-notices.js)
+    compare it with the form's hidden revision; the form itself is never advanced. -#}
 {% macro agent_status() -%}
-<p data-live-key="agent-status:config">Configuration revision {{ config_revision[:12] }}</p>
+<p data-live-key="agent-status:config"{% if tab in ('profile', 'runtime', 'prompts', 'memory') %} data-live-revision="{{ config_revision }}" data-live-scope="config" data-live-baseline-input="revision" data-live-changed="Agent configuration changed since this form loaded. Reload to see the latest."{% endif %}>Configuration revision {{ config_revision[:12] }}</p>
 <p data-live-key="agent-status:write">Workspace write {{ 'granted' if can_write else 'not granted' }}</p>
-<p data-live-key="agent-status:jobs">Active jobs: {{ agent_active_jobs|length }}</p>
+<p data-live-key="agent-status:jobs" data-live-revision="{{ agent_active_jobs | map(attribute='job_id') | sort | join(',') }}" data-live-scope="jobs" data-live-changed="Active jobs changed since this page loaded. Now {{ agent_active_jobs|length }} active.">Active jobs: {{ agent_active_jobs|length }}</p>
 {% for job in agent_active_jobs %}
 <p data-live-key="job:{{ job.job_id }}">{{ job.status }} job {{ job.job_id }}</p>
 {% endfor %}
@@ -101,7 +103,7 @@
 {#- The fingerprint changes whenever the saved effective access does; the editor summary stays controller-owned. -#}
 {% macro permissions_saved() -%}
 <p data-live-key="permissions:workspace">Saved permissions: workspace-root write {{ 'granted' if permission_workspace_write else 'not granted' }}</p>
-<p data-live-key="permissions:effective">Saved effective access {{ permission_summary_fingerprint }}</p>
+<p data-live-key="permissions:effective" data-live-revision="{{ permission_summary_fingerprint }}" data-live-scope="permissions" data-live-changed="Saved permissions changed since this form loaded. Reload to see the latest.">Saved effective access {{ permission_summary_fingerprint }}</p>
 {%- endmacro %}
 
 {% macro prompts_catalog() -%}
@@ -183,7 +185,9 @@
     {% endfor %}
 {%- endmacro %}
 
+{#- The revision covers the saved definitions only, so a routine firing (last fired, next due) never reads as an edit. -#}
 {% macro routines_saved() -%}
+<p data-live-key="routines:revision" data-live-revision="{{ routines_revision }}" data-live-scope="routines" data-live-changed="Saved routines changed since this form loaded. Reload to see the latest.">Saved routines revision {{ routines_revision }}</p>
 {% for row in routine_saved_status %}
 <p data-live-key="routine:{{ row.routine_id }}">Routine {{ row.routine_id }}: {{ 'enabled' if row.enabled else 'disabled' }}, {{ row.schedule }}, last fired {{ row.last_fired }}, next due {{ row.next_due }}</p>
 {% endfor %}
@@ -191,7 +195,7 @@
 
 {% macro memory_status() -%}
 <p data-live-key="memory:default">Default memory: <strong>{{ memory_scope_label }}</strong></p>
-<p class="sr-only" data-live-key="memory:revision">Memory content revision {{ memory_snapshot.revision[:12] }}; files {{ memory_file_options | join(', ') }}</p>
+<p class="sr-only" role="status" aria-live="polite" aria-atomic="true" data-live-key="memory:revision" data-live-revision="{{ memory_snapshot.revision }}" data-live-scope="memory" data-live-baseline-input="content_revision" data-live-changed="Memory content changed since this form loaded. Reload to see the latest.">Memory content revision {{ memory_snapshot.revision[:12] }}; files {{ memory_file_options | join(', ') }}</p>
 {%- endmacro %}
 
 {% macro activity_count_label() -%}

@@ -1865,3 +1865,161 @@ def test_live_detail_post_never_answers_with_a_snapshot(monkeypatch, tmp_path, r
 
     assert response.status_code == 409
     assert response.headers["content-type"].startswith("text/html")
+
+
+# ── External-change notices ──────────────────────────────────────────────────
+
+_ANNOUNCED = 'role="status" aria-live="polite" aria-atomic="true"'
+_CONFIG_NOTICE_TABS = ("profile", "runtime", "prompts", "memory")
+_CONFIG_NOTICE = "Agent configuration changed since this form loaded. Reload to see the latest."
+_PERMISSIONS_NOTICE = "Saved permissions changed since this form loaded. Reload to see the latest."
+_ROUTINES_NOTICE = "Saved routines changed since this form loaded. Reload to see the latest."
+_MEMORY_NOTICE = "Memory content changed since this form loaded. Reload to see the latest."
+
+
+def _revision_markers(html: str) -> dict[str, dict[str, str]]:
+    markers: dict[str, dict[str, str]] = {}
+    for tag in re.findall(r"<[a-z]+ [^>]*data-live-revision=[^>]*>", html):
+        attributes = dict(re.findall(r'([a-z-]+)="([^"]*)"', tag))
+        markers[attributes["data-live-scope"]] = attributes
+    return markers
+
+
+def _hidden_value(html: str, name: str) -> str:
+    return re.search(rf'<input type="hidden" name="{name}" value="([^"]*)"', html).group(1)
+
+
+@pytest.mark.parametrize("tab", _LIVE_TABS)
+def test_live_detail_page_has_an_empty_announced_notice_host_and_its_controller(monkeypatch, tmp_path, raw_config, tab):
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+
+    page = client.get(f"/newsletter/agents/advisor/{tab}").text
+
+    assert '<div data-live-notices role="status" aria-live="polite"></div>' in page
+    assert '<script src="/static/agent-detail-notices.js"></script>' in page
+    assert page.index("agent-detail-notices.js") < page.index("live-refresh.js")
+
+
+@pytest.mark.parametrize("tab", _LIVE_TABS)
+def test_live_detail_status_regions_are_announced_politely(monkeypatch, tmp_path, raw_config, tab):
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+
+    page = client.get(f"/newsletter/agents/advisor/{tab}").text
+
+    assert f'<div data-live-region="agent-status" class="sr-only" {_ANNOUNCED}>' in page
+    if tab == "permissions":
+        assert f'<div data-live-region="agent-permissions-saved" class="sr-only" {_ANNOUNCED}>' in page
+    if tab == "routines":
+        assert f'<div data-live-region="agent-routines-saved" class="sr-only" {_ANNOUNCED}>' in page
+    if tab == "memory":
+        assert f'<p class="sr-only" {_ANNOUNCED} data-live-key="memory:revision"' in page
+
+
+@pytest.mark.parametrize("tab", _LIVE_TABS)
+def test_live_detail_config_revision_marker_matches_the_loaded_form_and_snapshot(monkeypatch, tmp_path, raw_config, tab):
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+    page = client.get(f"/newsletter/agents/advisor/{tab}").text
+    snapshot = live_regions(_live(client, tab))["agent-status"]
+
+    marker = _revision_markers(snapshot).get("config")
+
+    if tab not in _CONFIG_NOTICE_TABS:
+        assert marker is None
+        return
+    assert marker["data-live-revision"] == _hidden_value(page, "revision")
+    assert marker["data-live-baseline-input"] == "revision"
+    assert marker["data-live-changed"] == _CONFIG_NOTICE
+    assert _revision_markers(page)["config"] == marker
+
+
+def test_live_detail_config_marker_follows_the_config_revision_not_the_loaded_form(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    page = client.get("/newsletter/agents/advisor/profile").text
+    loaded = _hidden_value(page, "revision")
+    assert _revision_markers(page)["config"]["data-live-revision"] == loaded
+
+    _config_patch(config_path, lambda raw: _advisor(raw)["identity"].update(title="Renamed Librarian"))
+
+    refreshed = _revision_markers(live_regions(_live(client, "profile"))["agent-status"])["config"]
+    assert refreshed["data-live-revision"] != loaded
+    assert refreshed["data-live-revision"] == ConfigStore(config_path).load().revision
+
+
+def test_live_detail_permissions_marker_changes_only_with_saved_permissions(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    page = client.get("/newsletter/agents/advisor/permissions").text
+    loaded = _revision_markers(page)["permissions"]
+    assert loaded["data-live-changed"] == _PERMISSIONS_NOTICE
+    assert "data-live-baseline-input" not in loaded
+
+    _config_patch(config_path, lambda raw: _advisor(raw)["identity"].update(title="Renamed Librarian"))
+    unrelated = _revision_markers(live_regions(_live(client, "permissions"))["agent-permissions-saved"])["permissions"]
+    assert unrelated["data-live-revision"] == loaded["data-live-revision"]
+
+    _config_patch(
+        config_path,
+        lambda raw: _advisor(raw)["permissions"]["rules"].append(
+            {"path": str((tmp_path / "Research" / "editorial").resolve()), "tools": ["read"]}
+        ),
+    )
+    changed = _revision_markers(live_regions(_live(client, "permissions"))["agent-permissions-saved"])["permissions"]
+    assert changed["data-live-revision"] != loaded["data-live-revision"]
+
+
+def test_live_detail_routines_marker_follows_the_saved_definitions_only(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    page = client.get("/newsletter/agents/advisor/routines").text
+    loaded = _revision_markers(page)["routines"]
+    assert loaded["data-live-changed"] == _ROUTINES_NOTICE
+    assert "data-live-baseline-input" not in loaded
+
+    _config_patch(config_path, lambda raw: _advisor(raw)["identity"].update(title="Renamed Librarian"))
+    unrelated = _revision_markers(live_regions(_live(client, "routines"))["agent-routines-saved"])["routines"]
+    assert unrelated["data-live-revision"] == loaded["data-live-revision"]
+
+    _config_patch(
+        config_path,
+        lambda raw: _advisor(raw)["routines"].append(
+            {
+                "id": "weekly-sweep",
+                "prompt": {"scope": "blueprint", "name": "pr-review"},
+                "schedule": {"every": "7d"},
+                "memory": {"scope": "agent"},
+            }
+        ),
+    )
+    changed = _revision_markers(live_regions(_live(client, "routines"))["agent-routines-saved"])["routines"]
+    assert changed["data-live-revision"] != loaded["data-live-revision"]
+
+
+def test_live_detail_memory_marker_is_the_loaded_content_revision(monkeypatch, tmp_path, raw_config):
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+    page = client.get("/newsletter/agents/advisor/memory").text
+    snapshot = live_regions(_live(client, "memory"))["agent-memory-status"]
+
+    marker = _revision_markers(snapshot)["memory"]
+
+    assert marker["data-live-revision"] == _hidden_value(page, "content_revision")
+    assert marker["data-live-baseline-input"] == "content_revision"
+    assert marker["data-live-changed"] == _MEMORY_NOTICE
+    assert _revision_markers(page)["memory"] == marker
+
+
+@pytest.mark.parametrize("tab", _LIVE_TABS)
+def test_live_detail_jobs_marker_follows_the_active_job_set_and_adds_no_visible_markup(monkeypatch, tmp_path, raw_config, tab):
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+    page = client.get(f"/newsletter/agents/advisor/{tab}").text
+    loaded = _revision_markers(page)["jobs"]
+    assert loaded["data-live-revision"] == ""
+    assert loaded["data-live-changed"] == "Active jobs changed since this page loaded. Now 0 active."
+    assert "active job" not in live_regions(_live(client, tab))["agent-header"]
+
+    _write_live_job(tmp_path, "job-live", "running")
+    one = _revision_markers(live_regions(_live(client, tab))["agent-status"])["jobs"]
+    _write_live_job(tmp_path, "job-live-2", "queued")
+    two = _revision_markers(live_regions(_live(client, tab))["agent-status"])["jobs"]
+
+    assert one["data-live-revision"] == "job-live"
+    assert one["data-live-changed"] == "Active jobs changed since this page loaded. Now 1 active."
+    assert two["data-live-revision"] == "job-live,job-live-2"
+    assert two["data-live-changed"] == "Active jobs changed since this page loaded. Now 2 active."

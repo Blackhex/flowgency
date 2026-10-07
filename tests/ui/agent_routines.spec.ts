@@ -3,6 +3,7 @@ import { rename } from 'node:fs/promises';
 import path from 'node:path';
 
 import { assertNoConsoleErrors, assertNoLayoutIssues, installBasePageSetup } from './layout';
+import { expectNoNotice, expectOnlyNotice, expectQuietPolls, notices } from './live_notice';
 
 const pagePath = '/newsletter/agents/advisor/routines';
 const fixturePath = '/research/agents/permissions-editor/routines';
@@ -551,5 +552,27 @@ test.describe('routines live refresh', () => {
     await expect(page.getByRole('button', { name: 'Reload page' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Save routines' })).toBeDisabled();
     await expect(page.locator('[data-routine-row] [data-field="id"]').first()).toHaveValue('daily-review-draft2');
+  });
+
+  test('a remote routine change is announced while the draft and loaded baseline stay', async ({ page, request }) => {
+    await page.goto(pagePath);
+    await expectNoNotice(page);
+    const saved = page.locator('[data-live-region="agent-routines-saved"]');
+    await expect(saved).toHaveAttribute('role', 'status');
+    await expect(saved).toHaveAttribute('aria-live', 'polite');
+    await expect(saved).toHaveAttribute('aria-atomic', 'true');
+    const loadedBaseline = await page.locator('#routines-initial').textContent();
+    const idField = page.locator('[data-routine-row] [data-field="id"]').first();
+    await idField.fill('daily-review-draft');
+
+    expect((await request.post('/__ui/live/change', { data: { case: 'agent-routines' } })).status()).toBe(204);
+
+    await expectOnlyNotice(page, 'Saved routines changed since this form loaded. Reload to see the latest.');
+    await expect(idField).toHaveValue('daily-review-draft');
+    expect(await page.locator('#routines-initial').textContent()).toBe(loadedBaseline);
+    await expectQuietPolls(page, [saved, notices(page)]);
+
+    expect((await request.post('/__ui/reset')).status()).toBe(204);
+    await expectNoNotice(page);
   });
 });

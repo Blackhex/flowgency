@@ -6,6 +6,7 @@ import { expect, test, type APIRequestContext, type Locator, type Page } from '@
 
 import { expectBodyFocus, tabTo } from './keyboard';
 import { assertNoConsoleErrors, assertNoLayoutIssues, installBasePageSetup } from './layout';
+import { expectNoNotice, expectOnlyNotice, expectQuietPolls, notices } from './live_notice';
 
 const runtimeConfigPath = path.resolve(__dirname, '.runtime', 'current', 'config.yaml');
 
@@ -511,6 +512,61 @@ test.describe('agent detail live refresh', () => {
     await expect(revision).toHaveValue(loadedRevision);
     await page.getByRole('button', { name: 'Save profile' }).click();
     await expect(page.locator('.border-amber-200').filter({ hasText: /changed/i })).toBeVisible();
+  });
+
+  test('profile announces a changed configuration without touching the draft or the loaded revision', async ({ page, request }) => {
+    await page.goto('/newsletter/agents/advisor/profile');
+    await expectNoNotice(page);
+    const name = page.locator('input[name="display_name"]');
+    const revision = page.locator('input[name="revision"]');
+    const loadedRevision = await revision.inputValue();
+    await name.fill('Draft Advisor');
+    await name.evaluate((node) => { (node as unknown as { __kept: boolean }).__kept = true; });
+
+    await changeLiveFixture(request, 'agent-identity');
+
+    await expectOnlyNotice(page, 'Agent configuration changed since this form loaded. Reload to see the latest.');
+    await expect(revision).toHaveValue(loadedRevision);
+    await expect(name).toHaveValue('Draft Advisor');
+    expect(await name.evaluate((node) => (node as unknown as { __kept?: boolean }).__kept)).toBe(true);
+    await expect(status(page)).toHaveAttribute('role', 'status');
+    await expect(status(page)).toHaveAttribute('aria-live', 'polite');
+    await expect(status(page)).toHaveAttribute('aria-atomic', 'true');
+    await expectQuietPolls(page, [status(page), notices(page)]);
+
+    expect((await request.post('/__ui/reset')).status()).toBe(204);
+    await expectNoNotice(page);
+  });
+
+  test('memory announces changed content without advancing the loaded content revision', async ({ page, request }) => {
+    await page.goto('/newsletter/agents/advisor/memory');
+    await expectNoNotice(page);
+    const memoryStatus = page.locator('[data-live-region="agent-memory-status"]');
+    const revision = page.locator('input[name="content_revision"]');
+    const loadedRevision = await revision.inputValue();
+    const content = page.locator('textarea[name="content"]');
+    await content.fill('Local memory draft');
+
+    await changeLiveFixture(request, 'agent-memory-revision');
+
+    await expectOnlyNotice(page, 'Memory content changed since this form loaded. Reload to see the latest.');
+    await expect(revision).toHaveValue(loadedRevision);
+    await expect(content).toHaveValue('Local memory draft');
+    await expect(memoryStatus.locator('[data-live-key="memory:revision"]')).toHaveAttribute('role', 'status');
+    await expectQuietPolls(page, [memoryStatus, status(page), notices(page)]);
+  });
+
+  test('a changed active-job set is announced and the visible default layout is untouched', async ({ page, request }) => {
+    await page.goto('/newsletter/agents/advisor/blueprint');
+    await expectNoNotice(page);
+    const loadedCount = Number(/Active jobs: (\d+)/.exec(await status(page).textContent())?.[1]);
+
+    await changeLiveFixture(request, 'agent-active-job');
+
+    await expectOnlyNotice(page, `Active jobs changed since this page loaded. Now ${loadedCount + 1} active.`);
+    await expect(status(page)).toContainText(`Active jobs: ${loadedCount + 1}`);
+    await expect(header(page)).not.toContainText('active job');
+    await expectQuietPolls(page, [status(page), notices(page)]);
   });
 
   test('blueprint, logs and activity show remote digest, log and report changes in place', async ({ page, request }) => {

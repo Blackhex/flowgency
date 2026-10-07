@@ -11,13 +11,15 @@
 
 <header data-live-region="agent-header" class="mb-6 border-b border-gray-200 pb-4">{{ agent_header() }}</header>
 
-<div data-live-region="agent-status" class="sr-only">{{ agent_status() }}</div>
+<div data-live-region="agent-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true">{{ agent_status() }}</div>
 {#- Out-of-flow status sits beside the header so it can never extend a long editor page. -#}
 {% if tab == "permissions" %}
-<div data-live-region="agent-permissions-saved" class="sr-only">{{ permissions_saved() }}</div>
+<div data-live-region="agent-permissions-saved" class="sr-only" role="status" aria-live="polite" aria-atomic="true">{{ permissions_saved() }}</div>
 {% elif tab == "routines" %}
-<div data-live-region="agent-routines-saved" class="sr-only">{{ routines_saved() }}</div>
+<div data-live-region="agent-routines-saved" class="sr-only" role="status" aria-live="polite" aria-atomic="true">{{ routines_saved() }}</div>
 {% endif %}
+{#- Empty until agent-detail-notices.js sees a saved revision that differs from the one this page's forms loaded. -#}
+<div data-live-notices role="status" aria-live="polite"></div>
 
 {% if banner %}
 <div class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{{ banner }}</div>
@@ -45,3 +47,5 @@
   {% include tab_template %}
 </section>
 {% endblock %}
+
+{% block page_scripts %}<script src="/static/agent-detail-notices.js"></script>{% endblock %}

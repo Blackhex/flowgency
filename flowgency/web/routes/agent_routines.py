@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -515,8 +516,14 @@ def render_routines_page(
             "routine_summary_rows": _summary_view(summary_rows, saved_rows, original_ids),
             "routine_conflict": conflict,
             "routine_saved_status": routine_status(snapshot, team, snapshot.config.teams[team].agents[agent]),
+            "routines_revision": _routines_revision(snapshot, team, agent),
         },
     )
+
+
+def _routines_revision(snapshot: ConfigSnapshot, team: str, agent: str) -> str:
+    routines = [routine.model_dump(mode="json") for routine in snapshot.config.teams[team].agents[agent].routines]
+    return hashlib.sha256(json.dumps(routines, sort_keys=True).encode("utf-8")).hexdigest()[:12]
 
 
 def _failure_json(
