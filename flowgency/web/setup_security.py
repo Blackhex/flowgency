@@ -124,6 +124,7 @@ async def read_completion_command(request: Request, *, max_bytes: int) -> SetupC
         body.extend(chunk)
         if len(body) > max_bytes:
             raise SetupCompletionError("payload-too-large")
+    request.state.body_fully_read = True
     try:
         return SetupCompletionCommand.model_validate_json(bytes(body))
     except ValueError:
@@ -137,7 +138,11 @@ async def discard_unread_body(
 
     Closing with unread request bytes can reset the connection and lose the
     rejection the client is waiting for. Call only after the rejection is decided.
+    Reads at most max_bytes for at most timeout seconds, and not at all once the
+    body was fully read (a further receive() would wait for a disconnect).
     """
+    if getattr(request.state, "body_fully_read", False):
+        return
     discarded = 0
     try:
         with anyio.move_on_after(timeout):

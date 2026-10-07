@@ -92,7 +92,7 @@ class _Live:
 @pytest.fixture
 def live(tmp_path, monkeypatch):
     monkeypatch.setattr(app_mod, "CONFIG_PATH", tmp_path / "config.yaml")
-    app_mod.app.state.services = None
+    monkeypatch.setattr(app_mod.app.state, "services", None, raising=False)
     server = uvicorn.Server(
         uvicorn.Config(app_mod.app, host="127.0.0.1", port=0, log_level="critical", access_log=False)
     )
@@ -143,6 +143,26 @@ def test_oversized_declared_body_refusal_is_never_lost_to_a_connection_reset(liv
     outcomes = collections.Counter(live.post(oversized, {}) for _ in range(400))
 
     assert dict(outcomes) == {"413": 400}
+
+
+@pytest.mark.parametrize(
+    ("body", "status"),
+    [
+        (_BODY.replace(LAUNCH_ID.encode(), b"c" * 32), "409"),
+        (b'{"launch_id": 7}', "422"),
+    ],
+    ids=["stale-launch-id", "schema-invalid"],
+)
+def test_refusal_after_the_body_was_read_is_not_delayed(live, monkeypatch, body, status):
+    live.use_live_capability(monkeypatch)
+
+    timings = []
+    for _ in range(3):
+        started = time.monotonic()
+        assert live.post(body, {}) == status
+        timings.append(time.monotonic() - started)
+
+    assert min(timings) < 0.5, timings
 
 
 def test_unauthenticated_incomplete_body_cannot_hold_the_handler(live):

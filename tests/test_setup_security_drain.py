@@ -55,3 +55,13 @@ def test_discard_gives_up_on_a_stalled_client():
     asyncio.run(discard_unread_body(_request(receive), max_bytes=4096, timeout=0.2))
 
     assert time.monotonic() - started < 2
+
+
+def test_discard_is_skipped_once_the_body_was_fully_read():
+    async def receive():
+        raise AssertionError("receive() would wait for a disconnect")
+
+    request = _request(receive)
+    request.state.body_fully_read = True
+
+    asyncio.run(discard_unread_body(request, max_bytes=4096))
