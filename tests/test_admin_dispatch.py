@@ -1,4 +1,6 @@
+import asyncio
 import shutil
+import threading
 from pathlib import Path
 
 import yaml
@@ -290,3 +292,40 @@ def test_admin_org_edit_preserves_selected_theme(tmp_path, monkeypatch):
 
     assert response.status_code == 200
     assert "/* Theme: Workshop */" in response.text
+
+
+def test_dispatch_status_off_loop_runs_in_threadpool_on_non_windows(monkeypatch):
+    """Non-Windows: the blocking scheduler inspection must not run on the caller's loop thread."""
+    seen_threads: list[threading.Thread] = []
+    monkeypatch.setattr(app_mod, "detect_platform", lambda: "linux")
+
+    def fake_status():
+        seen_threads.append(threading.current_thread())
+        return {"ok": True}
+
+    monkeypatch.setattr(app_mod, "get_dispatch_status", fake_status)
+    loop_thread = threading.current_thread()
+
+    result = asyncio.run(app_mod._get_dispatch_status_off_loop())
+
+    assert result == {"ok": True}
+    assert len(seen_threads) == 1
+    assert seen_threads[0] is not loop_thread
+
+
+def test_dispatch_status_off_loop_stays_on_loop_thread_on_windows(monkeypatch):
+    """Windows: the inspection keeps running on the calling thread (COM requirement)."""
+    seen_threads: list[threading.Thread] = []
+    monkeypatch.setattr(app_mod, "detect_platform", lambda: "windows")
+
+    def fake_status():
+        seen_threads.append(threading.current_thread())
+        return {"ok": True}
+
+    monkeypatch.setattr(app_mod, "get_dispatch_status", fake_status)
+    loop_thread = threading.current_thread()
+
+    result = asyncio.run(app_mod._get_dispatch_status_off_loop())
+
+    assert result == {"ok": True}
+    assert seen_threads == [loop_thread]

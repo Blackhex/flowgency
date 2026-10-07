@@ -41,7 +41,11 @@ from flowgency.configuration import (
 from flowgency.configuration.models import MemorySelector
 from flowgency.jobs.store import revision_bound_team_operation
 from flowgency.integrations import get_integration, REGISTRY
-from flowgency.dispatch.install import install_timer, get_timer_status as _get_timer_status
+from flowgency.dispatch.install import (
+    detect_platform,
+    install_timer,
+    get_timer_status as _get_timer_status,
+)
 from flowgency.jobs import (
     JobRequest,
     JobSubmissionError,
@@ -367,6 +371,13 @@ def get_dispatch_status() -> dict:
     """Return runtime scheduler status for the active singleton config."""
     interval = int(get_flowgency_config().get("dispatch_interval", 15))
     return _get_timer_status(CONFIG_PATH.resolve(), interval)
+
+
+async def _get_dispatch_status_off_loop() -> dict:
+    """Run the scheduler inspection off the event loop, except where Windows COM requires it."""
+    if detect_platform() == "windows":
+        return get_dispatch_status()
+    return await run_in_threadpool(get_dispatch_status)
 
 
 def install_dispatch(interval: int | None = None, replace: bool = False) -> str | None:
@@ -1324,7 +1335,7 @@ async def tip_hide_all(request: Request):
 
 
 def admin_context(
-    admin_page: str = "settings", dispatch_error: str = "", *, with_dispatch: bool = False
+    admin_page: str = "settings", dispatch_error: str = "", *, dispatch_status: dict | None = None
 ) -> dict:
     """Build common context for admin pages; only the dispatch page reads the scheduler."""
     snapshot = _load_snapshot()
@@ -1343,7 +1354,7 @@ def admin_context(
         "admin_active": True,
         "active": "admin",
         "admin_page": admin_page,
-        "dispatch": get_dispatch_status() if with_dispatch else None,
+        "dispatch": dispatch_status,
         "dispatch_error": dispatch_error,
         "theme_css": get_theme_css(),
         "workflow_library": flowgency.get("workflow_library", ""),
@@ -1478,10 +1489,11 @@ async def admin_integrations_restart(request: Request):
     return RedirectResponse("/admin/integrations", status_code=303)
 
 
-def _admin_dispatch_context(request: Request, dispatch_error: str = "") -> dict:
+async def _admin_dispatch_context(request: Request, dispatch_error: str = "") -> dict:
+    dispatch_status = await _get_dispatch_status_off_loop()
     return {
         "request": request,
-        **admin_context("dispatch", dispatch_error=dispatch_error, with_dispatch=True),
+        **admin_context("dispatch", dispatch_error=dispatch_error, dispatch_status=dispatch_status),
     }
 
 
@@ -1490,8 +1502,8 @@ async def admin_dispatch_page(request: Request):
     """Admin dispatch configuration page; ``?__live=1`` returns its read-only status."""
     if _services().startup_error is not None:
         return RedirectResponse("/setup", status_code=303)
-    # Stays on the event loop thread like the scheduler inspection it wraps (Windows COM).
-    context = _admin_dispatch_context(request)
+    # The scheduler inspection itself runs off the event loop except on Windows (COM).
+    context = await _admin_dispatch_context(request)
     return respond_live_or_html(request, templates, context, dispatch_policy(context))
 
 
@@ -1577,7 +1589,7 @@ async def admin_save_settings(request: Request):
                 replace=False,
             ) or ""
     if dispatch_error:
-        context = _admin_dispatch_context(request, dispatch_error)
+        context = await _admin_dispatch_context(request, dispatch_error)
         return respond_live_or_html(
             request, templates, context, dispatch_policy(context), status_code=409
         )
@@ -1594,7 +1606,7 @@ async def admin_dispatch_install(request: Request):
     form = await request.form()
     error = install_dispatch(replace=form.get("replace") == "true")
     if error:
-        context = _admin_dispatch_context(request, error)
+        context = await _admin_dispatch_context(request, error)
         return respond_live_or_html(
             request, templates, context, dispatch_policy(context), status_code=409
         )
