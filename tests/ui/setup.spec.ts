@@ -239,6 +239,49 @@ test('connected setup terminal survives reload and status fetch failure', async 
   await assertNoTailwindCdnRequests(page);
 });
 
+test('a failing status poll keeps the terminal during pending and during completion, then retries into the single redirect', async ({ page, request }) => {
+  const sockets = trackSetupSockets(page);
+  const stops = trackStopRequests(page);
+  await launchConnectedTerminal(page, request);
+  const terminal = await trackTerminalContinuity(page);
+  await markSetupReady(request);
+  await waitForStatusPolls(page, 1);
+  await expect(page).toHaveURL(/\/setup\/session$/);
+  const navigations = trackMainFrameNavigations(page);
+
+  // (a) config is ready but the attempt is still pending: a failing poll
+  // reports "Retrying" without losing the terminal or leaving the page.
+  await page.route('**/setup/status', (route) => route.fulfill({ status: 200, contentType: 'text/plain', body: 'not json' }));
+  await expect(page.locator('#status-message')).toContainText('Retrying');
+  expect(await terminal.evaluate((node) => node.isConnected)).toBe(true);
+  await expect(page).toHaveURL(/\/setup\/session$/);
+  expect(navigations).toEqual([]);
+
+  // (b) unrouting lets the next poll succeed and the message recover.
+  await page.unroute('**/setup/status');
+  await expect(page.locator('#status-message')).toContainText('Waiting for setup to report completion.');
+  expect(await terminal.evaluate((node) => node.isConnected)).toBe(true);
+
+  // Fail the poll that would carry the redirect: completing now must not
+  // navigate until a later, successful poll actually observes it.
+  await page.route('**/setup/status', (route) => route.fulfill({ status: 200, contentType: 'text/plain', body: 'not json' }));
+  expect((await completeSetup(request)).status()).toBe(200);
+  await expect(page.locator('#status-message')).toContainText('Retrying');
+  await expect(page).toHaveURL(/\/setup\/session$/);
+  expect(navigations).toEqual([]);
+  expect(await terminal.evaluate((node) => node.isConnected)).toBe(true);
+
+  // (c) recovery delivers exactly one redirect, with no new socket or Stop.
+  await page.unroute('**/setup/status');
+  await expect(page).toHaveURL(/\/newsletter\/$/);
+  expect(navigations).toEqual(['/newsletter/']);
+  expect(await recordedContinuity(page)).toEqual({ connected: true, same: true });
+  expect(sockets).toHaveLength(1);
+  expect(stops).toEqual([]);
+
+  await assertNoConsoleErrors(page);
+});
+
 test('connected setup terminal forwards keyboard input as the owning browser', async ({ page, request }) => {
   await launchConnectedTerminal(page, request);
 
@@ -702,8 +745,8 @@ test('dashboard surfaces the running setup session only for its owning browser',
   await expect(page).toHaveURL(/\/setup\/session\?view=inspection$/);
   await expect(page.locator('#setup-terminal .xterm-screen')).toBeVisible();
 
-  // The inspection view stays on the terminal even after completion.
-  await page.waitForTimeout(2000);
+  // The inspection view keeps polling but stays on the terminal after completion.
+  await waitForStatusPolls(page, 2);
   await expect(page).toHaveURL(/\/setup\/session\?view=inspection$/);
 
   await page.goto('/newsletter/');
@@ -840,7 +883,9 @@ test('Stop never counts as completion', async ({ page, request }) => {
   const status = await setupStatus(page);
   expect(status).toMatchObject({ completion: { phase: 'cancelled' } });
   expect(status).not.toHaveProperty('redirect');
-  expect((await completeSetup(request)).ok()).toBe(false);
+  const refused = await completeSetup(request);
+  expect(refused.status()).toBe(409);
+  expect(await refused.json()).toMatchObject({ ok: false, code: 'invalid-credentials' });
 
   await page.goto('/setup');
   await expect(page).toHaveURL(/\/setup$/);
@@ -862,7 +907,9 @@ test('a crash without acknowledgement keeps the terminal and never redirects', a
   await expect(page).toHaveURL(/\/setup\/session$/);
   expect(await setupStatus(page)).toMatchObject({ state: 'ready', completion: { phase: 'attention' } });
   expect(await setupStatus(page)).not.toHaveProperty('redirect');
-  expect((await completeSetup(request)).ok()).toBe(false);
+  const refused = await completeSetup(request);
+  expect(refused.status()).toBe(409);
+  expect(await refused.json()).toMatchObject({ ok: false, code: 'invalid-credentials' });
   await waitForStatusPolls(page, 1);
   await expect(page).toHaveURL(/\/setup\/session$/);
   await assertNoConsoleErrors(page);
