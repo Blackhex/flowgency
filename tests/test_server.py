@@ -1876,7 +1876,72 @@ def test_completion_callback_replays_identical_request_without_revalidating(
 
     assert first.status_code == again.status_code == 200
     assert first.json() == again.json()
-    assert len(calls) == 1
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize(
+    ("change", "expected_status", "expected_code"),
+    [("revision", 409, "stale"), ("source", 503, "not-ready")],
+)
+def test_completion_identical_replay_revalidates_drift_and_source_removal(
+    completion_session, raw_config, monkeypatch, change, expected_status, expected_code
+):
+    from flowgency.web.routes import setup_terminal
+
+    session = completion_session
+    revision = session.write_ready_config(raw_config)
+    command = session.command(revision)
+    assert session.post(command).status_code == 200
+    acknowledgement = session.manager._completion.acknowledgement
+    if change == "revision":
+        session.config_path.write_bytes(session.config_path.read_bytes() + b"\n# revision drift\n")
+    else:
+        (session.tmp_path / "agent-library" / "builder-blueprint" / "AGENTS.md").unlink()
+    status = session.client.get("/setup/status").json()
+    assert status["completion"]["phase"] == "pending"
+    assert "redirect" not in status
+
+    progressed = threading.Event()
+    release_validation = threading.Event()
+    calls = []
+    responses = []
+    real = setup_terminal.validate_current_completion
+
+    def paused(config_path, reported_revision):
+        calls.append((config_path, reported_revision))
+        progressed.set()
+        assert release_validation.wait(5), "validation barrier was not released"
+        return real(config_path, reported_revision)
+
+    monkeypatch.setattr(setup_terminal, "validate_current_completion", paused)
+
+    def replay():
+        try:
+            responses.append(session.post(command))
+        finally:
+            progressed.set()
+
+    thread = threading.Thread(target=replay)
+    thread.start()
+    try:
+        assert progressed.wait(5)
+        release_validation.set()
+        thread.join(timeout=10)
+        assert not thread.is_alive()
+        assert len(responses) == 1
+        response = responses[0]
+        assert response.status_code == expected_status
+        assert response.json()["ok"] is False
+        assert response.json()["code"] == expected_code
+        assert calls == [(session.config_path, revision)]
+        assert session.manager._completion.acknowledgement is acknowledgement
+        assert session.process.running is True
+        assert session.process.writes == []
+        assert session.token not in response.text
+        assert str(session.config_path) not in response.text
+    finally:
+        release_validation.set()
+        thread.join(timeout=10)
 
 
 def test_completion_callback_never_overlaps_validation_for_one_attempt(

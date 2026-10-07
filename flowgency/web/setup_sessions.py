@@ -334,7 +334,7 @@ class SetupSessionManager:
         command: SetupCompletionCommand,
         validate: Callable[[Path, str], str],
     ) -> SetupCompletionDecision:
-        """Validate and acknowledge one attempt at a time, replaying identical reports."""
+        """Validate every report serially; identical acknowledgements remain idempotent."""
         attempt = self._attempt_for_token(token)
         async with attempt.validation_lock:
             self._attempt_for_token(token)
@@ -342,25 +342,19 @@ class SetupSessionManager:
                 command.launch_id.encode("utf-8"), attempt.launch_id.encode("utf-8")
             ):
                 raise SetupSessionConflict(_COMPLETION_REJECTED)
-            reported = _Acknowledgement(
-                command.revision, command.scheduler_result, command.limitations_acknowledged
+            check = asyncio.ensure_future(
+                asyncio.to_thread(validate, attempt.config_path, command.revision)
             )
-            if attempt.acknowledgement == reported:
-                validated = command.revision
-            else:
-                check = asyncio.ensure_future(
-                    asyncio.to_thread(validate, attempt.config_path, command.revision)
-                )
-                try:
-                    validated = await asyncio.shield(check)
-                except asyncio.CancelledError:
-                    # Keep the lock until the worker thread ends so checks never overlap.
-                    while not check.done():
-                        with contextlib.suppress(asyncio.CancelledError, Exception):
-                            await asyncio.shield(check)
-                    if not check.cancelled():
-                        check.exception()
-                    raise
+            try:
+                validated = await asyncio.shield(check)
+            except asyncio.CancelledError:
+                # Keep the lock until the worker thread ends so checks never overlap.
+                while not check.done():
+                    with contextlib.suppress(asyncio.CancelledError, Exception):
+                        await asyncio.shield(check)
+                if not check.cancelled():
+                    check.exception()
+                raise
             return await self.acknowledge_completion(token, command, validated)
 
     async def acknowledge_completion(

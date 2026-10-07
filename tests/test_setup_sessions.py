@@ -238,6 +238,62 @@ def test_completion_duplicate_acknowledgement_is_idempotent(tmp_path: Path):
     asyncio.run(exercise())
 
 
+def test_completion_identical_replay_keeps_validation_lock_when_cancelled(tmp_path: Path):
+    async def exercise():
+        fake = FakeProcess()
+        manager = SetupSessionManager(process_factory=lambda launch: fake, sweep_interval=0)
+        progress = asyncio.Event()
+        second_requested = asyncio.Event()
+        release_validation = threading.Event()
+        replaying = second = None
+        calls = 0
+        loop = asyncio.get_running_loop()
+
+        def validate(config_path, revision):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                loop.call_soon_threadsafe(progress.set)
+                assert release_validation.wait(5), "validation barrier was not released"
+            return revision
+
+        try:
+            prepared = await _connected_completion(manager, tmp_path)
+            command = _completion_command(prepared.launch_id)
+            await manager.acknowledge_validated(prepared.token, command, validate)
+            acknowledgement = manager._completion.acknowledgement
+            replaying = asyncio.create_task(manager.acknowledge_validated(prepared.token, command, validate))
+            replaying.add_done_callback(lambda task: progress.set())
+            await asyncio.wait_for(progress.wait(), timeout=5)
+            assert calls == 2
+            assert not replaying.done()
+            replaying.cancel()
+
+            async def repeat():
+                second_requested.set()
+                return await manager.acknowledge_validated(prepared.token, command, validate)
+
+            second = asyncio.create_task(repeat())
+            await asyncio.wait_for(second_requested.wait(), timeout=5)
+            assert not second.done()
+            assert calls == 2
+            release_validation.set()
+            with pytest.raises(asyncio.CancelledError):
+                await replaying
+            assert (await second).redirect_allowed is True
+            assert calls == 3
+            assert manager._completion.acknowledgement is acknowledgement
+            assert fake.running is True
+            assert fake.writes == []
+        finally:
+            release_validation.set()
+            tasks = [task for task in (replaying, second) if task is not None]
+            await asyncio.gather(*tasks, return_exceptions=True)
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
 def test_completion_changed_revision_requires_new_acknowledgement(tmp_path: Path):
     async def exercise():
         manager = SetupSessionManager(process_factory=lambda launch: FakeProcess(), sweep_interval=0)
