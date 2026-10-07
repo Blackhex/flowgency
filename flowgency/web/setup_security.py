@@ -14,6 +14,7 @@ from ipaddress import ip_address
 from typing import Protocol
 from urllib.parse import urlsplit
 
+import anyio
 from fastapi import Request, Response, WebSocket
 from fastapi.responses import JSONResponse
 from starlette.requests import HTTPConnection
@@ -127,6 +128,28 @@ async def read_completion_command(request: Request, *, max_bytes: int) -> SetupC
         return SetupCompletionCommand.model_validate_json(bytes(body))
     except ValueError:
         raise SetupCompletionError("invalid-completion") from None
+
+
+async def discard_unread_body(
+    request: Request, *, max_bytes: int, timeout: float = 1.0
+) -> None:
+    """Throw away the part of a rejected request's body still on the wire, within bounds.
+
+    Closing with unread request bytes can reset the connection and lose the
+    rejection the client is waiting for. Call only after the rejection is decided.
+    """
+    discarded = 0
+    try:
+        with anyio.move_on_after(timeout):
+            while discarded <= max_bytes:
+                message = await request.receive()
+                if message["type"] != "http.request":
+                    return
+                discarded += len(message.get("body", b""))
+                if not message.get("more_body", False):
+                    return
+    except Exception:
+        return
 
 
 def _require_local_origin(connection: HTTPConnection, *, unsafe: bool) -> None:

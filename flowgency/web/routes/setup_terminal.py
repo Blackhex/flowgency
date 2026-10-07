@@ -29,6 +29,7 @@ from flowgency.web.setup_security import (
     SetupAccessDenied,
     SetupCompletionError,
     completion_error_response,
+    discard_unread_body,
     read_completion_command,
     require_completion_peer_and_bearer,
 )
@@ -132,16 +133,19 @@ async def setup_completion_callback(request: Request) -> JSONResponse:
             token, command, validate_current_completion
         )
     except SetupCompletionError as error:
-        return completion_error_response(error)
+        refusal = completion_error_response(error)
     except (SetupCompletionStale, SetupSessionConflict):
-        return completion_error_response(SetupCompletionError("stale"))
+        refusal = completion_error_response(SetupCompletionError("stale"))
     except SetupCompletionUnavailable as error:
-        return completion_error_response(SetupCompletionError(error.code))
+        refusal = completion_error_response(SetupCompletionError(error.code))
     except Exception:
-        return completion_error_response(SetupCompletionError("unavailable"))
-    return JSONResponse(
-        {"ok": True, "completion": asdict(decision)}, headers={"Cache-Control": "no-store"}
-    )
+        refusal = completion_error_response(SetupCompletionError("unavailable"))
+    else:
+        return JSONResponse(
+            {"ok": True, "completion": asdict(decision)}, headers={"Cache-Control": "no-store"}
+        )
+    await discard_unread_body(request, max_bytes=_COMPLETION_MAX_BYTES)
+    return refusal
 
 
 async def _receive_controls(
