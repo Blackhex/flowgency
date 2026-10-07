@@ -2145,6 +2145,82 @@ def test_external_launch_reports_automatic_completion_unavailable_without_capabi
     assert token not in response.text
 
 
+def test_completion_external_relaunch_passes_new_environment_and_rejects_old_token(tmp_path, monkeypatch, raw_config):
+    from flowgency.configuration import ConfigStore
+
+    config_path = _configure_missing_config(tmp_path, monkeypatch)
+    root = tmp_path / "Flowgency"
+    relaunch_entered = threading.Event()
+    release_relaunch = threading.Event()
+    responses = []
+
+    class GatedLaunch(_LaunchIntegration):
+        def launch_interactive_setup(self, request):
+            self.requests.append(request)
+            if len(self.requests) == 2:
+                relaunch_entered.set()
+                assert release_relaunch.wait(5), "relaunch barrier was not released"
+            return type("Result", (), {
+                "fallback_command": self._fallback_command,
+                "completion_environment_delivered": True,
+            })()
+
+    integration = GatedLaunch()
+    monkeypatch.setattr(
+        "flowgency.web.routes.admin_teams.launchable_integrations",
+        lambda integrations, data_root: (integration,),
+    )
+    with _local_client() as client:
+        csrf = _setup_csrf(client)
+        form = {"data_root": str(root), "integration": "copilot", "setup_csrf": csrf}
+        headers = {"Origin": _LOCAL_BASE_URL}
+        assert client.post("/setup/launch", data=form, headers=headers).status_code == 200
+        old = integration.requests[0].environment
+
+        def relaunch():
+            responses.append(client.post("/setup/launch", data=form, headers=headers))
+
+        thread = threading.Thread(target=relaunch)
+        thread.start()
+        try:
+            assert relaunch_entered.wait(5)
+            config_path.write_text(
+                yaml.safe_dump(_materialize_ready_config(tmp_path, raw_config), sort_keys=False),
+                encoding="utf-8",
+            )
+            revision = ConfigStore(config_path).load().revision
+            body = {
+                "launch_id": old["FLOWGENCY_SETUP_LAUNCH_ID"],
+                "revision": revision,
+                "scheduler_result": "manual-only",
+                "all_questions_answered": True,
+                "summary_delivered": True,
+            }
+            stale = client.post("/setup/session/completion", json=body, headers={
+                "Authorization": f"Bearer {old['FLOWGENCY_SETUP_TOKEN']}",
+            })
+            assert stale.status_code == 401
+            assert stale.json()["code"] == "invalid-credentials"
+            new = integration.requests[1].environment
+            assert new["FLOWGENCY_SETUP_LAUNCH_ID"] != old["FLOWGENCY_SETUP_LAUNCH_ID"]
+            assert new["FLOWGENCY_SETUP_TOKEN"] != old["FLOWGENCY_SETUP_TOKEN"]
+            release_relaunch.set()
+            thread.join(timeout=10)
+            assert not thread.is_alive()
+            completed = client.post("/setup/session/completion", json={
+                **body, "launch_id": new["FLOWGENCY_SETUP_LAUNCH_ID"],
+            }, headers={"Authorization": f"Bearer {new['FLOWGENCY_SETUP_TOKEN']}"})
+            assert completed.status_code == 200
+            assert completed.json()["completion"]["phase"] == "complete"
+            assert len(responses) == 1
+            assert responses[0].status_code == 200
+            for environment in (old, new):
+                assert environment["FLOWGENCY_SETUP_TOKEN"] not in responses[0].text + stale.text + completed.text
+        finally:
+            release_relaunch.set()
+            thread.join(timeout=10)
+
+
 @pytest.mark.parametrize(
     ("base_url", "peer", "expected"),
     [

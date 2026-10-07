@@ -291,8 +291,12 @@ class SetupSessionManager:
                 raise SetupSessionConflict("Setup is shutting down")
             attempt = self._completion
             if attempt is not None and self._holds_slot(attempt):
-                if attempt.owner == owner and attempt.selection() == (
-                    integration_name, data_root, config_path
+                if (
+                    attempt.owner == owner
+                    and attempt.selection() == (integration_name, data_root, config_path)
+                    and attempt.session is not None
+                    and attempt.session.state in {"starting", "running"}
+                    and not attempt.session.eof_seen
                 ):
                     return attempt.launch
                 if not self._supersedable(attempt, owner):

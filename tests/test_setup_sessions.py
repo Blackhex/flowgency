@@ -289,6 +289,103 @@ def _prepare(manager: SetupSessionManager, owner: str, integration: str, root: P
     )
 
 
+def test_completion_external_relaunch_revokes_previous_in_flight_acknowledgement(tmp_path: Path):
+    async def exercise():
+        manager = SetupSessionManager(sweep_interval=0)
+        validation_entered = threading.Event()
+        release_validation = threading.Event()
+        relaunch_entered = threading.Event()
+        release_relaunch = threading.Event()
+        acknowledging = relaunching = None
+
+        def validate(config_path, revision):
+            validation_entered.set()
+            assert release_validation.wait(5), "validation barrier was not released"
+            return revision
+
+        def relaunch():
+            relaunch_entered.set()
+            assert release_relaunch.wait(5), "relaunch barrier was not released"
+            return "relaunched"
+
+        try:
+            old = await _prepare(manager, "owner", "codex", tmp_path)
+            assert await manager._launch_external("owner", "codex", tmp_path, lambda: "launched") == "launched"
+            acknowledging = asyncio.create_task(manager.acknowledge_validated(
+                old.token, _completion_command(old.launch_id), validate
+            ))
+            assert await asyncio.to_thread(validation_entered.wait, 5)
+            new = await _prepare(manager, "owner", "codex", tmp_path)
+            relaunching = asyncio.create_task(manager._launch_external("owner", "codex", tmp_path, relaunch))
+            assert await asyncio.to_thread(relaunch_entered.wait, 5)
+            release_validation.set()
+            with pytest.raises(SetupSessionConflict):
+                await acknowledging
+            assert new.launch_id != old.launch_id
+            assert new.token != old.token
+            with pytest.raises(SetupSessionConflict):
+                manager.require_completion_token(old.token)
+            assert manager.require_completion_token(new.token) == new.launch_id
+            assert manager.completion_decision("owner", _REVISION, True).phase == "pending"
+            release_relaunch.set()
+            assert await relaunching == "relaunched"
+            decision = await manager.acknowledge_completion(
+                new.token, _completion_command(new.launch_id), _REVISION
+            )
+            assert decision.redirect_allowed is True
+        finally:
+            release_validation.set()
+            release_relaunch.set()
+            tasks = [task for task in (acknowledging, relaunching) if task is not None]
+            await asyncio.gather(*tasks, return_exceptions=True)
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+def test_completion_connected_reattach_keeps_in_flight_acknowledgement_and_process(tmp_path: Path):
+    async def exercise():
+        fake = FakeProcess()
+        launches = []
+        validation_entered = threading.Event()
+        release_validation = threading.Event()
+        acknowledging = None
+
+        def factory(launch):
+            launches.append(launch)
+            return fake
+
+        def validate(config_path, revision):
+            validation_entered.set()
+            assert release_validation.wait(5), "validation barrier was not released"
+            return revision
+
+        manager = SetupSessionManager(process_factory=factory, sweep_interval=0)
+        try:
+            first = await _connected_completion(manager, tmp_path)
+            acknowledging = asyncio.create_task(manager.acknowledge_validated(
+                first.token, _completion_command(first.launch_id), validate
+            ))
+            assert await asyncio.to_thread(validation_entered.wait, 5)
+            again = await _prepare(manager, "owner", "copilot", tmp_path)
+            launch = RuntimeLaunch(("copilot",), tmp_path, {}, "connected")
+            snapshot = await manager.start("owner", "copilot", launch, "fallback")
+            assert again.launch_id == first.launch_id
+            assert again.token == first.token
+            assert len(launches) == 1
+            assert snapshot.state == "running"
+            assert fake.running is True
+            release_validation.set()
+            assert (await acknowledging).redirect_allowed is True
+        finally:
+            release_validation.set()
+            if acknowledging is not None:
+                await asyncio.gather(acknowledging, return_exceptions=True)
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
 def test_completion_owner_supersedes_unbound_attempt_on_other_selection(tmp_path: Path):
     async def exercise():
         manager = SetupSessionManager(process_factory=lambda launch: FakeProcess(), sweep_interval=0)
