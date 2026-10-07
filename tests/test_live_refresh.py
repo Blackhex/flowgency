@@ -858,3 +858,77 @@ def test_shared_navigation_snapshot_hides_absent_sections_and_changes_with_membe
     assert _region_html(bare, "navigation-workflows").strip() == ""
     assert 'data-live-key="nav:workspaces"' not in _region_html(bare, "navigation-workspace")
     assert live_etag(base) != live_etag(bare)
+
+
+# ── Inbox template regions ─────────────────────────────────────────────────────
+
+INBOX_REGION_MACROS = {
+    "setup-session": "live_setup_session",
+    "fleet": "live_fleet",
+    "workflows": "live_workflows",
+    "work-queue": "live_work_queue",
+    "attention": "live_attention",
+    "activity": "live_activity",
+}
+
+
+def _inbox_policy() -> LivePagePolicy:
+    return LivePagePolicy(
+        template_name="home.html",
+        binding=LiveBinding(page="inbox", team="newsletter"),
+        structure="inbox:1",
+        region_macros=INBOX_REGION_MACROS,
+        snapshot_url="/newsletter/?__live=1",
+    )
+
+
+def _empty_inbox_context() -> dict[str, Any]:
+    return {
+        "team": "newsletter",
+        "fleet_agents": [],
+        "fleet_healthy": 0,
+        "fleet_never_run": 0,
+        "fleet_attention": 0,
+        "fleet_running": 0,
+        "workflow_dashboard": {
+            "workflows": [], "activity": [], "unassigned": [], "issues": [],
+            "issue_count": 0, "ticket_count": 0, "working_count": 0, "configured_count": 0,
+        },
+        "work_queue": {"running": 0, "pool": 4, "waiting": []},
+        "health_items": [],
+        "needs_action_count": 0,
+        "activity_feed": [],
+        "setup_session": None,
+    }
+
+
+def test_inbox_template_renders_every_empty_state_from_its_own_macros():
+    from flowgency import app as app_mod
+
+    snapshot = render_live_snapshot(app_mod.templates, _empty_inbox_context(), _inbox_policy())
+
+    html = {region.key: region.html for region in snapshot.regions}
+    assert set(html) == set(INBOX_REGION_MACROS)
+    assert html["setup-session"].strip() == ""
+    assert "No agents configured" in html["fleet"]
+    assert "No workflows configured." in html["workflows"]
+    assert "idle" in html["work-queue"] and "pool 4" in html["work-queue"]
+    assert "No items need attention right now." in html["attention"]
+    assert "No recent activity" in html["activity"]
+
+
+def test_inbox_snapshot_digest_follows_the_rendered_work_queue():
+    from flowgency import app as app_mod
+
+    context = _empty_inbox_context()
+    idle = live_etag(render_live_snapshot(app_mod.templates, context, _inbox_policy()))
+    context["work_queue"] = {
+        "running": 1, "pool": 4,
+        "waiting": [{"position": 1, "agent": "advisor", "routine": "daily-review", "due": None,
+                     "href": "/newsletter/jobs/job-1", "job_id": "job-1"}],
+    }
+    queued_snapshot = render_live_snapshot(app_mod.templates, context, _inbox_policy())
+
+    assert live_etag(queued_snapshot) != idle
+    strip = next(region.html for region in queued_snapshot.regions if region.key == "work-queue")
+    assert 'data-live-key="job:job-1"' in strip and "1 running" in strip and "1 queued" in strip

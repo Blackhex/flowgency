@@ -1,5 +1,6 @@
 """Flowgency Dashboard — multi-team agent management interface."""
 
+import hashlib
 import logging
 import os
 import re
@@ -7,6 +8,7 @@ import stat
 import subprocess
 import urllib.parse
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -72,6 +74,7 @@ from flowgency.web.logs import describe_log_file, log_belongs_to_agent, with_log
 from flowgency.web.log_preview import read_log_preview
 from flowgency.web.setup_security import SetupAccessDenied, SetupBrowserAccess
 from flowgency.web.setup_sessions import SetupSessionManager
+from flowgency.web.live import LiveBinding, LivePagePolicy, respond_live_or_html, shared_region_macros
 from flowgency.web.state import flowgency_settings, runtime_team
 from flowgency.web.team_navigation import build_team_context
 from flowgency.web.routes import (
@@ -417,6 +420,12 @@ async def manifest():
 # ── Team Resolution ───────────────────────────────────────────────────────────
 
 
+def _team_from_snapshot(snapshot, team: str) -> dict:
+    if team not in snapshot.config.teams:
+        raise HTTPException(404, f"Unknown team: {team}")
+    return runtime_team(snapshot, team)
+
+
 def get_team(team: str) -> dict:
     """Resolve a team key to its full config dict."""
     try:
@@ -426,9 +435,7 @@ def get_team(team: str) -> dict:
             status_code=409,
             detail=_config_error_message(error),
         )
-    if team not in snapshot.config.teams:
-        raise HTTPException(404, f"Unknown team: {team}")
-    return runtime_team(snapshot, team)
+    return _team_from_snapshot(snapshot, team)
 
 
 def get_agent_integration(g: dict, agent_name: str):
@@ -446,9 +453,9 @@ def safe_redirect(url: str, fallback: str = "/") -> str:
     return fallback
 
 
-def team_context(g: dict) -> dict:
+def team_context(g: dict, snapshot=None) -> dict:
     """Return standard template context for a team."""
-    snapshot = _load_snapshot()
+    snapshot = snapshot if snapshot is not None else _load_snapshot()
     flowgency = flowgency_settings(snapshot)
     return build_team_context(
         snapshot,
@@ -513,13 +520,14 @@ def validate_file_access(fpath: Path, base_path: Path, allowed_roots: list[Path]
     raise HTTPException(403, "Access denied")
 
 
-def build_ticket_dashboard(services: FlowgencyServices, team_id: str) -> dict[str, Any]:
+def build_ticket_dashboard(services: FlowgencyServices, team_id: str, snapshot=None) -> dict[str, Any]:
     def _dashboard_time(value: datetime | None) -> datetime | None:
         if value is None:
             return None
         return value.replace(tzinfo=None) if value.tzinfo is not None else value
 
-    snapshot = services.config_store.load()
+    if snapshot is None:
+        snapshot = services.config_store.load()
     team = snapshot.config.teams[team_id]
     configured_count = len(team.workflows)
     if services.tickets is None:
@@ -1063,11 +1071,12 @@ def _overlay_dashboard_job_state(agent: dict, current, team_key: str) -> None:
     )
 
 
-def build_dashboard_fleet(g: dict) -> list[dict]:
-    try:
-        snapshot = _load_snapshot()
-    except Exception:
-        return []
+def build_dashboard_fleet(g: dict, snapshot=None) -> list[dict]:
+    if snapshot is None:
+        try:
+            snapshot = _load_snapshot()
+        except Exception:
+            return []
 
     services = getattr(app.state, "services", None)
     if services is None or getattr(services, "startup_error", None) is not None or services.instances is None:
@@ -1723,15 +1732,70 @@ async def agent_run(
     return JSONResponse({"status": "started", "job_id": handle.job_id}, status_code=202)
 
 
-@app.get("/{team}/", response_class=HTMLResponse)
-async def home(request: Request, team: str):
-    """Dashboard home — mission control."""
-    g = get_team(team)
-    services = get_services(request)
-    workflow_dashboard = build_ticket_dashboard(services, team)
+INBOX_REGION_MACROS = {
+    "setup-session": "live_setup_session",
+    "fleet": "live_fleet",
+    "workflows": "live_workflows",
+    "work-queue": "live_work_queue",
+    "attention": "live_attention",
+    "activity": "live_activity",
+}
+
+
+def _inbox_policy(team: str, context: dict) -> LivePagePolicy:
+    policy = LivePagePolicy(
+        template_name="home.html",
+        binding=LiveBinding(page="inbox", team=team),
+        structure="inbox:1",
+        region_macros=INBOX_REGION_MACROS,
+        snapshot_url=f"/{team}/?__live=1",
+    )
+    return replace(policy, region_macros=shared_region_macros(context, policy))
+
+
+def _keyed_issues(issues: list[dict]) -> list[dict]:
+    """Give each workflow issue a stable identity derived from its content."""
+    seen: dict[str, int] = {}
+    keyed = []
+    for issue in issues:
+        digest = hashlib.sha256(
+            f"{issue.get('workflow_id') or ''}\0{issue.get('message') or ''}".encode("utf-8")
+        ).hexdigest()[:12]
+        ordinal = seen.get(digest, 0)
+        seen[digest] = ordinal + 1
+        keyed.append({**issue, "key": f"{digest}-{ordinal}" if ordinal else digest})
+    return keyed
+
+
+def _inbox_setup_session(request: Request) -> tuple[dict | None, str]:
+    """Owner-only setup indicator and the CSRF token of its stop form; never counted as work."""
+    access = request.app.state.setup_access
+    try:
+        owner = access.require_http(request)
+    except SetupAccessDenied:
+        return None, ""
+    credential, csrf, _issued = access.ensure_browser(request)
+    if credential != owner:
+        return None, ""
+    manager = getattr(request.app.state, "setup_sessions", None)
+    session = manager.snapshot(owner) if manager is not None else None
+    if session is None or session.state not in {"running", "failed"}:
+        return None, csrf
+    return {
+        "href": "/setup/session?view=inspection",
+        "state": session.state,
+        "message": session.message,
+    }, csrf
+
+
+def build_inbox_context(request: Request, services: FlowgencyServices, snapshot, team: str) -> dict:
+    """One context for the Inbox page and its live snapshots, from one configuration snapshot."""
+    g = _team_from_snapshot(snapshot, team)
+    workflow_dashboard = build_ticket_dashboard(services, team, snapshot=snapshot)
+    workflow_dashboard = {**workflow_dashboard, "issues": _keyed_issues(workflow_dashboard["issues"])}
 
     # Zone 1: Fleet status
-    agents = build_dashboard_fleet(g)
+    agents = build_dashboard_fleet(g, snapshot=snapshot)
     health_items = build_health_items(g, agents)
     needs_action_count = (
         len(health_items)
@@ -1741,7 +1805,6 @@ async def home(request: Request, team: str):
 
     # Work queue strip
     try:
-        snapshot = _load_snapshot()
         ms = snapshot.config.flowgency.memory_store
         if ms is not None:
             view = queue_snapshot(snapshot.config, memory_store=ms)
@@ -1759,6 +1822,7 @@ async def home(request: Request, team: str):
                 "routine": e.record.spec.routine_id or "task",
                 "due": e.record.due_at or e.record.spec.created_at,
                 "href": f"/{e.team_id}/jobs/{e.record.spec.job_id}",
+                "job_id": e.record.spec.job_id,
             }
             for i, e in enumerate(view.waiting)
         ],
@@ -1767,30 +1831,11 @@ async def home(request: Request, team: str):
     # Zone 4: Activity feed
     activity = workflow_dashboard["activity"]
 
-    # Owner-only inline indicator for a background connected-setup session; it is
-    # never counted as a configured agent, ticket, or job.
-    setup_session = None
-    access = request.app.state.setup_access
-    try:
-        owner = access.require_http(request)
-    except SetupAccessDenied:
-        owner = None
-    if owner is not None:
-        manager = getattr(request.app.state, "setup_sessions", None)
-        session = manager.snapshot(owner) if manager is not None else None
-        if session is not None and session.state in {"running", "failed"}:
-            credential, csrf, _issued = access.ensure_browser(request)
-            if credential == owner:
-                setup_session = {
-                    "href": "/setup/session?view=inspection",
-                    "csrf": csrf,
-                    "state": session.state,
-                    "message": session.message,
-                }
+    setup_session, setup_stop_csrf = _inbox_setup_session(request)
 
-    return templates.TemplateResponse(request, "home.html", {
+    return {
         "request": request,
-        **team_context(g),
+        **team_context(g, snapshot),
         # Zone 1: Fleet
         "fleet_agents": agents,
         "fleet_healthy": sum(1 for a in agents if a["health"] == "green"),
@@ -1806,7 +1851,22 @@ async def home(request: Request, team: str):
         # Zone 4: Activity
         "activity_feed": activity,
         "setup_session": setup_session,
-    })
+        "setup_stop_csrf": setup_stop_csrf,
+    }
+
+
+@app.get("/{team}/", response_class=HTMLResponse)
+async def home(request: Request, team: str):
+    """Dashboard home — mission control; ``?__live=1`` returns the live region snapshot."""
+    try:
+        snapshot = _load_snapshot()
+    except Exception as error:
+        raise HTTPException(status_code=409, detail=_config_error_message(error))
+    if team not in snapshot.config.teams:
+        raise HTTPException(404, f"Unknown team: {team}")
+    context = build_inbox_context(request, get_services(request), snapshot, team)
+    return respond_live_or_html(request, templates, context, _inbox_policy(team, context))
+
 
 
 @app.get("/{team}/observations", response_class=HTMLResponse)

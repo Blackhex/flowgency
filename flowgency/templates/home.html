@@ -1,91 +1,94 @@
 {% extends "base.html" %}
 {% set active = "home" %}
 
-{% block title %}Mission Control - {{ team_name }}{% endblock %}
+{#- Live regions. The initial page and every live snapshot render these same macros from the
+    same context, so a refresh can never disagree with a reload. Keys are namespaced identities
+    (never indices, display names or timestamps). -#}
 
-{% block content %}
+{% macro live_setup_session() -%}
 {% if setup_session %}
-<div class="mb-3 flex flex-wrap items-center gap-3 border-l-4 border-emerald-600 dark:border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30 px-3 py-2 text-sm text-gray-900 dark:text-gray-100" data-setup-session>
+<div class="mb-3 flex flex-wrap items-center gap-3 border-l-4 border-emerald-600 dark:border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30 px-3 py-2 text-sm text-gray-900 dark:text-gray-100" data-live-key="setup-session:banner" data-setup-session>
   <span class="font-semibold">{{ "Setup session running" if setup_session.state == "running" else "Setup session needs attention" }}</span>
   <a href="{{ setup_session.href }}" class="underline">View terminal</a>
-  <form action="/setup/session/stop" method="post" class="ml-auto">
-    <input type="hidden" name="setup_csrf" value="{{ setup_session.csrf }}">
-    <button type="submit" title="Stop setup session" aria-label="Stop setup session" class="rounded bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 px-2 py-1 text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700">Stop</button>
-  </form>
+  <button type="submit" form="setup-stop-form" title="Stop setup session" aria-label="Stop setup session" class="ml-auto rounded bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 px-2 py-1 text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700">Stop</button>
 </div>
 {% endif %}
-{# ════════════════════════════════════════════════════════════
-   ZONE 1: FLEET STATUS BAR
-   ════════════════════════════════════════════════════════════ #}
-<div class="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2.5 mb-3">
-  {% if fleet_agents %}
-  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 items-start">
-    {% for a in fleet_agents %}
-    <div class="rounded-lg border px-3 py-2 transition-colors
-         {% if a.health == 'red' %}border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/25
-         {% elif a.health == 'amber' %}border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/25
-         {% elif a.health == 'gray' %}border-gray-200 dark:border-gray-700 bg-gray-100/60 dark:bg-gray-800/60
-         {% else %}border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800{% endif %}">
+{%- endmacro %}
 
-      <a href="{{ a.profile_href or ('/' ~ team ~ '/agents/' ~ a.name) }}" aria-label="{{ a.display_name or a.name }}" class="flex items-center gap-2 group">
-        <span class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-200 dark:bg-gray-700 text-xs font-semibold text-gray-700 dark:text-gray-200">{{ a.emoji or (a.display_name or a.name) | initials }}</span>
-        <span class="truncate text-sm font-semibold {% if a.health == 'gray' %}text-slate-600 dark:text-slate-400{% else %}text-gray-900 dark:text-gray-100{% endif %} group-hover:underline">{{ a.display_name or a.name }}</span>
-        {% if a.open_observations %}<span class="rounded-full bg-amber-100 dark:bg-amber-900/50 px-1.5 text-xs font-mono text-amber-700 dark:text-amber-300">{{ a.open_observations }}</span>{% endif %}
-        {% if a.queued %}
-        <span class="ml-auto rounded bg-cyan-100 dark:bg-cyan-900/60 px-1.5 font-mono text-xs text-cyan-800 dark:text-cyan-100" title="{{ a.health_sentence }}">queued</span>
-        {% elif a.running %}
-        <span class="ml-auto text-emerald-500 text-xs leading-none animate-pulse" data-agent-running title="{{ a.health_sentence }}">&#9679;</span>
-        {% else %}
-        <span class="ml-auto text-xs leading-none {% if a.health == 'green' %}text-emerald-500{% elif a.health == 'amber' %}text-amber-500{% elif a.health == 'gray' %}text-gray-400 dark:text-gray-500{% else %}text-rose-500{% endif %}"
-              title="{{ a.health_sentence }}">&#9679;</span>
-        {% endif %}
-      </a>
+{% macro fleet_card(a) -%}
+<div data-live-key="agent:{{ a.name }}" data-health="{{ a.health }}" data-health-kind="{{ a.health_kind }}" class="rounded-lg border px-3 py-2 transition-colors
+     {% if a.health == 'red' %}border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/25
+     {% elif a.health == 'amber' %}border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/25
+     {% elif a.health == 'gray' %}border-gray-200 dark:border-gray-700 bg-gray-100/60 dark:bg-gray-800/60
+     {% else %}border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800{% endif %}">
 
-      {% if a.title %}<div class="mt-0.5 truncate text-xs text-slate-600 dark:text-slate-400">{{ a.title }}</div>{% endif %}
+  <a href="{{ a.profile_href or ('/' ~ team ~ '/agents/' ~ a.name) }}" aria-label="{{ a.display_name or a.name }}" class="flex items-center gap-2 group">
+    <span class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-200 dark:bg-gray-700 text-xs font-semibold text-gray-700 dark:text-gray-200">{{ a.emoji or (a.display_name or a.name) | initials }}</span>
+    <span class="truncate text-sm font-semibold {% if a.health == 'gray' %}text-slate-600 dark:text-slate-400{% else %}text-gray-900 dark:text-gray-100{% endif %} group-hover:underline">{{ a.display_name or a.name }}</span>
+    {% if a.open_observations %}<span class="rounded-full bg-amber-100 dark:bg-amber-900/50 px-1.5 text-xs font-mono text-amber-700 dark:text-amber-300">{{ a.open_observations }}</span>{% endif %}
+    {% if a.queued %}
+    <span class="ml-auto rounded bg-cyan-100 dark:bg-cyan-900/60 px-1.5 font-mono text-xs text-cyan-800 dark:text-cyan-100" title="{{ a.health_sentence }}">queued</span>
+    {% elif a.running %}
+    <span class="ml-auto text-emerald-500 text-xs leading-none animate-pulse" data-agent-running title="{{ a.health_sentence }}">&#9679;</span>
+    {% else %}
+    <span class="ml-auto text-xs leading-none {% if a.health == 'green' %}text-emerald-500{% elif a.health == 'amber' %}text-amber-500{% elif a.health == 'gray' %}text-gray-400 dark:text-gray-500{% else %}text-rose-500{% endif %}"
+          title="{{ a.health_sentence }}">&#9679;</span>
+    {% endif %}
+  </a>
 
-      <div class="mt-1.5 flex flex-wrap gap-1">
-        {% if a.blueprint %}<span class="rounded bg-gray-200 dark:bg-gray-700 px-1.5 text-xs text-gray-700 dark:text-gray-200">{{ a.blueprint }}</span>{% endif %}
-        {% if a.integration %}<span class="rounded bg-slate-200 dark:bg-slate-700 px-1.5 text-xs text-slate-700 dark:text-slate-200">{{ a.integration }}</span>{% endif %}
-      </div>
+  {% if a.title %}<div class="mt-0.5 truncate text-xs text-slate-600 dark:text-slate-400">{{ a.title }}</div>{% endif %}
 
-      <div class="mt-2 flex items-center justify-between border-t border-gray-200 dark:border-gray-700 pt-1.5 font-mono text-xs">
-        {% if a.last_run %}
-        <a href="/{{ team }}/logs/view?path={{ a.last_run.path | urlencode }}"
-           class="text-gray-600 dark:text-gray-300 hover:underline"
-           title="{{ a.last_run.at.strftime('%Y-%m-%d %H:%M') }}">{{ a.last_run.at | relative_time }}</a>
-        {% else %}
-        <span class="text-slate-600 dark:text-slate-400">never run</span>
-        {% endif %}
-
-        {% if a.job_status and a.job_href %}
-        <a href="{{ a.job_href }}" class="text-indigo-600 dark:text-indigo-300 hover:underline">{{ a.job_status }}</a>
-        {% elif a.health_kind == 'overdue' %}
-        <a href="/{{ team }}/agents/{{ a.name }}/routines" class="text-rose-600 dark:text-rose-300 hover:underline">overdue {{ a.health_late | elapsed }}</a>
-        {% elif a.health_kind == 'due' %}
-        <a href="/{{ team }}/agents/{{ a.name }}/routines" class="text-amber-600 dark:text-amber-300 hover:underline">due now</a>
-        {% elif a.next_run %}
-        <a href="/{{ team }}/agents/{{ a.name }}/routines" class="text-gray-600 dark:text-gray-300 hover:underline">{{ a.next_run | relative_future }}</a>
-        {% else %}
-        <a href="/{{ team }}/agents/{{ a.name }}/routines" class="text-sky-700 dark:text-sky-300 hover:underline">no schedule</a>
-        {% endif %}
-      </div>
-
-      {% if a.health_fault %}
-      <div class="mt-1 text-xs {% if a.health == 'red' %}text-rose-700 dark:text-rose-200{% else %}text-amber-700 dark:text-amber-200{% endif %}">{{ a.health_fault }}</div>
-      {% endif %}
-    </div>
-    {% endfor %}
+  <div class="mt-1.5 flex flex-wrap gap-1">
+    {% if a.blueprint %}<span class="rounded bg-gray-200 dark:bg-gray-700 px-1.5 text-xs text-gray-700 dark:text-gray-200">{{ a.blueprint }}</span>{% endif %}
+    {% if a.integration %}<span class="rounded bg-slate-200 dark:bg-slate-700 px-1.5 text-xs text-slate-700 dark:text-slate-200">{{ a.integration }}</span>{% endif %}
   </div>
-  <div class="mt-1.5 text-sm text-gray-500 dark:text-gray-400 font-mono">
-    {{ fleet_agents|length }} agents · {{ fleet_healthy }} healthy{% if fleet_never_run %} · <span class="text-gray-500 dark:text-gray-400">{{ fleet_never_run }} never run</span>{% endif %}{% if fleet_running %} · <span class="text-emerald-700 dark:text-emerald-300">{{ fleet_running }} running</span>{% endif %}{% if fleet_attention %} · <span class="text-amber-700 dark:text-amber-300">{{ fleet_attention }} needs attention</span>{% endif %}
+
+  <div class="mt-2 flex items-center justify-between border-t border-gray-200 dark:border-gray-700 pt-1.5 font-mono text-xs">
+    {% if a.last_run %}
+    <a href="/{{ team }}/logs/view?path={{ a.last_run.path | urlencode }}"
+       class="text-gray-600 dark:text-gray-300 hover:underline"
+       title="{{ a.last_run.at.strftime('%Y-%m-%d %H:%M') }}">{{ a.last_run.at | relative_time }}</a>
+    {% else %}
+    <span class="text-slate-600 dark:text-slate-400">never run</span>
+    {% endif %}
+
+    {% if a.job_status and a.job_href %}
+    <a href="{{ a.job_href }}" class="text-indigo-600 dark:text-indigo-300 hover:underline">{{ a.job_status }}</a>
+    {% elif a.health_kind == 'overdue' %}
+    <a href="/{{ team }}/agents/{{ a.name }}/routines" class="text-rose-600 dark:text-rose-300 hover:underline">overdue {{ a.health_late | elapsed }}</a>
+    {% elif a.health_kind == 'due' %}
+    <a href="/{{ team }}/agents/{{ a.name }}/routines" class="text-amber-600 dark:text-amber-300 hover:underline">due now</a>
+    {% elif a.next_run %}
+    <a href="/{{ team }}/agents/{{ a.name }}/routines" class="text-gray-600 dark:text-gray-300 hover:underline">{{ a.next_run | relative_future }}</a>
+    {% else %}
+    <a href="/{{ team }}/agents/{{ a.name }}/routines" class="text-sky-700 dark:text-sky-300 hover:underline">no schedule</a>
+    {% endif %}
   </div>
-  {% else %}
-  <div class="text-sm text-gray-400 dark:text-gray-500">No agents configured</div>
+
+  {% if a.health_fault %}
+  <div class="mt-1 text-xs {% if a.health == 'red' %}text-rose-700 dark:text-rose-200{% else %}text-amber-700 dark:text-amber-200{% endif %}">{{ a.health_fault }}</div>
   {% endif %}
 </div>
+{%- endmacro %}
 
+{% macro live_fleet() -%}
+{% if fleet_agents %}
+<div data-live-key="fleet:grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 items-start">
+  {% for a in fleet_agents %}
+  {{ fleet_card(a) }}
+  {% endfor %}
+</div>
+<div data-live-key="fleet:summary" class="mt-1.5 text-sm text-gray-500 dark:text-gray-400 font-mono">
+  {{ fleet_agents|length }} agents · {{ fleet_healthy }} healthy{% if fleet_never_run %} · <span class="text-gray-500 dark:text-gray-400">{{ fleet_never_run }} never run</span>{% endif %}{% if fleet_running %} · <span class="text-emerald-700 dark:text-emerald-300">{{ fleet_running }} running</span>{% endif %}{% if fleet_attention %} · <span class="text-amber-700 dark:text-amber-300">{{ fleet_attention }} needs attention</span>{% endif %}
+</div>
+{% else %}
+<div data-live-key="fleet:empty" class="text-sm text-gray-400 dark:text-gray-500">No agents configured</div>
+{% endif %}
+{%- endmacro %}
+
+{% macro live_workflows() -%}
 {% if workflow_dashboard.workflows or workflow_dashboard.issues or workflow_dashboard.configured_count == 0 %}
-<div class="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-3 mb-3">
+<div data-live-key="workflows:summary" class="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-3 mb-3">
   <div class="flex items-center justify-between gap-2 mb-2">
     <span class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Ticket workflows</span>
     <span class="font-mono text-xs text-gray-500 dark:text-gray-400">{{ workflow_dashboard.ticket_count }} tickets · {{ workflow_dashboard.working_count }} active · {{ workflow_dashboard.unassigned|length }} unassigned</span>
@@ -93,7 +96,7 @@
   {% if workflow_dashboard.issues %}
   <div class="mb-3 space-y-2">
     {% for issue in workflow_dashboard.issues %}
-    <div class="rounded-md border border-amber-200 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-950/30 px-3 py-2 text-sm text-amber-900 dark:text-amber-100">
+    <div data-live-key="workflow-issue:{{ issue.key }}" class="rounded-md border border-amber-200 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-950/30 px-3 py-2 text-sm text-amber-900 dark:text-amber-100">
       {% if issue.workflow_name %}<span class="font-semibold">{{ issue.workflow_name }}:</span> {% endif %}{{ issue.message }}
     </div>
     {% endfor %}
@@ -103,7 +106,7 @@
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
     <div class="space-y-2">
       {% for workflow in workflow_dashboard.workflows %}
-      <a href="{{ workflow.href }}" class="block rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 hover:border-flowgency-400 dark:hover:border-flowgency-600 transition-colors">
+      <a href="{{ workflow.href }}" data-live-key="ticket-workflow:{{ workflow.id }}" class="block rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 hover:border-flowgency-400 dark:hover:border-flowgency-600 transition-colors">
         <div class="flex items-center justify-between gap-2">
           <span class="text-sm font-semibold text-gray-900 dark:text-gray-100">{{ workflow.name }}</span>
           <span class="font-mono text-xs text-gray-500 dark:text-gray-400">{{ workflow.ticket_count }} tickets</span>
@@ -121,7 +124,7 @@
       {% if workflow_dashboard.activity %}
       <div class="space-y-2">
         {% for item in workflow_dashboard.activity %}
-        <a href="{{ item.href }}" class="block rounded-md border border-gray-200 dark:border-gray-700 px-3 py-2 bg-white dark:bg-gray-800 hover:border-flowgency-400 dark:hover:border-flowgency-600 transition-colors">
+        <a href="{{ item.href }}" data-live-key="ticket-activity:{{ item.workflow_id }}:{{ item.ticket_id }}" class="block rounded-md border border-gray-200 dark:border-gray-700 px-3 py-2 bg-white dark:bg-gray-800 hover:border-flowgency-400 dark:hover:border-flowgency-600 transition-colors">
           <div class="flex items-center justify-between gap-2">
             <span class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ item.title }}</span>
             <span class="font-mono text-xs text-gray-500 dark:text-gray-400">{{ item.workflow_name }}</span>
@@ -131,20 +134,19 @@
         {% endfor %}
       </div>
       {% else %}
-      <div class="text-sm text-gray-500 dark:text-gray-400">No ticket activity yet.</div>
+      <div data-live-key="workflows:no-activity" class="text-sm text-gray-500 dark:text-gray-400">No ticket activity yet.</div>
       {% endif %}
     </div>
   </div>
   {% else %}
-  <div class="text-sm text-gray-500 dark:text-gray-400">No workflows configured.</div>
+  <div data-live-key="workflows:none" class="text-sm text-gray-500 dark:text-gray-400">No workflows configured.</div>
   {% endif %}
 </div>
 {% endif %}
+{%- endmacro %}
 
-{# ════════════════════════════════════════════════════════════
-   WORK QUEUE STRIP
-   ════════════════════════════════════════════════════════════ #}
-<div class="rounded-lg border px-4 py-3 mb-3
+{% macro live_work_queue() -%}
+<div data-live-key="queue:strip" class="rounded-lg border px-4 py-3 mb-3
     {% if work_queue.waiting or work_queue.running %}border-cyan-200 dark:border-cyan-700 bg-cyan-50 dark:bg-cyan-950/20{% else %}bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700{% endif %}">
   <div class="flex items-center justify-between gap-2">
     <span class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Work queue</span>
@@ -160,88 +162,109 @@
   {% if work_queue.waiting %}
   <div class="mt-1.5 max-h-24 overflow-y-auto font-mono text-xs leading-6">
     {% for item in work_queue.waiting %}
-    <a href="{{ item.href }}" class="block hover:underline text-gray-700 dark:text-gray-200">{{ item.position }} {{ item.agent }} / {{ item.routine }} <span class="text-gray-500 dark:text-gray-400">{{ item.due | queue_due_time }}</span></a>
+    <a href="{{ item.href }}" data-live-key="job:{{ item.job_id }}" class="block hover:underline text-gray-700 dark:text-gray-200">{{ item.position }} {{ item.agent }} / {{ item.routine }} <span class="text-gray-500 dark:text-gray-400">{{ item.due | queue_due_time }}</span></a>
     {% endfor %}
   </div>
   {% endif %}
 </div>
+{%- endmacro %}
+
+{% macro live_attention() -%}
+<div class="flex items-center justify-between mb-2">
+  <span class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Attention Queue</span>
+  {% if needs_action_count %}
+  <span class="font-mono text-sm text-amber-700 dark:text-amber-300">{{ needs_action_count }} item{{ "s" if needs_action_count != 1 else "" }}</span>
+  {% endif %}
+</div>
+
+{% if health_items or workflow_dashboard.issues or workflow_dashboard.unassigned %}
+
+{# ─ Agent health (highest priority) ─ #}
+{% for h in health_items %}
+<div data-live-key="health:{{ h.name }}" class="block border rounded-md px-3 py-2.5 mb-2 {% if h.kind == 'due' %}border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/30{% else %}border-rose-200 dark:border-rose-800 bg-rose-50/50 dark:bg-rose-950/30{% endif %}">
+  <div class="flex items-center gap-1.5">
+    <span class="text-sm font-semibold {% if h.kind == 'due' %}text-amber-700 dark:text-amber-300{% else %}text-rose-700 dark:text-rose-300{% endif %}">{{ h.label }}</span>
+    <span class="inline-block px-2 py-0.5 rounded-full text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200">{{ h.display_name }}</span>
+  </div>
+  <div class="text-base text-gray-800 dark:text-gray-200 mt-0.5 leading-tight">{{ h.sentence }}</div>
+  {% if h.last_line %}
+  <div class="mt-1 font-mono text-xs text-gray-500 dark:text-gray-400">{{ h.last_line }}</div>
+  {% endif %}
+  <div class="mt-1.5 flex flex-wrap gap-3 text-sm">
+    <a href="{{ h.routines_href }}" class="text-flowgency-700 dark:text-flowgency-200 hover:underline">Open routine</a>
+    {% if h.job_href %}<a href="{{ h.job_href }}" class="text-flowgency-700 dark:text-flowgency-200 hover:underline">Last job log</a>{% endif %}
+    <a href="{{ h.run_href }}" class="text-flowgency-700 dark:text-flowgency-200 hover:underline">Run now</a>
+  </div>
+</div>
+{% endfor %}
+
+{# ─ Workflow issues ─ #}
+{% for issue in workflow_dashboard.issues %}
+<div data-live-key="attention-issue:{{ issue.key }}" class="block border border-amber-200 dark:border-amber-800 rounded-md px-3 py-2.5 mb-2 bg-amber-50/60 dark:bg-amber-950/30">
+  <div class="text-sm font-semibold text-amber-700 dark:text-amber-300">Workflow issue{% if issue.workflow_name %} · {{ issue.workflow_name }}{% endif %}</div>
+  <div class="text-base text-gray-800 dark:text-gray-200 mt-0.5 leading-tight">{{ issue.message }}</div>
+</div>
+{% endfor %}
+
+{# ─ Unassigned tickets ─ #}
+{% for ticket in workflow_dashboard.unassigned %}
+<a href="{{ ticket.href }}" data-live-key="unassigned:{{ ticket.workflow_id }}:{{ ticket.ticket_id }}" class="block border border-sky-200 dark:border-sky-800 rounded-md px-3 py-2.5 mb-2 bg-white dark:bg-gray-800 hover:border-sky-400 dark:hover:border-sky-600 transition-colors">
+  <div class="flex items-center justify-between gap-2">
+    <span class="text-base font-medium text-gray-900 dark:text-gray-100 leading-tight">{{ ticket.title }}</span>
+    <span class="text-xs font-mono text-sky-700 dark:text-sky-300">{{ ticket.workflow_name }}</span>
+  </div>
+  <div class="text-sm text-gray-600 dark:text-gray-300 mt-1">Unassigned ticket · {{ ticket.ticket_id }}</div>
+</a>
+{% endfor %}
+
+{% else %}
+<div data-live-key="attention:empty" class="text-sm text-gray-400 dark:text-gray-500 py-2">No items need attention right now.</div>
+{% endif %}
+{%- endmacro %}
+
+{% macro live_activity() -%}
+<div class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Activity</div>
+{% if activity_feed %}
+<div data-live-key="activity:list" class="max-h-96 overflow-y-auto space-y-1 pr-1">
+  {% for ev in activity_feed %}
+  <a href="{{ ev.href }}" data-live-key="activity:{{ ev.workflow_id }}:{{ ev.ticket_id }}"
+     class="flex items-baseline gap-2 py-1 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors group">
+    <span class="font-mono text-sm text-gray-600 dark:text-gray-300 w-14 flex-shrink-0 text-right">{{ ev.at | relative_time }}</span>
+    <span class="text-sm truncate"><span class="text-gray-700 dark:text-gray-200 group-hover:text-gray-800 dark:group-hover:text-white">{{ ev.title }}</span> <span class="text-gray-600 dark:text-gray-300">&middot;</span> {{ ev.summary }}</span>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<div data-live-key="activity:empty" class="text-sm text-gray-400 dark:text-gray-500 py-2">No recent activity</div>
+{% endif %}
+{%- endmacro %}
+
+{% block title %}Mission Control - {{ team_name }}{% endblock %}
+
+{% block content %}
+{% if setup_stop_csrf %}
+<form id="setup-stop-form" action="/setup/session/stop" method="post" hidden>
+  <input type="hidden" name="setup_csrf" value="{{ setup_stop_csrf }}">
+</form>
+{% endif %}
+<div data-live-region="setup-session">{{ live_setup_session() }}</div>
+{# ════════════════════════════════════════════════════════════
+   ZONE 1: FLEET STATUS BAR
+   ════════════════════════════════════════════════════════════ #}
+<div data-live-region="fleet" class="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2.5 mb-3">{{ live_fleet() }}</div>
+
+<div data-live-region="workflows">{{ live_workflows() }}</div>
+
+{# ════════════════════════════════════════════════════════════
+   WORK QUEUE STRIP
+   ════════════════════════════════════════════════════════════ #}
+<div data-live-region="work-queue">{{ live_work_queue() }}</div>
 
 {# ════════════════════════════════════════════════════════════
    ZONES 3 + 4: ATTENTION QUEUE + ACTIVITY FEED
    ════════════════════════════════════════════════════════════ #}
 <div class="md:grid md:grid-cols-5 md:gap-3">
-
-  {# ── ZONE 3: ATTENTION QUEUE (3/5 width) ── #}
-  <div class="md:col-span-3 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-3 mb-3 md:mb-0">
-    <div class="flex items-center justify-between mb-2">
-      <span class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Attention Queue</span>
-      {% if needs_action_count %}
-      <span class="font-mono text-sm text-amber-700 dark:text-amber-300">{{ needs_action_count }} item{{ "s" if needs_action_count != 1 else "" }}</span>
-      {% endif %}
-    </div>
-
-    {% if health_items or workflow_dashboard.issues or workflow_dashboard.unassigned %}
-
-    {# ─ Agent health (highest priority) ─ #}
-    {% for h in health_items %}
-    <div class="block border rounded-md px-3 py-2.5 mb-2 {% if h.kind == 'due' %}border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/30{% else %}border-rose-200 dark:border-rose-800 bg-rose-50/50 dark:bg-rose-950/30{% endif %}">
-      <div class="flex items-center gap-1.5">
-        <span class="text-sm font-semibold {% if h.kind == 'due' %}text-amber-700 dark:text-amber-300{% else %}text-rose-700 dark:text-rose-300{% endif %}">{{ h.label }}</span>
-        <span class="inline-block px-2 py-0.5 rounded-full text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200">{{ h.display_name }}</span>
-      </div>
-      <div class="text-base text-gray-800 dark:text-gray-200 mt-0.5 leading-tight">{{ h.sentence }}</div>
-      {% if h.last_line %}
-      <div class="mt-1 font-mono text-xs text-gray-500 dark:text-gray-400">{{ h.last_line }}</div>
-      {% endif %}
-      <div class="mt-1.5 flex flex-wrap gap-3 text-sm">
-        <a href="{{ h.routines_href }}" class="text-flowgency-700 dark:text-flowgency-200 hover:underline">Open routine</a>
-        {% if h.job_href %}<a href="{{ h.job_href }}" class="text-flowgency-700 dark:text-flowgency-200 hover:underline">Last job log</a>{% endif %}
-        <a href="{{ h.run_href }}" class="text-flowgency-700 dark:text-flowgency-200 hover:underline">Run now</a>
-      </div>
-    </div>
-    {% endfor %}
-
-    {# ─ Workflow issues ─ #}
-    {% for issue in workflow_dashboard.issues %}
-    <div class="block border border-amber-200 dark:border-amber-800 rounded-md px-3 py-2.5 mb-2 bg-amber-50/60 dark:bg-amber-950/30">
-      <div class="text-sm font-semibold text-amber-700 dark:text-amber-300">Workflow issue{% if issue.workflow_name %} · {{ issue.workflow_name }}{% endif %}</div>
-      <div class="text-base text-gray-800 dark:text-gray-200 mt-0.5 leading-tight">{{ issue.message }}</div>
-    </div>
-    {% endfor %}
-
-    {# ─ Unassigned tickets ─ #}
-    {% for ticket in workflow_dashboard.unassigned %}
-    <a href="{{ ticket.href }}" class="block border border-sky-200 dark:border-sky-800 rounded-md px-3 py-2.5 mb-2 bg-white dark:bg-gray-800 hover:border-sky-400 dark:hover:border-sky-600 transition-colors">
-      <div class="flex items-center justify-between gap-2">
-        <span class="text-base font-medium text-gray-900 dark:text-gray-100 leading-tight">{{ ticket.title }}</span>
-        <span class="text-xs font-mono text-sky-700 dark:text-sky-300">{{ ticket.workflow_name }}</span>
-      </div>
-      <div class="text-sm text-gray-600 dark:text-gray-300 mt-1">Unassigned ticket · {{ ticket.ticket_id }}</div>
-    </a>
-    {% endfor %}
-
-    {% else %}
-    <div class="text-sm text-gray-400 dark:text-gray-500 py-2">No items need attention right now.</div>
-    {% endif %}
-  </div>
-
-  {# ── ZONE 4: ACTIVITY FEED (2/5 width) ── #}
-  <div class="md:col-span-2 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-3">
-    <div class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Activity</div>
-    {% if activity_feed %}
-    <div class="max-h-96 overflow-y-auto space-y-1 pr-1">
-      {% for ev in activity_feed %}
-      <a href="{{ ev.href }}"
-         class="flex items-baseline gap-2 py-1 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors group">
-        <span class="font-mono text-sm text-gray-600 dark:text-gray-300 w-14 flex-shrink-0 text-right">{{ ev.at | relative_time }}</span>
-        <span class="text-sm truncate"><span class="text-gray-700 dark:text-gray-200 group-hover:text-gray-800 dark:group-hover:text-white">{{ ev.title }}</span> <span class="text-gray-600 dark:text-gray-300">&middot;</span> {{ ev.summary }}</span>
-      </a>
-      {% endfor %}
-    </div>
-    {% else %}
-    <div class="text-sm text-gray-400 dark:text-gray-500 py-2">No recent activity</div>
-    {% endif %}
-  </div>
-
+  <div data-live-region="attention" class="md:col-span-3 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-3 mb-3 md:mb-0">{{ live_attention() }}</div>
+  <div data-live-region="activity" class="md:col-span-2 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-3">{{ live_activity() }}</div>
 </div>
 {% endblock %}

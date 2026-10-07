@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import base64
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import dataclasses
 import hashlib
 import inspect
@@ -32,7 +32,7 @@ from flowgency.jobs.connected_process import connected_process_available as _REA
 from flowgency.jobs.models import JobHandle
 from flowgency.jobs.authority import JobStore
 from flowgency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
-from flowgency.jobs.store import transition_job, write_job
+from flowgency.jobs.store import cancel_job, transition_job, write_job
 from flowgency.memory import MemoryStore, resolve_memory_selector
 from flowgency.prompts import PromptStore
 from flowgency.tickets.models import ActiveTicketRun, StorageBinding, TicketEvent, TicketOperation, TicketRecord, TicketRef
@@ -61,7 +61,21 @@ COMPLETION_FIXTURE_SCHEDULER_RESULTS = frozenset(
 COMPLETION_FIXTURE_REVISIONS = frozenset({"current", "stale"})
 COMPLETION_FIXTURE_KEYS = frozenset({"scheduler_result", "limitations_acknowledged", "revision"})
 LIVE_CHANGE_PATH = "/__ui/live/change"
-LIVE_CHANGE_CASES = frozenset({"navigation-membership", "navigation-workflow-count"})
+LIVE_CHANGE_CASES = frozenset(
+    {
+        "navigation-membership",
+        "navigation-workflow-count",
+        "inbox-routine-pending",
+        "inbox-job-completes",
+        "inbox-agent-added",
+        "inbox-agent-moved",
+        "inbox-agent-removed",
+        "inbox-ticket-activity",
+        "inbox-queue-grows",
+        "inbox-clock-advances",
+    }
+)
+INBOX_CLOCK_ADVANCE = timedelta(minutes=30)
 STALE_REVISION = "0" * 64
 GIT_EVIDENCE_TICKET_ID = "fixture-git-evidence"
 GIT_EVIDENCE_REF = "refs/heads/main"
@@ -382,8 +396,138 @@ def _apply_live_change(runtime: Path, case: str) -> None:
             state_id="backlog",
         )
         provider.create(ticket, _ticket_operation(ticket.id))
+    elif case in _INBOX_LIVE_CHANGES:
+        _INBOX_LIVE_CHANGES[case](runtime)
     else:
         raise ValueError(f"Unknown live change case: {case}")
+
+
+def _patch_runtime_config(runtime: Path, patch) -> None:
+    store = ConfigStore(runtime / "config.yaml")
+    store.patch(store.load().revision, patch)
+
+
+def _inbox_routine_pending(runtime: Path) -> None:
+    """Dispatch owes advisor's 09:00 routine; the seeded failure and waiting job would otherwise mask it."""
+
+    def patch(raw: dict) -> None:
+        raw["teams"]["newsletter"]["dispatch"] = {"enabled": True}
+
+    _patch_runtime_config(runtime, patch)
+    authority = JobStore(runtime / "memory-store")
+    failed = authority.path("newsletter", "job-failed")
+    failed.unlink(missing_ok=True)
+    Path(f"{failed}.lock").unlink(missing_ok=True)
+    cancel_job(authority.path("newsletter", "job-waiting"))
+
+
+def _inbox_job_completes(runtime: Path) -> None:
+    """Fire the owed occurrence the way the dispatcher does: marker, then a job that finishes."""
+    day = FIXED_NOW[:10]
+    marker = runtime / "teams" / "newsletter" / "logs" / day / f".event-advisor-daily-review-{day}"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.touch()
+    job_id = "inbox-daily-review"
+    path = JobStore(runtime / "memory-store").path("newsletter", job_id)
+    write_job(path, JobRecord.from_spec(_job_spec(runtime, runtime / "config.yaml", job_id)))
+    transition_job(path, "queued", "running", started_at="2026-07-16T11:59:00+00:00")
+    transition_job(
+        path,
+        "running",
+        "complete",
+        completed_at="2026-07-16T11:59:30+00:00",
+        duration_seconds=30,
+    )
+
+
+def _inbox_agent_added(runtime: Path) -> None:
+    def patch(raw: dict) -> None:
+        raw["teams"]["newsletter"]["agents"].append(
+            {
+                "name": "scribe",
+                "blueprint": "reviewer",
+                "integration": "ticket-test",
+                "identity": {"display_name": "Scribe", "title": "Release Scribe", "emoji": "S"},
+                "default_memory": {"scope": "agent"},
+                "routines": [],
+            }
+        )
+
+    _patch_runtime_config(runtime, patch)
+
+
+def _inbox_agent_moved(runtime: Path) -> None:
+    def patch(raw: dict) -> None:
+        agents = raw["teams"]["newsletter"]["agents"]
+        agents.insert(0, agents.pop(next(i for i, agent in enumerate(agents) if agent["name"] == "builder")))
+
+    _patch_runtime_config(runtime, patch)
+
+
+def _inbox_agent_removed(runtime: Path) -> None:
+    def patch(raw: dict) -> None:
+        agents = raw["teams"]["newsletter"]["agents"]
+        agents[:] = [agent for agent in agents if agent["name"] != "researcher"]
+
+    _patch_runtime_config(runtime, patch)
+
+
+def _inbox_ticket_activity(runtime: Path) -> None:
+    delivery_root = runtime / "tickets" / "delivery"
+    provider = LocalTicketStorage(delivery_root, clock=lambda: datetime.fromisoformat(FIXED_NOW))
+    binding = StorageBinding(
+        integration="local",
+        config={"root": str(delivery_root)},
+        team_id="newsletter",
+        workflow_id="delivery",
+    )
+    opened = TicketEvent(
+        kind="opened",
+        actor="local-user",
+        summary="Ticket created",
+        at=datetime.fromisoformat(FIXED_NOW) + timedelta(minutes=1),
+    )
+    ticket = _ticket_record(
+        binding,
+        ticket_id="fixture-live-activity",
+        number=191,
+        title="Surfaced by the live inbox",
+        description="Added by the inbox live-change fixture.",
+        state_id="backlog",
+        events=(opened,),
+    )
+    provider.create(ticket, _ticket_operation(ticket.id))
+
+
+def _inbox_queue_grows(runtime: Path) -> None:
+    authority = JobStore(runtime / "memory-store")
+    config_path = runtime / "config.yaml"
+    for job_id, routine, due in (
+        ("inbox-queued-1", "suite-health", "2026-07-16T08:00:00+00:00"),
+        ("inbox-queued-2", "docs-audit", "2026-07-16T11:42:00+00:00"),
+    ):
+        spec = dataclasses.replace(
+            _job_spec(runtime, config_path, job_id), agent_name="builder", routine_id=routine
+        )
+        write_job(authority.path("newsletter", job_id), JobRecord.from_spec(spec, due_at=due))
+
+
+def _inbox_clock_advances(runtime: Path) -> None:
+    del runtime
+    current = datetime.fromisoformat(os.environ["FLOWGENCY_FIXED_NOW"])
+    os.environ["FLOWGENCY_FIXED_NOW"] = (current + INBOX_CLOCK_ADVANCE).isoformat()
+
+
+_INBOX_LIVE_CHANGES = {
+    "inbox-routine-pending": _inbox_routine_pending,
+    "inbox-job-completes": _inbox_job_completes,
+    "inbox-agent-added": _inbox_agent_added,
+    "inbox-agent-moved": _inbox_agent_moved,
+    "inbox-agent-removed": _inbox_agent_removed,
+    "inbox-ticket-activity": _inbox_ticket_activity,
+    "inbox-queue-grows": _inbox_queue_grows,
+    "inbox-clock-advances": _inbox_clock_advances,
+}
 
 
 def _install_ui_test_runtime() -> None:
@@ -1690,6 +1834,8 @@ def _safe_remove_runtime(runtime: Path) -> None:
 
 
 def _reset_runtime_state(runtime: Path, *, fixture: str = "default") -> None:
+    if "FLOWGENCY_FIXED_NOW" in os.environ:
+        os.environ["FLOWGENCY_FIXED_NOW"] = FIXED_NOW
     if fixture == CONNECTED_SETUP_FIXTURE:
         # No teams config yet: the setup page must render its guided form
         # (state "waiting") rather than the ready dashboard.

@@ -1314,3 +1314,216 @@ class TestFleetCardQueuedState:
         fleet = build_dashboard_fleet(app_mod.get_team("newsletter"))
         assert fleet[0].get("running") is True
         assert not fleet[0].get("queued")
+
+
+# ── Live Inbox regions ─────────────────────────────────────────────────────────
+
+LIVE_INBOX_PAGE_REGIONS = ("setup-session", "fleet", "workflows", "work-queue", "attention", "activity")
+PENDING_SENTENCE = "Routine daily-review was due at 09:00 and has not run \u2014 3h late."
+
+
+def _live_inbox(client, path="/newsletter/"):
+    response = client.get(f"{path}?__live=1")
+    assert response.status_code == 200
+    return response, {region["key"]: region["html"] for region in response.json()["regions"]}
+
+
+def _enable_dispatch(config_path):
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["teams"]["newsletter"]["dispatch"] = {"enabled": True}
+    _write_yaml(config_path, raw)
+    app_mod.refresh_services()
+    app_mod.app.state.services = app_mod.build_services(config_path)
+
+
+def _complete_scheduled_job(tmp_path, team_root, config_path, job_id="job-scheduled-done"):
+    day = "2026-07-16"
+    (team_root / "logs" / day).mkdir(parents=True, exist_ok=True)
+    (team_root / "logs" / day / f".event-advisor-daily-review-{day}").touch()
+    spec = _job_spec(team_root, config_path, status="queued", job_id=job_id)
+    path = JobStore(tmp_path / "memory-store").path("newsletter", job_id)
+    write_job(path, JobRecord.from_spec(spec))
+    transition_job(path, "queued", "running")
+    transition_job(
+        path, "running", "complete",
+        started_at="2026-07-16T11:59:00+00:00",
+        completed_at="2026-07-16T11:59:30+00:00",
+        duration_seconds=30,
+    )
+
+
+def test_live_inbox_snapshot_and_html_share_the_same_regions(monkeypatch, tmp_path, raw_config):
+    client, _, _ = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+
+    response, regions = _live_inbox(client)
+    body = response.json()
+    html = client.get("/newsletter/").text
+
+    assert body["binding"] == {"page": "inbox", "team": "newsletter", "entity": None, "tab": None, "query": {}}
+    assert body["structure"] == "inbox:1"
+    assert set(LIVE_INBOX_PAGE_REGIONS) <= set(regions)
+    assert {"navigation-teams", "navigation-primary", "navigation-workflows", "navigation-workspace"} <= set(regions)
+    for key in LIVE_INBOX_PAGE_REGIONS:
+        assert f'data-live-region="{key}"' in html
+        assert regions[key] in html
+    assert 'id="live-initial"' in html
+    assert '"url": "/newsletter/?__live=1"' in html or '"url":"/newsletter/?__live=1"' in html
+
+
+def test_live_inbox_keys_are_stable_and_namespaced(monkeypatch, tmp_path, raw_config):
+    client, config_path, team_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+    authority = JobStore(tmp_path / "memory-store")
+    spec = _job_spec(team_root, config_path, status="queued", job_id="job-queued-key")
+    write_job(authority.path("newsletter", spec.job_id), JobRecord.from_spec(spec))
+
+    _, regions = _live_inbox(client)
+
+    assert 'data-live-key="agent:advisor"' in regions["fleet"]
+    assert 'data-live-key="job:job-queued-key"' in regions["work-queue"]
+    for html in regions.values():
+        for key in re.findall(r'data-live-key="([^"]*)"', html):
+            assert ":" in key
+
+
+def test_live_inbox_pending_routine_becomes_healthy_when_the_scheduled_job_completes(
+    monkeypatch, tmp_path, raw_config
+):
+    client, config_path, team_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+    _enable_dispatch(config_path)
+
+    with patch("flowgency.app.clock_now", return_value=datetime(2026, 7, 16, 12, 0)):
+        pending_response, pending = _live_inbox(client)
+        _complete_scheduled_job(tmp_path, team_root, config_path)
+        healthy_response, healthy = _live_inbox(client)
+
+    assert 'data-live-key="agent:advisor"' in pending["fleet"]
+    assert 'data-health="red"' in pending["fleet"] and 'data-health-kind="overdue"' in pending["fleet"]
+    assert PENDING_SENTENCE in pending["attention"]
+    assert 'data-health="green"' in healthy["fleet"] and 'data-health-kind="healthy"' in healthy["fleet"]
+    assert PENDING_SENTENCE not in healthy["fleet"] and PENDING_SENTENCE not in healthy["attention"]
+    assert "No items need attention right now." in healthy["attention"]
+    assert pending_response.headers["etag"] != healthy_response.headers["etag"]
+
+
+def test_live_inbox_counts_equal_the_rendered_lists(workflow_web_env):
+    env = workflow_web_env
+    env.create(title="Alpha review")
+    env.create(title="Beta review")
+    env.create(title="Gamma review")
+
+    _, regions = _live_inbox(env.client, f"/{env.team_id}/")
+
+    attention = regions["attention"]
+    listed = len(re.findall(r'data-live-key="(?:health|unassigned|attention-issue):', attention))
+    header = re.search(r"(\d+) items?", attention)
+    assert header is not None and int(header.group(1)) == listed >= 3
+    workflows = regions["workflows"]
+    assert "3 tickets" in workflows
+    assert "3 unassigned" in workflows
+
+
+def test_live_inbox_work_queue_header_counts_match_listed_jobs(monkeypatch, tmp_path, raw_config):
+    client, config_path, team_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+    authority = JobStore(tmp_path / "memory-store")
+
+    _, idle = _live_inbox(client)
+    for job_id, routine in (("job-q-a", "suite-health"), ("job-q-b", "docs-audit")):
+        spec = _job_spec(team_root, config_path, status="queued", job_id=job_id, routine_id=routine)
+        write_job(authority.path("newsletter", job_id), JobRecord.from_spec(spec, due_at="2026-07-16T08:00:00+00:00"))
+    _, queued = _live_inbox(client)
+
+    assert "idle" in idle["work-queue"] and 'data-live-key="job:' not in idle["work-queue"]
+    listed = re.findall(r'data-live-key="job:([^"]+)"', queued["work-queue"])
+    assert sorted(listed) == ["job-q-a", "job-q-b"]
+    assert f"{len(listed)} queued" in queued["work-queue"]
+
+
+def test_live_inbox_membership_create_move_remove_changes_keys(monkeypatch, tmp_path, raw_config):
+    client, config_path, _ = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+
+    def keys():
+        _, regions = _live_inbox(client)
+        return re.findall(r'data-live-key="agent:([^"]+)"', regions["fleet"]), regions["fleet"]
+
+    def patch_agents(change):
+        raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        change(raw["teams"]["newsletter"]["agents"])
+        _write_yaml(config_path, raw)
+        app_mod.refresh_services()
+        app_mod.app.state.services = app_mod.build_services(config_path)
+
+    assert keys()[0] == ["advisor"]
+    patch_agents(lambda agents: agents.append({
+        "name": "second", "blueprint": "advisor", "integration": "copilot",
+        "identity": {"display_name": "Second"}, "routines": [],
+    }))
+    created, html = keys()
+    assert created == ["advisor", "second"] and "2 agents" in html
+    patch_agents(lambda agents: agents.reverse())
+    assert keys()[0] == ["second", "advisor"]
+    patch_agents(lambda agents: agents.pop(0))
+    removed, html = keys()
+    assert removed == ["advisor"] and "1 agents" in html
+
+
+def test_live_inbox_relative_labels_change_the_snapshot_digest(monkeypatch, tmp_path, raw_config):
+    client, config_path, team_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+    _enable_dispatch(config_path)
+    (team_root / "logs" / "2026-07-16" / "advisor-run.out").write_text("x", encoding="utf-8")
+
+    monkeypatch.setenv("FLOWGENCY_FIXED_NOW", "2026-07-16T07:00:00")
+    first, first_regions = _live_inbox(client)
+    monkeypatch.setenv("FLOWGENCY_FIXED_NOW", "2026-07-16T07:30:00")
+    later, later_regions = _live_inbox(client)
+
+    assert first.headers["etag"] != later.headers["etag"]
+    assert "due in 2h" in first_regions["fleet"]
+    assert "due in 90m" in later_regions["fleet"] or "due in 1h" in later_regions["fleet"]
+
+
+def test_live_inbox_setup_session_region_is_owner_only(monkeypatch, tmp_path, raw_config):
+    _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+    with TestClient(app_mod.app, base_url="http://127.0.0.1:8500", client=("127.0.0.1", 50001)) as client:
+        scope = {
+            "type": "http", "scheme": "http", "path": "/setup",
+            "client": ("127.0.0.1", 50001), "server": ("127.0.0.1", 8500),
+            "headers": [(b"host", b"127.0.0.1:8500")],
+        }
+        owner, csrf, _ = app_mod.app.state.setup_access.ensure_browser(Request(scope))
+        current = SetupSessionSnapshot("running", "copilot", tmp_path, b"", False, "fallback", None, "")
+
+        class OwnedSession:
+            def snapshot(self, claimant):
+                return current if claimant == owner else None
+
+            async def shutdown(self):
+                return None
+
+        monkeypatch.setattr(app_mod.app.state, "setup_sessions", OwnedSession())
+        client.cookies.set("flowgency_setup", owner)
+        _, owned = _live_inbox(client)
+        assert "Setup session running" in owned["setup-session"]
+        assert 'href="/setup/session?view=inspection"' in owned["setup-session"]
+        assert 'form="setup-stop-form"' in owned["setup-session"]
+        assert csrf not in owned["setup-session"] and owner not in owned["setup-session"]
+        page = client.get("/newsletter/").text
+        assert 'id="setup-stop-form"' in page and 'action="/setup/session/stop"' in page and csrf in page
+
+        other = TestClient(app_mod.app, base_url="http://127.0.0.1:8500", client=("127.0.0.1", 50002))
+        remote = TestClient(app_mod.app, base_url="http://127.0.0.1:8500", client=("192.0.2.9", 50003))
+        for visitor in (other, remote):
+            response = visitor.get("/newsletter/?__live=1")
+            assert response.status_code == 200
+            regions = {region["key"]: region["html"] for region in response.json()["regions"]}
+            assert regions["setup-session"].strip() == ""
+            body = response.text
+            assert "Setup session" not in body and "setup/session" not in body and csrf not in body
+        current = replace(current, state="failed", message="Could not confirm process exit")
+        _, failed = _live_inbox(client)
+        assert "Setup session needs attention" in failed["setup-session"]
+
+
+def test_live_inbox_live_request_for_an_unknown_team_is_not_found(monkeypatch, tmp_path, raw_config):
+    client, _, _ = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+
+    assert client.get("/missing/?__live=1").status_code == 404

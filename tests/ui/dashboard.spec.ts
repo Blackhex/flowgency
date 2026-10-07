@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 
 import { assertNoConsoleErrors, assertNoLayoutIssues, assertNoTailwindCdnRequests, installBasePageSetup } from './layout';
 
@@ -87,4 +87,136 @@ test('fleet cards expose run timing and the routine link', async ({ page }) => {
   await expect(page.locator('a[href="/newsletter/agents/builder/routines"]')).toBeVisible();
   await expect(page.getByText('last job failed').first()).toBeVisible();
   await assertNoConsoleErrors(page);
+});
+
+test.describe('inbox live regions', () => {
+  const PENDING_SENTENCE = 'Routine daily-review was due at 09:00 and has not run \u2014 3h late.';
+  const FLEET_KEYS = ['agent:advisor', 'agent:builder', 'agent:reviewer', 'agent:researcher'];
+
+  async function resetRuntime(request: APIRequestContext) {
+    expect((await request.post('/__ui/reset')).status()).toBe(204);
+  }
+
+  async function change(request: APIRequestContext, name: string) {
+    expect((await request.post('/__ui/live/change', { data: { case: name } })).status()).toBe(204);
+  }
+
+  const fleetKeys = (page: Page) => page.locator('[data-live-region="fleet"] [data-live-key^="agent:"]')
+    .evaluateAll((elements) => elements.map((element) => element.getAttribute('data-live-key')));
+
+  async function attentionCounts(page: Page) {
+    const attention = page.locator('[data-live-region="attention"]');
+    const header = (await attention.locator('span.font-mono').first().textContent()) ?? '';
+    const listed = await attention.locator(
+      '[data-live-key^="health:"], [data-live-key^="unassigned:"], [data-live-key^="attention-issue:"]',
+    ).count();
+    return { header: Number(/(\d+) item/.exec(header)?.[1] ?? 0), listed };
+  }
+
+  async function queueCounts(page: Page) {
+    const strip = page.locator('[data-live-region="work-queue"]');
+    const text = (await strip.textContent()) ?? '';
+    return { header: Number(/(\d+) queued/.exec(text)?.[1] ?? 0), listed: await strip.locator('[data-live-key^="job:"]').count() };
+  }
+
+  const healthyCount = async (page: Page) => Number(
+    /(\d+) healthy/.exec((await page.locator('[data-live-key="fleet:summary"]').textContent()) ?? '')?.[1] ?? -1,
+  );
+
+  test.beforeEach(async ({ request }) => resetRuntime(request));
+  test.afterEach(async ({ request }) => resetRuntime(request));
+
+  test('a completed scheduled job clears the pending card in place without a reload', async ({ page, request }) => {
+    await change(request, 'inbox-routine-pending');
+    await page.goto('/newsletter/');
+    await page.evaluate(() => { (window as unknown as { __kept: boolean }).__kept = true; });
+    const main = await page.locator('main').elementHandle();
+    const card = page.locator('[data-live-key="agent:advisor"]');
+    const attention = page.locator('[data-live-region="attention"]');
+
+    await expect(card).toHaveAttribute('data-health', 'red');
+    await expect(card).toHaveAttribute('data-health-kind', 'overdue');
+    await expect(card).toContainText('daily-review due 09:00');
+    await expect(attention).toContainText(PENDING_SENTENCE);
+    const healthyBefore = await healthyCount(page);
+
+    await change(request, 'inbox-job-completes');
+
+    await expect(card).toHaveAttribute('data-health', 'green');
+    await expect(card).toHaveAttribute('data-health-kind', 'healthy');
+    await expect(card.locator('a[aria-label="Advisor"] span[title="Healthy"]')).toHaveCount(1);
+    await expect(card).not.toContainText('daily-review due 09:00');
+    await expect(attention).not.toContainText(PENDING_SENTENCE);
+    await expect(attention.locator('[data-live-key="health:advisor"]')).toHaveCount(0);
+    await expect.poll(() => healthyCount(page)).toBe(healthyBefore + 1);
+    expect(await main!.evaluate((node) => node.isConnected)).toBe(true);
+    expect(await page.evaluate(() => (window as unknown as { __kept?: boolean }).__kept)).toBe(true);
+    const counts = await attentionCounts(page);
+    expect(counts.header).toBe(counts.listed);
+  });
+
+  test('membership create, move and remove reconcile the fleet by identity', async ({ page, request }) => {
+    await page.goto('/newsletter/');
+    await expect.poll(() => fleetKeys(page)).toEqual(FLEET_KEYS);
+    await page.locator('[data-live-key="agent:builder"]').evaluate((element) => {
+      (element as unknown as { __kept: boolean }).__kept = true;
+    });
+
+    await change(request, 'inbox-agent-added');
+    await expect.poll(() => fleetKeys(page)).toEqual([...FLEET_KEYS, 'agent:scribe']);
+    await expect(page.locator('[data-live-key="fleet:summary"]')).toContainText('5 agents');
+
+    await change(request, 'inbox-agent-moved');
+    await expect.poll(async () => (await fleetKeys(page))[0]).toBe('agent:builder');
+    expect(await page.locator('[data-live-key="agent:builder"]').evaluate(
+      (element) => (element as unknown as { __kept?: boolean }).__kept,
+    )).toBe(true);
+
+    await change(request, 'inbox-agent-removed');
+    await expect.poll(() => fleetKeys(page)).toEqual(['agent:builder', 'agent:advisor', 'agent:reviewer', 'agent:scribe']);
+    await expect(page.locator('[data-live-key="fleet:summary"]')).toContainText('4 agents');
+  });
+
+  test('activity and attention counts stay coherent while a focused link keeps focus', async ({ page, request }) => {
+    await page.goto('/newsletter/');
+    const link = page.locator('[data-live-key="agent:builder"] a').first();
+    await link.focus();
+    await expect(link).toBeFocused();
+    const before = await attentionCounts(page);
+    expect(before.header).toBe(before.listed);
+
+    await change(request, 'inbox-ticket-activity');
+
+    const created = page.locator('[data-live-region="activity"] [data-live-key="activity:delivery:fixture-live-activity"]');
+    await expect(created).toBeVisible();
+    await expect(page.locator('[data-live-region="attention"] [data-live-key="unassigned:delivery:fixture-live-activity"]')).toBeVisible();
+    await expect(link).toBeFocused();
+    const after = await attentionCounts(page);
+    expect(after.listed).toBe(before.listed + 1);
+    expect(after.header).toBe(after.listed);
+  });
+
+  test('queue header counts always equal the listed waiting jobs', async ({ page, request }) => {
+    await page.goto('/newsletter/');
+    const before = await queueCounts(page);
+    expect(before.header).toBe(before.listed);
+
+    await change(request, 'inbox-queue-grows');
+
+    await expect.poll(async () => (await queueCounts(page)).listed).toBe(before.listed + 2);
+    const after = await queueCounts(page);
+    expect(after.header).toBe(after.listed);
+    await expect(page.locator('[data-live-key="job:inbox-queued-1"]')).toContainText('builder / suite-health');
+  });
+
+  test('relative labels advance with the clock without a reload', async ({ page, request }) => {
+    await page.goto('/newsletter/');
+    const activity = page.locator('[data-live-region="activity"] a[data-live-key^="activity:"]').first();
+    const label = activity.locator('span.font-mono');
+    await expect(label).toHaveText('Just now');
+
+    await change(request, 'inbox-clock-advances');
+
+    await expect(label).toHaveText('30m ago');
+  });
 });

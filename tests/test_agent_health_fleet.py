@@ -183,3 +183,35 @@ def test_complete_followed_by_cancelled_is_green(tmp_path):
     _write_job(tmp_path, "job-old", status="complete", completed_at="2026-07-27T10:00:00+00:00")
     _write_job(tmp_path, "job-new", status="cancelled", completed_at="2026-07-28T10:00:00+00:00")
     assert _health(tmp_path, routines=[]) == "green"
+
+
+# ── Pending routine to healthy ────────────────────────────────────────────────
+
+
+def _fleet_for(tmp_path, routines):
+    team_data = _team(tmp_path, routines=routines)
+    team_data["observations"].mkdir(parents=True, exist_ok=True)
+    with patch.dict(os.environ, {"FLOWGENCY_FIXED_NOW": NOW.isoformat()}):
+        agents, _ = app_module.collect_agents_with_identity(team_data)
+        return agents[0], app_module.build_health_items(team_data, agents)
+
+
+def test_pending_routine_reports_its_sentence_and_is_healthy_once_the_job_completes(tmp_path):
+    routines = [_routine("r", at="08:00")]
+
+    pending, pending_items = _fleet_for(tmp_path, routines)
+
+    assert (pending["health"], pending["health_kind"]) == ("red", "overdue")
+    assert pending["health_sentence"] == "Routine r was due at 08:00 and has not run \u2014 4h late."
+    assert [item["sentence"] for item in pending_items] == [pending["health_sentence"]]
+
+    day = NOW.strftime("%Y-%m-%d")
+    (tmp_path / "logs" / day).mkdir(parents=True, exist_ok=True)
+    (tmp_path / "logs" / day / f".event-product-r-{day}").touch()
+    _write_job(tmp_path, "job-done", status="complete", completed_at="2026-07-28T11:59:00+00:00")
+
+    healthy, healthy_items = _fleet_for(tmp_path, routines)
+
+    assert (healthy["health"], healthy["health_kind"]) == ("green", "healthy")
+    assert healthy["health_sentence"] == "Healthy"
+    assert healthy_items == []

@@ -250,6 +250,8 @@ def test_completion_fixture_endpoint_rejects_invalid_bodies_without_an_attempt(m
 def test_live_change_case_accepts_only_the_closed_allowlist():
     assert server._live_change_case({"case": "navigation-membership"}) == "navigation-membership"
     assert server._live_change_case({"case": "navigation-workflow-count"}) == "navigation-workflow-count"
+    for case in server.LIVE_CHANGE_CASES:
+        assert server._live_change_case({"case": case}) == case
 
     rejected = [
         None,
@@ -299,5 +301,101 @@ def test_live_change_endpoint_changes_navigation_and_reset_restores_it(monkeypat
             restored = client.get("/newsletter/agents?__live=1").text
             assert "Research updated" not in restored
             assert 'data-live-key=\\"nav:workspaces\\"' not in restored
+    finally:
+        server._safe_remove_runtime(runtime)
+
+
+_ADVISOR_CARD = r'data-live-key="agent:advisor" data-health="(\w+)" data-health-kind="(\w+)"'
+_PENDING_SENTENCE = "Routine daily-review was due at 09:00 and has not run \u2014 3h late."
+
+
+def _inbox_regions(client) -> dict[str, str]:
+    body = client.get("/newsletter/?__live=1").json()
+    return {region["key"]: region["html"] for region in body["regions"]}
+
+
+def test_live_change_inbox_job_completion_turns_the_pending_advisor_healthy(monkeypatch):
+    import re
+
+    import flowgency.app as app_mod
+
+    runtime, config_path = server._prepare_runtime()
+    try:
+        monkeypatch.setenv("FLOWGENCY_CONFIG", str(config_path))
+        monkeypatch.setenv("FLOWGENCY_UI_RUNTIME", str(runtime))
+        monkeypatch.setenv("FLOWGENCY_FIXED_NOW", server.FIXED_NOW)
+        monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
+        server._install_ui_test_runtime()
+        app_mod.refresh_services()
+
+        with TestClient(app_mod.app) as client:
+            path = server.LIVE_CHANGE_PATH
+
+            def card() -> tuple[str, str]:
+                match = re.search(_ADVISOR_CARD, _inbox_regions(client)["fleet"])
+                assert match is not None
+                return match.groups()
+
+            assert card() == ("red", "job_failed")
+
+            assert client.post(path, json={"case": "inbox-routine-pending"}).status_code == 204
+            assert card() == ("red", "overdue")
+            assert _PENDING_SENTENCE in _inbox_regions(client)["attention"]
+
+            assert client.post(path, json={"case": "inbox-job-completes"}).status_code == 204
+            assert card() == ("green", "healthy")
+            regions = _inbox_regions(client)
+            assert _PENDING_SENTENCE not in regions["fleet"] + regions["attention"]
+
+            assert client.post(server.UI_RESET_PATH).status_code == 204
+            assert card() == ("red", "job_failed")
+    finally:
+        server._safe_remove_runtime(runtime)
+
+
+def test_live_change_inbox_membership_queue_activity_and_clock_cases_reset_cleanly(monkeypatch):
+    import re
+
+    import flowgency.app as app_mod
+
+    runtime, config_path = server._prepare_runtime()
+    try:
+        monkeypatch.setenv("FLOWGENCY_CONFIG", str(config_path))
+        monkeypatch.setenv("FLOWGENCY_UI_RUNTIME", str(runtime))
+        monkeypatch.setenv("FLOWGENCY_FIXED_NOW", server.FIXED_NOW)
+        monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
+        server._install_ui_test_runtime()
+        app_mod.refresh_services()
+
+        with TestClient(app_mod.app) as client:
+            path = server.LIVE_CHANGE_PATH
+
+            def agents() -> list[str]:
+                return re.findall(r'data-live-key=\\"agent:([^\\"]+)\\"', json.dumps(_inbox_regions(client)["fleet"]))
+
+            default = agents()
+            assert default == ["advisor", "builder", "reviewer", "researcher"]
+
+            assert client.post(path, json={"case": "inbox-agent-added"}).status_code == 204
+            assert agents() == [*default, "scribe"]
+            assert client.post(path, json={"case": "inbox-agent-moved"}).status_code == 204
+            assert agents()[0] == "builder"
+            assert client.post(path, json={"case": "inbox-agent-removed"}).status_code == 204
+            assert "researcher" not in agents()
+
+            before = _inbox_regions(client)
+            assert client.post(path, json={"case": "inbox-ticket-activity"}).status_code == 204
+            assert client.post(path, json={"case": "inbox-queue-grows"}).status_code == 204
+            after = _inbox_regions(client)
+            assert 'data-live-key=\\"activity:delivery:fixture-live-activity\\"' in json.dumps(after["activity"])
+            assert json.dumps(after["work-queue"]).count('data-live-key=\\"job:inbox-queued-') == 2
+            assert after["work-queue"] != before["work-queue"]
+
+            assert client.post(path, json={"case": "inbox-clock-advances"}).status_code == 204
+            assert _inbox_regions(client)["activity"] != after["activity"]
+
+            assert client.post(server.UI_RESET_PATH).status_code == 204
+            assert agents() == default
+            assert _inbox_regions(client)["activity"] == before["activity"]
     finally:
         server._safe_remove_runtime(runtime)
