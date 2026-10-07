@@ -550,3 +550,63 @@ test.describe('agent detail live refresh', () => {
     expect(await dialog.evaluate((node) => (node as unknown as { __kept?: boolean }).__kept)).toBe(true);
   });
 });
+
+
+test.describe('activity reports live refresh', () => {
+  test('inserted reports initialize, discarded reports release their observers and expanded reports stay open', async ({ page, request }) => {
+    await page.addInitScript(() => {
+      const Native = window.ResizeObserver;
+      const stats = { observed: 0, disconnected: 0 };
+      (window as unknown as { __roStats: typeof stats }).__roStats = stats;
+      window.ResizeObserver = class extends Native {
+        observe(target: Element, options?: ResizeObserverOptions) {
+          stats.observed += 1;
+          return super.observe(target, options);
+        }
+
+        disconnect() {
+          stats.disconnected += 1;
+          return super.disconnect();
+        }
+      };
+    });
+    expect((await request.post('/__ui/reset', { data: { fixture: 'agent-activity-logs' } })).status()).toBe(204);
+    await page.goto('/newsletter/agents/advisor/activity');
+    const longReport = page.locator('section ol > li').filter({ hasText: 'Triage identified and documented the violated invariant' }).first();
+    const toggle = longReport.locator('[data-report-toggle]');
+    const text = longReport.locator('[data-report-text]');
+    await expect(toggle).toHaveText('Show more');
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(toggle).toHaveText('Show less');
+    // A focused control holds its ancestors, so a structural change would wait for the blur.
+    await toggle.evaluate((node) => (node as HTMLElement).blur());
+    await longReport.evaluate((node) => { (node as unknown as { __kept: boolean }).__kept = true; });
+    const stats = () => page.evaluate(() => (window as unknown as { __roStats: { observed: number; disconnected: number } }).__roStats);
+    const before = await stats();
+    expect(await page.evaluate(() => typeof (window as unknown as { initActivityReports: unknown }).initActivityReports)).toBe('function');
+    expect(await page.evaluate(() => typeof (window as unknown as { disposeActivityReports: unknown }).disposeActivityReports)).toBe('function');
+
+    await changeLiveFixture(request, 'agent-report-history');
+
+    const entries = page.locator('[data-live-region="agent-activity-entries"]');
+    await expect(entries).toContainText('Published the live refresh handoff report.');
+    await expect.poll(async () => (await stats()).observed).toBeGreaterThan(before.observed);
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(toggle).toHaveText('Show less');
+    expect(await text.evaluate((node) => getComputedStyle(node).overflow)).not.toBe('hidden');
+    expect(await longReport.evaluate((node) => (node as unknown as { __kept?: boolean }).__kept)).toBe(true);
+
+    const observed = (await stats()).observed;
+    await page.evaluate(() => {
+      const probe = document.createElement('div');
+      probe.id = 'report-probe';
+      probe.innerHTML = '<div data-activity-report><div data-report-text>probe</div><button type="button" data-report-toggle hidden aria-expanded="false">Show more</button></div>';
+      document.body.append(probe);
+    });
+    await expect.poll(async () => (await stats()).observed).toBe(observed + 1);
+    const disconnected = (await stats()).disconnected;
+    await page.evaluate(() => document.getElementById('report-probe')?.remove());
+    await expect.poll(async () => (await stats()).disconnected).toBe(disconnected + 1);
+  });
+});

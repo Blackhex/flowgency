@@ -754,6 +754,9 @@
       return;
     }
     controller = new AbortController();
+    // A preview is a local action: passive live refreshes pause until it settles.
+    const liveHandle = window.FlowgencyLive && window.FlowgencyLive.handles.get('page');
+    const finishLiveAction = liveHandle ? liveHandle.beginAction() : () => {};
     fetch(initial.preview_url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -788,7 +791,7 @@
       }
       controller = null;
       showFailure({ code: 'preview-unavailable', issues: [] });
-    });
+    }).finally(finishLiveAction);
   }
 
   function markChanged() {

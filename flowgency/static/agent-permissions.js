@@ -458,6 +458,9 @@
     const serializedDraft = JSON.stringify(draft);
     const activeController = new AbortController();
     controller = activeController;
+    // A preview is a local action: passive live refreshes pause until it settles.
+    const liveHandle = window.FlowgencyLive && window.FlowgencyLive.handles.get('page');
+    const finishLiveAction = liveHandle ? liveHandle.beginAction() : () => {};
     try {
       const response = await fetch(initial.preview_url, {
         method: 'POST',
@@ -497,6 +500,8 @@
       }
       setSummaryUnavailable();
       setDirtyState();
+    } finally {
+      finishLiveAction();
     }
   }
 
