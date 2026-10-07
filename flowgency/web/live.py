@@ -11,6 +11,7 @@ from weakref import WeakKeyDictionary
 
 from fastapi import Request
 from fastapi.responses import JSONResponse, Response
+from jinja2 import nodes
 from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = [
@@ -223,8 +224,38 @@ class _NonRenderingParent:
         return iter(())
 
 
-def _non_rendering_parent(*_args: Any, **_kwargs: Any) -> _NonRenderingParent:
-    return _NonRenderingParent()
+def _literal_template_names(expr: Any) -> frozenset[str] | None:
+    """Resolve a compile-time-constant `{% extends %}` target to its literal
+    name(s), or None if it is not fully known at compile time (e.g. a
+    variable, or a `select_template`-style list containing one)."""
+    if isinstance(expr, nodes.Const) and isinstance(expr.value, str):
+        return frozenset({expr.value})
+    if isinstance(expr, (nodes.Tuple, nodes.List)):
+        names: set[str] = set()
+        for item in expr.items:
+            if not (isinstance(item, nodes.Const) and isinstance(item.value, str)):
+                return None
+            names.add(item.value)
+        return frozenset(names)
+    return None
+
+
+def _extends_parent_names(env: Any, source: str, template_name: str) -> frozenset[str]:
+    """Find the literal template name(s) targeted by this template's own
+    top-level `{% extends %}`. Only these names may resolve to the
+    non-rendering stub; `{% import %}`, `{% from ... import %}` and
+    `{% include %}` of any other template must still resolve for real."""
+    ast = env.parse(source, name=template_name)
+    names: set[str] = set()
+    for extends_node in ast.find_all(nodes.Extends):
+        literal_names = _literal_template_names(extends_node.template)
+        if literal_names is None:
+            raise LiveSnapshotError(
+                f"template {template_name!r} extends a non-literal template name; "
+                "live snapshot macro extraction requires a literal {% extends %} target"
+            )
+        names.update(literal_names)
+    return frozenset(names)
 
 
 # Per real Jinja Environment, a compiled template whose extends resolution is
@@ -234,15 +265,43 @@ _macro_template_cache: "WeakKeyDictionary[Any, dict[str, Any]]" = WeakKeyDiction
 
 def _macro_only_context(env: Any, template_name: str, context_vars: dict[str, Any]) -> Any:
     """Build a render context with top-level macros defined, without executing
-    any `{% extends %}` parent's layout/body or the template's own non-macro output."""
+    any `{% extends %}` parent's layout/body or the template's own non-macro
+    output. Top-level `{% import %}`, `{% from ... import %}` and
+    `{% include %}` of other templates still resolve through the real
+    environment, so their macros remain usable."""
     per_env_cache = _macro_template_cache.setdefault(env, {})
     fresh_template = per_env_cache.get(template_name)
     if fresh_template is None:
         source, filename, _ = env.loader.get_source(env, template_name)
+        parent_names = _extends_parent_names(env, source, template_name)
         overlay = env.overlay()
-        overlay.get_template = _non_rendering_parent
-        overlay.select_template = _non_rendering_parent
-        overlay.get_or_select_template = _non_rendering_parent
+        real_get_template = overlay.get_template
+        real_select_template = overlay.select_template
+        real_get_or_select_template = overlay.get_or_select_template
+
+        def _stub_get_template(name: str, parent: str | None = None, globals: Any = None) -> Any:
+            if name in parent_names:
+                return _NonRenderingParent()
+            return real_get_template(name, parent, globals)
+
+        def _stub_select_template(names: Any, parent: str | None = None, globals: Any = None) -> Any:
+            if parent_names and parent_names.issubset(list(names)):
+                return _NonRenderingParent()
+            return real_select_template(names, parent, globals)
+
+        def _stub_get_or_select_template(
+            name_or_list: Any, parent: str | None = None, globals: Any = None
+        ) -> Any:
+            if isinstance(name_or_list, str):
+                if name_or_list in parent_names:
+                    return _NonRenderingParent()
+            elif parent_names and parent_names.issubset(list(name_or_list)):
+                return _NonRenderingParent()
+            return real_get_or_select_template(name_or_list, parent, globals)
+
+        overlay.get_template = _stub_get_template
+        overlay.select_template = _stub_select_template
+        overlay.get_or_select_template = _stub_get_or_select_template
         code = overlay.compile(source, name=template_name, filename=filename)
         fresh_template = overlay.template_class.from_code(overlay, code, overlay.globals, uptodate=None)
         per_env_cache[template_name] = fresh_template

@@ -99,6 +99,93 @@ def test_render_live_snapshot_does_not_execute_extends_layout_or_body():
     assert calls == {}
 
 
+def test_render_live_snapshot_extends_with_top_level_import_still_resolves():
+    # Modeled on workflow_board.html / ticket_detail.html / _ticket_inspector.html,
+    # which all combine `{% extends %}` with a top-level
+    # `{% import ... with context %}` whose macros the page's own macros call.
+    calls: dict[str, int] = {}
+
+    def probe(label: str) -> str:
+        calls[label] = calls.get(label, 0) + 1
+        return ""
+
+    templates = Environment(
+        loader=DictLoader(
+            {
+                "base.html": (
+                    "{{ probe('base_top') }}"
+                    "{% block content %}{{ probe('base_block_default') }}{% endblock %}"
+                ),
+                "_presentation.html": (
+                    "{% macro greeting(value) -%}Hello {{ value }}{%- endmacro %}"
+                ),
+                "sample.html": (
+                    "{% extends 'base.html' %}"
+                    '{% import "_presentation.html" as p with context %}'
+                    "{% macro live_rows() %}<p>{{ p.greeting(name) }}</p>{% endmacro %}"
+                    "{% block content %}<div>{{ probe('child_block') }}</div>{% endblock %}"
+                ),
+            }
+        ),
+        autoescape=True,
+    )
+    templates.globals["probe"] = probe
+
+    policy = LivePagePolicy(
+        template_name="sample.html", binding=LiveBinding(page="sample"),
+        structure="sample:1", region_macros={"rows": "live_rows"},
+        snapshot_url="/sample?__live=1",
+    )
+
+    snapshot = render_live_snapshot(templates, {"name": "World"}, policy)
+
+    assert snapshot.regions[0].html == "<p>Hello World</p>"
+    assert calls == {}
+
+
+def test_render_live_snapshot_extends_with_top_level_from_import_still_resolves():
+    templates = Environment(
+        loader=DictLoader(
+            {
+                "base.html": "{% block content %}{% endblock %}",
+                "_presentation.html": (
+                    "{% macro greeting(value) -%}Hi {{ value }}{%- endmacro %}"
+                ),
+                "sample.html": (
+                    "{% extends 'base.html' %}"
+                    '{% from "_presentation.html" import greeting %}'
+                    "{% macro live_rows() %}<p>{{ greeting(name) }}</p>{% endmacro %}"
+                    "{% block content %}{% endblock %}"
+                ),
+            }
+        ),
+        autoescape=True,
+    )
+    policy = LivePagePolicy(
+        template_name="sample.html", binding=LiveBinding(page="sample"),
+        structure="sample:1", region_macros={"rows": "live_rows"},
+        snapshot_url="/sample?__live=1",
+    )
+
+    snapshot = render_live_snapshot(templates, {"name": "World"}, policy)
+
+    assert snapshot.regions[0].html == "<p>Hi World</p>"
+
+
+def test_real_workflow_templates_macro_extraction_does_not_crash():
+    # Quick probe against the real flowgency Jinja environment: workflow_board.html
+    # and ticket_detail.html both extend a parent and import
+    # "_ticket_presentation.html" with context at the top level. Extraction
+    # (building the macro-only render context) must not raise.
+    from flowgency.app import templates as app_templates
+    from flowgency.web.live import _macro_only_context
+
+    env = app_templates.env
+    for template_name in ("workflow_board.html", "ticket_detail.html"):
+        render_context = _macro_only_context(env, template_name, {})
+        assert "presentation" in render_context.vars
+
+
 def test_live_etag_is_stable_for_equivalent_snapshots():
     templates = Environment(
         loader=DictLoader({"sample.html": "{% macro live_rows() %}<p>{{ name }}</p>{% endmacro %}"}),
