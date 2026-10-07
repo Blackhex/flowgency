@@ -22,14 +22,15 @@ from flowgency.configuration import (
     create_team_state,
     patch_team_settings_state,
     prepare_writable_directory,
-    resolve_team_paths,
 )
 from flowgency.integrations import BaseIntegration, IntegrationError, REGISTRY
 from flowgency.integrations.models import InteractiveSetupRequest
 from flowgency.jobs.connected_process import ConnectedLaunchError, connected_process_available
 from flowgency.jobs.store import revision_bound_team_operation
 from flowgency.web.dependencies import FlowgencyServices, build_services, get_services
+from flowgency.web.admin_live import team_edit_policy, team_new_policy, team_summary, teams_policy
 from flowgency.web.directory_browser import DirectoryBrowseError, list_directories
+from flowgency.web.live import respond_live_or_html
 from flowgency.web.setup_completion import (
     SetupCompletionDecision,
     completion_environment,
@@ -68,30 +69,17 @@ def _workspace_types_json(request: Request) -> str:
     return request.app.state.workspace_types_json_getter()
 
 
-def _team_summary(key: str, tcfg) -> dict:
-    paths = resolve_team_paths(tcfg)
-    return {
-        "key": key,
-        "name": tcfg.name,
-        "workspace_path": str(tcfg.workspace_path),
-        "team_path": str(tcfg.path),
-        "agents": list(tcfg.agents.keys()),
-        "agent_count": len(tcfg.agents),
-        "initialized": all(path.is_dir() for path in paths.record_directories),
-        "workspace_exists": paths.workspace_root.exists(),
-        "dispatch_enabled": tcfg.dispatch.enabled,
-    }
-
-
 def _base_admin_context(request: Request, snapshot=None) -> dict:
     teams = {}
     title = "Flowgency"
+    saved_revision = ""
     if snapshot is not None:
         teams = {
             key: tcfg.name
             for key, tcfg in snapshot.config.teams.items()
         }
         title = snapshot.config.flowgency.title
+        saved_revision = snapshot.revision
     return {
         "request": request,
         "flowgency_title": title,
@@ -100,7 +88,18 @@ def _base_admin_context(request: Request, snapshot=None) -> dict:
         "admin_page": "teams",
         "theme_css": _theme_css(request),
         "teams": teams,
+        # What a live region reports as saved; a form's own `revision` is its loaded baseline.
+        "saved_revision": saved_revision,
     }
+
+
+def _team_form_response(request: Request, context: dict, *, status_code: int = 200):
+    """Render the team form page; every render registers the canonical GET read, never its POST."""
+    if context["mode"] == "create":
+        policy = team_new_policy(context)
+    else:
+        policy = team_edit_policy(context["team_key"], context)
+    return respond_live_or_html(request, _templates(request), context, policy, status_code=status_code)
 
 
 def _diagnostic_issues(services: FlowgencyServices) -> list[dict]:
@@ -202,61 +201,57 @@ def _team_settings_response(
     def value(key: str, default):
         return values[key] if key in values else default
 
-    return _templates(request).TemplateResponse(
-        request,
-        "admin_team_edit.html",
-        {
-            **_base_admin_context(request, snapshot),
-            "mode": "edit",
-            "team_key": team_id,
-            "team_name": value("name", team_cfg.name),
-            "team_workspace_path": value("workspace_path", str(team_cfg.workspace_path)),
-            "team_path": value("path", str(team_cfg.path)),
-            "team_workspaces_json": value(
-                "workspaces_json",
-                json.dumps(
-                    [
-                        workspace.model_dump(mode="json")
-                        for workspace in team_cfg.workspaces
-                    ]
-                ),
+    context = {
+        **_base_admin_context(request, snapshot),
+        "mode": "edit",
+        "team_key": team_id,
+        "team_name": value("name", team_cfg.name),
+        "team_workspace_path": value("workspace_path", str(team_cfg.workspace_path)),
+        "team_path": value("path", str(team_cfg.path)),
+        "team_workspaces_json": value(
+            "workspaces_json",
+            json.dumps(
+                [
+                    workspace.model_dump(mode="json")
+                    for workspace in team_cfg.workspaces
+                ]
             ),
-            "workspace_types_json": _workspace_types_json(request),
-            "default_integration": value(
-                "default_integration", team_cfg.default_integration
-            ),
-            "runtime_timeout": value("runtime_timeout", runtime.timeout),
-            "permission_mode": value("permission_mode", permissions.mode),
-            "permission_rules_yaml": value(
-                "permission_rules_yaml",
-                yaml.safe_dump(
-                    [
-                        {
-                            k: v
-                            for k, v in (
-                                ("path", str(rule.path) if rule.path else None),
-                                ("tools", list(rule.tools) if rule.tools is not None else None),
-                            )
-                            if v is not None
-                        }
-                        for rule in permissions.rules
-                    ],
-                    default_flow_style=False,
-                    sort_keys=False,
-                ).strip() if permissions.rules else "",
-            ),
-            "dispatch_enabled": value("dispatch_enabled", dispatch.enabled),
-            "agent_count": len(team_cfg.agents),
-            "manage_agents_href": f"/{team_id}/agents",
-            "warning": warning,
-            "revision": (
-                revision
-                if revision is not None
-                else value("revision", snapshot.revision)
-            ),
-        },
-        status_code=status_code,
-    )
+        ),
+        "workspace_types_json": _workspace_types_json(request),
+        "default_integration": value(
+            "default_integration", team_cfg.default_integration
+        ),
+        "runtime_timeout": value("runtime_timeout", runtime.timeout),
+        "permission_mode": value("permission_mode", permissions.mode),
+        "permission_rules_yaml": value(
+            "permission_rules_yaml",
+            yaml.safe_dump(
+                [
+                    {
+                        k: v
+                        for k, v in (
+                            ("path", str(rule.path) if rule.path else None),
+                            ("tools", list(rule.tools) if rule.tools is not None else None),
+                        )
+                        if v is not None
+                    }
+                    for rule in permissions.rules
+                ],
+                default_flow_style=False,
+                sort_keys=False,
+            ).strip() if permissions.rules else "",
+        ),
+        "dispatch_enabled": value("dispatch_enabled", dispatch.enabled),
+        "agent_count": len(team_cfg.agents),
+        "manage_agents_href": f"/{team_id}/agents",
+        "warning": warning,
+        "revision": (
+            revision
+            if revision is not None
+            else value("revision", snapshot.revision)
+        ),
+    }
+    return _team_form_response(request, context, status_code=status_code)
 
 
 def _team_create_response(
@@ -273,25 +268,21 @@ def _team_create_response(
     revision: str,
     status_code: int,
 ):
-    return _templates(request).TemplateResponse(
-        request,
-        "admin_team_edit.html",
-        {
-            **_base_admin_context(request, snapshot),
-            "mode": "create",
-            "team_key": key,
-            "team_name": name,
-            "team_workspace_path": workspace_path,
-            "team_path": path,
-            "default_integration": default_integration,
-            "team_workspaces_json": workspaces_json,
-            "workspace_types_json": _workspace_types_json(request),
-            "warning": warning,
-            "integration_names": _integration_names(),
-            "revision": revision,
-        },
-        status_code=status_code,
-    )
+    context = {
+        **_base_admin_context(request, snapshot),
+        "mode": "create",
+        "team_key": key,
+        "team_name": name,
+        "team_workspace_path": workspace_path,
+        "team_path": path,
+        "default_integration": default_integration,
+        "team_workspaces_json": workspaces_json,
+        "workspace_types_json": _workspace_types_json(request),
+        "warning": warning,
+        "integration_names": _integration_names(),
+        "revision": revision,
+    }
+    return _team_form_response(request, context, status_code=status_code)
 
 
 PERMISSION_RULES_WARNING = "Permission rules must be valid YAML (a list of mappings)."
@@ -923,48 +914,33 @@ async def admin_team_create(
     path = str(form.get("path", "")).strip()
     if not key or not name or not workspace_path or not path:
         snapshot = services.config_store.load()
-        return _templates(request).TemplateResponse(
+        return _team_create_response(
             request,
-            "admin_team_edit.html",
-            {
-                **_base_admin_context(request, snapshot),
-                "mode": "create",
-                "team_key": key,
-                "team_name": name,
-                "team_workspace_path": workspace_path,
-                "team_path": path,
-                "default_integration": str(
-                    form.get("default_integration", "")
-                ).strip(),
-                "team_workspaces_json": str(form.get("workspaces_json", "[]")),
-                "workspace_types_json": _workspace_types_json(request),
-                "warning": "Key, name, workspace path, and path are required.",
-                "integration_names": _integration_names(),
-                "revision": snapshot.revision,
-            },
+            snapshot,
+            key=key,
+            name=name,
+            workspace_path=workspace_path,
+            path=path,
+            default_integration=str(form.get("default_integration", "")).strip(),
+            workspaces_json=str(form.get("workspaces_json", "[]")),
+            warning="Key, name, workspace path, and path are required.",
+            revision=snapshot.revision,
+            status_code=200,
         )
     snapshot = services.config_store.load()
     default_integration = str(form.get("default_integration", "")).strip()
     if default_integration and default_integration not in REGISTRY:
-        return _templates(request).TemplateResponse(
+        return _team_create_response(
             request,
-            "admin_team_edit.html",
-            {
-                **_base_admin_context(request, snapshot),
-                "mode": "create",
-                "team_key": key,
-                "team_name": name,
-                "team_workspace_path": workspace_path,
-                "team_path": path,
-                "default_integration": default_integration,
-                "team_workspaces_json": str(form.get("workspaces_json", "[]")),
-                "workspace_types_json": _workspace_types_json(request),
-                "warning": (
-                    f"Integration '{default_integration}' is not registered."
-                ),
-                "integration_names": _integration_names(),
-                "revision": snapshot.revision,
-            },
+            snapshot,
+            key=key,
+            name=name,
+            workspace_path=workspace_path,
+            path=path,
+            default_integration=default_integration,
+            workspaces_json=str(form.get("workspaces_json", "[]")),
+            warning=f"Integration '{default_integration}' is not registered.",
+            revision=snapshot.revision,
             status_code=409,
         )
     workspaces_json = str(form.get("workspaces_json", "[]"))
@@ -992,23 +968,17 @@ async def admin_team_create(
         if not isinstance(workspaces, list):
             raise TypeError
     except (json.JSONDecodeError, TypeError):
-        return _templates(request).TemplateResponse(
+        return _team_create_response(
             request,
-            "admin_team_edit.html",
-            {
-                **_base_admin_context(request, snapshot),
-                "mode": "create",
-                "team_key": key,
-                "team_name": name,
-                "team_workspace_path": workspace_path,
-                "team_path": path,
-                "default_integration": default_integration,
-                "team_workspaces_json": workspaces_json,
-                "workspace_types_json": _workspace_types_json(request),
-                "warning": "Workspaces payload is invalid.",
-                "integration_names": _integration_names(),
-                "revision": snapshot.revision,
-            },
+            snapshot,
+            key=key,
+            name=name,
+            workspace_path=workspace_path,
+            path=path,
+            default_integration=default_integration,
+            workspaces_json=workspaces_json,
+            warning="Workspaces payload is invalid.",
+            revision=snapshot.revision,
             status_code=409,
         )
     try:
@@ -1037,23 +1007,17 @@ async def admin_team_create(
             )
     except ConfigConflictError:
         current = services.config_store.load()
-        return _templates(request).TemplateResponse(
+        return _team_create_response(
             request,
-            "admin_team_edit.html",
-            {
-                **_base_admin_context(request, current),
-                "mode": "create",
-                "team_key": key,
-                "team_name": name,
-                "team_workspace_path": workspace_path,
-                "team_path": path,
-                "default_integration": default_integration,
-                "team_workspaces_json": workspaces_json,
-                "workspace_types_json": _workspace_types_json(request),
-                "warning": "Configuration changed. Reload before saving.",
-                "integration_names": _integration_names(),
-                "revision": current.revision,
-            },
+            current,
+            key=key,
+            name=name,
+            workspace_path=workspace_path,
+            path=path,
+            default_integration=default_integration,
+            workspaces_json=workspaces_json,
+            warning="Configuration changed. Reload before saving.",
+            revision=current.revision,
             status_code=409,
         )
     except ValidationFailed as exc:
@@ -1104,21 +1068,17 @@ async def admin_team_delete(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ConfigConflictError:
         current = services.config_store.load()
-        return _templates(request).TemplateResponse(
-            request,
-            "admin_teams.html",
-            {
-                **_base_admin_context(request, current),
-                "team_summaries": [
-                    _team_summary(key, tcfg)
-                    for key, tcfg in current.config.teams.items()
-                ],
-                "revision": current.revision,
-                "dispatch_error": (
-                    "Configuration changed. Reload before deleting."
-                ),
-            },
-            status_code=409,
+        context = {
+            **_base_admin_context(request, current),
+            "team_summaries": [
+                team_summary(key, tcfg)
+                for key, tcfg in current.config.teams.items()
+            ],
+            "revision": current.revision,
+            "dispatch_error": "Configuration changed. Reload before deleting.",
+        }
+        return respond_live_or_html(
+            request, _templates(request), context, teams_policy(context), status_code=409
         )
     request.app.state.refresh_services()
     return RedirectResponse("/admin/teams", status_code=303)

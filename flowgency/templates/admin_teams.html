@@ -1,4 +1,74 @@
 {% extends "base.html" %}
+
+{#- Live regions: the page and every snapshot render these same macros from the same context.
+    Delete is a button-only form with its own loaded revision: it is disposable (it goes with its card)
+    and never rewritten by a refresh, so a stale revision conflicts on the server instead of deleting. -#}
+{% macro live_teams_status() -%}
+<p data-live-key="teams:summary">{{ team_summaries | length }} team{{ '' if team_summaries | length == 1 else 's' }} configured</p>
+{%- endmacro %}
+
+{% macro live_teams_list() -%}
+{% if team_summaries %}
+<div data-live-key="teams:cards" class="space-y-3">
+  {% for team in team_summaries %}
+  <div data-live-key="admin-team:{{ team.key }}" class="bg-white rounded-xl border border-gray-200 p-5">
+    <div class="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+      <div class="min-w-0 space-y-1.5">
+        <h3 class="text-lg font-semibold text-gray-900">{{ team.name }}</h3>
+        <div class="space-y-1 text-sm text-gray-500 font-mono break-all">
+          <p><span class="font-semibold text-gray-700">Workspace path:</span> {{ team.workspace_path }}</p>
+          <p><span class="font-semibold text-gray-700">Team path:</span> {{ team.team_path }}</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-3 text-sm text-gray-600">
+          <span>{{ team.agent_count }} agent{{ 's' if team.agent_count != 1 else '' }}</span>
+          <span class="text-gray-300">|</span>
+          {% if team.initialized %}
+          <span class="inline-flex items-center gap-1 text-green-700">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+            Initialized
+          </span>
+          {% elif team.workspace_exists %}
+          <span class="text-amber-600">Record directories missing</span>
+          {% else %}
+          <span class="text-red-600">Workspace path does not exist</span>
+          {% endif %}
+          {% if team.dispatch_enabled %}
+          <span class="text-gray-300">|</span>
+          <span class="inline-flex items-center gap-1 text-indigo-600">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            Schedule enabled
+          </span>
+          {% endif %}
+        </div>
+      </div>
+      <div class="flex flex-wrap gap-2 sm:ml-4">
+        <a href="/admin/teams/{{ team.key }}/edit"
+           class="px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">
+          Edit
+        </a>
+        <form method="post" action="/admin/teams/{{ team.key }}/delete" class="inline" data-live-key="team-action:{{ team.key }}:delete" data-live-disposable
+              data-confirm="Delete team '{{ team.name }}'? This only removes it from config — files on disk are not deleted.">
+          <input type="hidden" name="revision" value="{{ revision }}">
+          <button type="submit"
+                  class="px-3 py-1.5 text-sm font-medium text-red-700 bg-red-50 rounded-lg hover:bg-red-100 transition-colors">
+            Delete
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div data-live-key="teams:empty" class="bg-white rounded-xl border border-gray-200 border-dashed p-8 text-center">
+  <p class="text-sm text-gray-500 mb-3">No agent teams configured yet.</p>
+  <a href="/admin/teams/new" class="px-4 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors">
+    Add Your First Team
+  </a>
+</div>
+{% endif %}
+{%- endmacro %}
+
 {% block title %}Agent Teams — {{ flowgency_title }}{% endblock %}
 {% block content %}
 <div>
@@ -9,64 +79,17 @@
     </a>
   </div>
 
-  <div class="space-y-3">
-    {% for team in team_summaries %}
-    <div class="bg-white rounded-xl border border-gray-200 p-5">
-      <div class="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-        <div class="min-w-0 space-y-1.5">
-          <h3 class="text-lg font-semibold text-gray-900">{{ team.name }}</h3>
-          <div class="space-y-1 text-sm text-gray-500 font-mono break-all">
-            <p><span class="font-semibold text-gray-700">Workspace path:</span> {{ team.workspace_path }}</p>
-            <p><span class="font-semibold text-gray-700">Team path:</span> {{ team.team_path }}</p>
-          </div>
-          <div class="flex flex-wrap items-center gap-3 text-sm text-gray-600">
-            <span>{{ team.agent_count }} agent{{ 's' if team.agent_count != 1 else '' }}</span>
-            <span class="text-gray-300">|</span>
-            {% if team.initialized %}
-            <span class="inline-flex items-center gap-1 text-green-700">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-              Initialized
-            </span>
-            {% elif team.workspace_exists %}
-            <span class="text-amber-600">Record directories missing</span>
-            {% else %}
-            <span class="text-red-600">Workspace path does not exist</span>
-            {% endif %}
-            {% if team.dispatch_enabled %}
-            <span class="text-gray-300">|</span>
-            <span class="inline-flex items-center gap-1 text-indigo-600">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-              Schedule enabled
-            </span>
-            {% endif %}
-          </div>
-        </div>
-        <div class="flex flex-wrap gap-2 sm:ml-4">
-          <a href="/admin/teams/{{ team.key }}/edit"
-             class="px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">
-            Edit
-          </a>
-              <form method="post" action="/admin/teams/{{ team.key }}/delete" class="inline"
-                onsubmit="return confirm('Delete team \'{{ team.name }}\'? This only removes it from config — files on disk are not deleted.')">
-            <input type="hidden" name="revision" value="{{ revision }}">
-            <button type="submit"
-                    class="px-3 py-1.5 text-sm font-medium text-red-700 bg-red-50 rounded-lg hover:bg-red-100 transition-colors">
-              Delete
-            </button>
-          </form>
-        </div>
-      </div>
-    </div>
-    {% endfor %}
-  </div>
-
-  {% if not team_summaries %}
-  <div class="bg-white rounded-xl border border-gray-200 border-dashed p-8 text-center">
-    <p class="text-sm text-gray-500 mb-3">No agent teams configured yet.</p>
-    <a href="/admin/teams/new" class="px-4 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors">
-      Add Your First Team
-    </a>
+  {#- A rejected delete is local action output; it stays outside every region. -#}
+  {% if dispatch_error %}
+  <div class="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">
+    {{ dispatch_error }}
   </div>
   {% endif %}
+
+  <div data-live-region="teams-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true">{{ live_teams_status() }}</div>
+
+  <div data-live-region="teams-list">{{ live_teams_list() }}</div>
 </div>
 {% endblock %}
+
+{% block page_scripts %}<script src="/static/confirm-submit.js"></script>{% endblock %}

@@ -412,6 +412,7 @@ def test_live_change_cases_all_have_a_dispatcher():
         *server._JOB_LIVE_CHANGES,
         *server._LOG_LIVE_CHANGES,
         *server._WORKSPACE_LIVE_CHANGES,
+        *server._ADMIN_LIVE_CHANGES,
     }
     assert dispatched == set(server.LIVE_CHANGE_CASES)
 
@@ -752,3 +753,153 @@ def test_the_non_live_fixture_page_registers_nothing(monkeypatch):
         assert 'id="live-initial"' not in response.text
         assert "live-refresh.js" not in response.text
         assert "data-live-status" not in response.text
+
+
+def _live_keys(html: str) -> list[str]:
+    return re.findall(r'data-live-key="([^"]+)"', html)
+
+
+@contextlib.contextmanager
+def _admin_fixture(monkeypatch):
+    """The live fixture with the integration listing redirected to its private copy, restored afterwards."""
+    import flowgency.integrations as integrations_module
+
+    monkeypatch.setattr(integrations_module, "INTEGRATIONS_DIR", integrations_module.INTEGRATIONS_DIR)
+    with _live_fixture(monkeypatch) as (client, runtime):
+        monkeypatch.setattr(integrations_module, "INTEGRATIONS_DIR", server._integration_source(runtime))
+        yield client, runtime
+
+
+def test_live_change_admin_settings_changed_moves_title_revision_and_interval_and_reset_restores_them(monkeypatch):
+    with _admin_fixture(monkeypatch) as (client, _runtime):
+        status = _region(client, "/admin/", "settings-status")
+        interval = _region(client, "/admin/dispatch", "dispatch-status")
+        assert 'data-live-revision="15"' in interval
+
+        _apply(client, "admin-settings-changed")
+
+        changed = _region(client, "/admin/", "settings-status")
+        assert changed != status
+        assert server.ADMIN_SETTINGS_TITLE in client.get("/admin/").text
+        assert f'data-live-revision="{server.ADMIN_DISPATCH_INTERVAL}"' in _region(client, "/admin/dispatch", "dispatch-status")
+
+        _reset(client)
+
+        assert _region(client, "/admin/", "settings-status") == status
+        assert _region(client, "/admin/dispatch", "dispatch-status") == interval
+        assert server.ADMIN_SETTINGS_TITLE not in client.get("/admin/").text
+
+
+def test_live_change_admin_dispatch_changed_enables_the_research_team_and_reset_restores_it(monkeypatch):
+    with _admin_fixture(monkeypatch) as (client, _runtime):
+        before = _region(client, "/admin/dispatch", "dispatch-teams")
+        assert before.count('data-dispatch-enabled="true"') == 0
+
+        _apply(client, "admin-dispatch-changed")
+
+        after = _region(client, "/admin/dispatch", "dispatch-teams")
+        assert after.count('data-dispatch-enabled="true"') == 1
+        assert after.split("dispatch-team:research")[1].lstrip('"').startswith(' data-dispatch-enabled="true"')
+
+        _reset(client)
+        assert _region(client, "/admin/dispatch", "dispatch-teams") == before
+
+
+def test_live_change_admin_team_created_adds_a_card_and_moves_every_team_revision_and_reset_restores_them(monkeypatch):
+    with _admin_fixture(monkeypatch) as (client, runtime):
+        listing = _region(client, "/admin/teams", "teams-list")
+        edit = _region(client, "/admin/teams/newsletter/edit", "team-edit-status")
+        new = _region(client, "/admin/teams/new", "team-new-status")
+        assert f"admin-team:{server.ADMIN_CREATED_TEAM}" not in _live_keys(listing)
+
+        _apply(client, "admin-team-created")
+
+        created = _region(client, "/admin/teams", "teams-list")
+        assert f"admin-team:{server.ADMIN_CREATED_TEAM}" in _live_keys(created)
+        assert "3 teams configured" in _region(client, "/admin/teams", "teams-status")
+        assert _region(client, "/admin/teams/newsletter/edit", "team-edit-status") != edit
+        assert _region(client, "/admin/teams/new", "team-new-status") != new
+        assert client.get(f"/admin/teams/{server.ADMIN_CREATED_TEAM}/edit?__live=1").status_code == 200
+
+        _reset(client)
+
+        assert _region(client, "/admin/teams", "teams-list") == listing
+        assert _region(client, "/admin/teams/newsletter/edit", "team-edit-status") == edit
+        assert _region(client, "/admin/teams/new", "team-new-status") == new
+        assert client.get(f"/admin/teams/{server.ADMIN_CREATED_TEAM}/edit?__live=1").status_code == 404
+        assert not any(path.exists() for path in server._admin_created_team_paths(runtime))
+
+
+def test_live_change_admin_team_changed_renames_the_team_and_adds_an_agent_and_reset_restores_them(monkeypatch):
+    with _admin_fixture(monkeypatch) as (client, _runtime):
+        listing = _region(client, "/admin/teams", "teams-list")
+        agents = _region(client, "/admin/teams/newsletter/edit", "team-edit-agents")
+        assert "Manage agents (4)" in agents
+
+        _apply(client, "admin-team-changed")
+
+        changed = _region(client, "/admin/teams", "teams-list")
+        assert server.ADMIN_CHANGED_TEAM_NAME in changed and "5 agents" in changed
+        assert "Schedule enabled" in changed
+        assert "Manage agents (5)" in _region(client, "/admin/teams/newsletter/edit", "team-edit-agents")
+
+        _reset(client)
+
+        assert _region(client, "/admin/teams", "teams-list") == listing
+        assert _region(client, "/admin/teams/newsletter/edit", "team-edit-agents") == agents
+
+
+def test_live_change_admin_team_removed_drops_the_card_and_the_second_page_and_reset_restores_them(monkeypatch):
+    with _admin_fixture(monkeypatch) as (client, _runtime):
+        listing = _region(client, "/admin/teams", "teams-list")
+        assert client.get("/admin/teams/research/edit?__live=1").status_code == 200
+
+        _apply(client, "admin-team-removed")
+
+        removed = _region(client, "/admin/teams", "teams-list")
+        assert "admin-team:research" not in _live_keys(removed)
+        assert client.get("/admin/teams/research/edit?__live=1").status_code == 404
+        assert "admin-team:research" not in _live_keys(_region(client, "/admin/dispatch", "dispatch-teams"))
+
+        _reset(client)
+
+        assert _region(client, "/admin/teams", "teams-list") == listing
+        assert client.get("/admin/teams/research/edit?__live=1").status_code == 200
+
+
+def test_live_change_integration_cases_change_the_available_listing_and_reset_restores_the_private_copy(monkeypatch):
+    import hashlib
+    from pathlib import Path
+
+    import flowgency.integrations as integrations_module
+
+    product_config = Path(integrations_module.__file__).parent / "integrations.yaml"
+    product_before = hashlib.sha256(product_config.read_bytes()).hexdigest()
+    with _admin_fixture(monkeypatch) as (client, runtime):
+        source = server._integration_source(runtime)
+        before = _region(client, "/admin/integrations", "integrations-available")
+        installed = _region(client, "/admin/integrations", "integrations-installed")
+        assert _live_keys(before) == ["available:list", f"available:{server.INTEGRATION_REGISTERED_MODULE}",
+                                      f"available-action:{server.INTEGRATION_REGISTERED_MODULE}"]
+
+        _apply(client, "integration-available-added")
+
+        added = _live_keys(_region(client, "/admin/integrations", "integrations-available"))
+        assert f"available:{server.INTEGRATION_ADDED_MODULE}" in added
+        assert f"available:{server.INTEGRATION_REGISTERED_MODULE}" in added
+
+        _apply(client, "integration-registered")
+
+        registered = _region(client, "/admin/integrations", "integrations-available")
+        assert _live_keys(registered) == ["available:list", f"available:{server.INTEGRATION_ADDED_MODULE}",
+                                          f"available-action:{server.INTEGRATION_ADDED_MODULE}"]
+        assert "2 available" not in _region(client, "/admin/integrations", "integrations-status")
+        assert _region(client, "/admin/integrations", "integrations-installed") == installed
+        assert server.INTEGRATION_REGISTERED_MODULE in (source / "integrations.yaml").read_text(encoding="utf-8")
+
+        _reset(client)
+
+        assert _region(client, "/admin/integrations", "integrations-available") == before
+        assert not (source / "acme" / "gadget.py").exists()
+        assert server.INTEGRATION_REGISTERED_MODULE not in (source / "integrations.yaml").read_text(encoding="utf-8")
+    assert hashlib.sha256(product_config.read_bytes()).hexdigest() == product_before

@@ -73,6 +73,14 @@ from flowgency.workspaces.live import (
     workspace_row_keys,
 )
 from flowgency.web import FlowgencyServices, build_services, get_services
+from flowgency.web.admin_live import (
+    dispatch_policy,
+    integrations_policy,
+    settings_policy,
+    team_new_policy,
+    team_summary,
+    teams_policy,
+)
 from flowgency.web.job_presentation import load_team_jobs
 from flowgency.web.logs import collect_agent_logs
 from flowgency.web.logs import collect_logs as _collect_logs
@@ -1315,25 +1323,13 @@ async def tip_hide_all(request: Request):
 # ── Admin Routes ──────────────────────────────────────────────────────────────
 
 
-def admin_context(admin_page: str = "settings", dispatch_error: str = "") -> dict:
-    """Build common context for admin pages."""
+def admin_context(
+    admin_page: str = "settings", dispatch_error: str = "", *, with_dispatch: bool = False
+) -> dict:
+    """Build common context for admin pages; only the dispatch page reads the scheduler."""
     snapshot = _load_snapshot()
     flowgency = flowgency_settings(snapshot)
-    team_summaries = []
-    for key, tcfg in snapshot.config.teams.items():
-        paths = resolve_team_paths(tcfg)
-        dispatch_cfg = tcfg.dispatch
-        team_summaries.append({
-            "key": key,
-            "name": tcfg.name,
-            "workspace_path": str(tcfg.workspace_path),
-            "team_path": str(tcfg.path),
-            "agents": list(tcfg.agents.keys()),
-            "agent_count": len(tcfg.agents),
-            "initialized": all(path.is_dir() for path in paths.runtime_directories),
-            "workspace_exists": paths.workspace_root.exists(),
-            "dispatch_enabled": dispatch_cfg.enabled,
-        })
+    team_summaries = [team_summary(key, tcfg) for key, tcfg in snapshot.config.teams.items()]
     return {
         "flowgency_title": flowgency.get("title", "Flowgency"),
         "default_team": flowgency.get("default_team", ""),
@@ -1342,30 +1338,39 @@ def admin_context(admin_page: str = "settings", dispatch_error: str = "") -> dic
             key: tcfg.name for key, tcfg in snapshot.config.teams.items()
         },
         "revision": snapshot.revision,
+        # What a live region reports as saved; a form's own `revision` is its loaded baseline.
+        "saved_revision": snapshot.revision,
         "admin_active": True,
         "active": "admin",
         "admin_page": admin_page,
-        "dispatch": get_dispatch_status(),
+        "dispatch": get_dispatch_status() if with_dispatch else None,
         "dispatch_error": dispatch_error,
         "theme_css": get_theme_css(),
         "workflow_library": flowgency.get("workflow_library", ""),
     }
 
 
-@app.get("/admin/", response_class=HTMLResponse)
-async def admin_settings_page(request: Request):
-    """Admin app settings page."""
-    if _services().startup_error is not None:
-        return RedirectResponse("/setup", status_code=303)
-    return templates.TemplateResponse(request, "admin_settings.html", {
+def _admin_settings_context(
+    request: Request, *, ai_backend: str | None = None, current_theme: str | None = None
+) -> dict:
+    return {
         "request": request,
         **admin_context("settings"),
         "integrations": {name: i.display_name for name, i in REGISTRY.items() if i.supports_ai_backend},
-        "ai_backend": get_flowgency_config()["ai_backend"],
+        "ai_backend": ai_backend if ai_backend is not None else get_flowgency_config()["ai_backend"],
         "installed_count": len(REGISTRY),
         "themes": load_themes(),
-        "current_theme": get_flowgency_config()["theme"],
-    })
+        "current_theme": current_theme if current_theme is not None else get_flowgency_config()["theme"],
+    }
+
+
+@app.get("/admin/", response_class=HTMLResponse)
+async def admin_settings_page(request: Request):
+    """Admin app settings page; ``?__live=1`` returns its read-only status snapshot."""
+    if _services().startup_error is not None:
+        return RedirectResponse("/setup", status_code=303)
+    context = _admin_settings_context(request)
+    return respond_live_or_html(request, templates, context, settings_policy(context))
 
 
 def _read_integration_config():
@@ -1376,9 +1381,14 @@ def _read_integration_config():
 
 @app.get("/admin/integrations", response_class=HTMLResponse)
 async def admin_integrations_page(request: Request):
-    """Admin integrations management page."""
+    """Admin integrations management page; ``?__live=1`` returns its read-only listings."""
     if _services().startup_error is not None:
         return RedirectResponse("/setup", status_code=303)
+    context = await run_in_threadpool(_admin_integrations_context, request)
+    return respond_live_or_html(request, templates, context, integrations_policy(context))
+
+
+def _admin_integrations_context(request: Request) -> dict:
     from flowgency.integrations import scan_available
 
     config_modules = _read_integration_config()
@@ -1427,13 +1437,13 @@ async def admin_integrations_page(request: Request):
 
     available = scan_available()
 
-    return templates.TemplateResponse(request, "admin_integrations.html", {
+    return {
         "request": request,
         **admin_context("integrations"),
         "installed": installed,
         "available": available,
         "restart_needed": request.query_params.get("restart") == "1",
-    })
+    }
 
 
 @app.post("/admin/integrations/register", response_class=HTMLResponse)
@@ -1468,26 +1478,38 @@ async def admin_integrations_restart(request: Request):
     return RedirectResponse("/admin/integrations", status_code=303)
 
 
+def _admin_dispatch_context(request: Request, dispatch_error: str = "") -> dict:
+    return {
+        "request": request,
+        **admin_context("dispatch", dispatch_error=dispatch_error, with_dispatch=True),
+    }
+
+
 @app.get("/admin/dispatch", response_class=HTMLResponse)
 async def admin_dispatch_page(request: Request):
-    """Admin dispatch configuration page."""
+    """Admin dispatch configuration page; ``?__live=1`` returns its read-only status."""
     if _services().startup_error is not None:
         return RedirectResponse("/setup", status_code=303)
-    return templates.TemplateResponse(request, "admin_dispatch.html", {
+    # Stays on the event loop thread like the scheduler inspection it wraps (Windows COM).
+    context = _admin_dispatch_context(request)
+    return respond_live_or_html(request, templates, context, dispatch_policy(context))
+
+
+def _admin_teams_context(request: Request, dispatch_error: str = "") -> dict:
+    return {
         "request": request,
-        **admin_context("dispatch"),
-    })
+        **admin_context("teams", dispatch_error=dispatch_error),
+    }
 
 
 @app.get("/admin/teams", response_class=HTMLResponse)
 async def admin_teams_page(request: Request):
-    """Admin agent teams page."""
+    """Admin agent teams page; ``?__live=1`` returns its read-only listing."""
     if _services().startup_error is not None:
         return RedirectResponse("/setup", status_code=303)
-    return templates.TemplateResponse(request, "admin_teams.html", {
-        "request": request,
-        **admin_context("teams"),
-    })
+    context = _admin_teams_context(request)
+    return respond_live_or_html(request, templates, context, teams_policy(context))
+
 
 
 @app.post("/admin/settings", response_class=HTMLResponse)
@@ -1538,23 +1560,9 @@ async def admin_save_settings(request: Request):
                 ),
             )
     except ConfigConflictError:
-        return templates.TemplateResponse(
-            request,
-            "admin_settings.html",
-            {
-                "request": request,
-                **admin_context("settings"),
-                "integrations": {
-                    name: integration.display_name
-                    for name, integration in REGISTRY.items()
-                    if integration.supports_ai_backend
-                },
-                "ai_backend": ai_backend,
-                "installed_count": len(REGISTRY),
-                "themes": load_themes(),
-                "current_theme": theme,
-            },
-            status_code=409,
+        context = _admin_settings_context(request, ai_backend=ai_backend, current_theme=theme)
+        return respond_live_or_html(
+            request, templates, context, settings_policy(context), status_code=409
         )
     refresh_services()
     dispatch_error = ""
@@ -1569,11 +1577,9 @@ async def admin_save_settings(request: Request):
                 replace=False,
             ) or ""
     if dispatch_error:
-        return templates.TemplateResponse(
-            request,
-            "admin_dispatch.html",
-            {"request": request, **admin_context("dispatch", dispatch_error=dispatch_error)},
-            status_code=409,
+        context = _admin_dispatch_context(request, dispatch_error)
+        return respond_live_or_html(
+            request, templates, context, dispatch_policy(context), status_code=409
         )
     # Redirect back to dispatch page if interval was changed, otherwise settings
     redirect = "/admin/dispatch" if dispatch_interval_raw else "/admin/"
@@ -1588,23 +1594,17 @@ async def admin_dispatch_install(request: Request):
     form = await request.form()
     error = install_dispatch(replace=form.get("replace") == "true")
     if error:
-        return templates.TemplateResponse(
-            request,
-            "admin_dispatch.html",
-            {"request": request, **admin_context("dispatch", dispatch_error=error)},
-            status_code=409,
+        context = _admin_dispatch_context(request, error)
+        return respond_live_or_html(
+            request, templates, context, dispatch_policy(context), status_code=409
         )
     return RedirectResponse("/admin/dispatch", status_code=303)
 
 
-@app.get("/admin/teams/new", response_class=HTMLResponse)
-async def admin_team_new(request: Request):
-    """Create new team form."""
-    if _services().startup_error is not None:
-        return RedirectResponse("/setup", status_code=303)
+def _admin_team_new_context(request: Request) -> dict:
     flowgency = get_flowgency_config()
     snapshot = _load_snapshot()
-    return templates.TemplateResponse(request, "admin_team_edit.html", {
+    return {
         "request": request,
         "flowgency_title": flowgency.get("title", "Flowgency"),
         "admin_active": True,
@@ -1626,7 +1626,17 @@ async def admin_team_new(request: Request):
         "agent_infos": [],
         "warning": "",
         "revision": snapshot.revision,
-    })
+        "saved_revision": snapshot.revision,
+    }
+
+
+@app.get("/admin/teams/new", response_class=HTMLResponse)
+async def admin_team_new(request: Request):
+    """Create new team form; ``?__live=1`` returns its read-only status."""
+    if _services().startup_error is not None:
+        return RedirectResponse("/setup", status_code=303)
+    context = _admin_team_new_context(request)
+    return respond_live_or_html(request, templates, context, team_new_policy(context))
 
 
 @app.post("/{team}/agents/{agent}/run")

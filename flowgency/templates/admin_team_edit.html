@@ -1,4 +1,20 @@
 {% extends "base.html" %}
+
+{#- Read-only regions of the team form pages. saved_revision is always the saved configuration, while the
+    form's hidden revision stays the one it loaded; agent-detail-notices.js compares the two and the form,
+    its drafts and its revision are never rewritten by a refresh. -#}
+{% macro live_team_edit_status() -%}
+<p data-live-key="team-edit:config" data-live-revision="{{ saved_revision }}" data-live-scope="config" data-live-baseline-input="revision" data-live-changed="Team configuration changed since this form loaded. Reload to see the latest.">Configuration revision {{ saved_revision[:12] }}; {{ agent_count }} agent{{ '' if agent_count == 1 else 's' }}</p>
+{%- endmacro %}
+
+{% macro live_team_edit_agents() -%}
+<a href="{{ manage_agents_href }}" data-live-key="team-edit:agents" class="px-3 py-2 text-sm font-medium text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors">Manage agents ({{ agent_count }})</a>
+{%- endmacro %}
+
+{% macro live_team_new_status() -%}
+<p data-live-key="team-new:config" data-live-revision="{{ saved_revision }}" data-live-scope="config" data-live-baseline-input="revision" data-live-changed="Configuration changed since this form loaded. Reload to see the latest.">Configuration revision {{ saved_revision[:12] }}; {{ teams | length }} team{{ '' if teams | length == 1 else 's' }} configured</p>
+{%- endmacro %}
+
 {% block title %}{{ 'New Team' if mode == 'create' else 'Edit ' + team_name }} — {{ flowgency_title }}{% endblock %}
 {% block content %}
 <div class="max-w-4xl">
@@ -9,6 +25,14 @@
   <h1 class="text-2xl font-bold text-gray-900 mb-6">
     {% if mode == 'create' %}New Agent Team{% else %}Edit: {{ team_name }}{% endif %}
   </h1>
+
+  {#- Empty until the saved configuration differs from the one this form loaded. -#}
+  <div data-live-notices role="status" aria-live="polite"></div>
+  {% if mode == 'create' %}
+  <div data-live-region="team-new-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true">{{ live_team_new_status() }}</div>
+  {% else %}
+  <div data-live-region="team-edit-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true">{{ live_team_edit_status() }}</div>
+  {% endif %}
 
   {% if warning %}
   <div class="mb-4 p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800">
@@ -108,7 +132,7 @@
           <h2 class="text-sm font-semibold text-gray-600 uppercase tracking-wider">Dispatch</h2>
           <p class="mt-1 text-sm text-gray-500">This page owns only team dispatch enablement.</p>
         </div>
-        <a href="{{ manage_agents_href }}" class="px-3 py-2 text-sm font-medium text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors">Manage agents ({{ agent_count }})</a>
+        <div data-live-region="team-edit-agents" class="flex">{{ live_team_edit_agents() }}</div>
       </div>
       <label class="flex items-center gap-2 text-sm text-gray-700">
         <input type="checkbox" name="dispatch_enabled" {% if dispatch_enabled %}checked{% endif %}
@@ -133,3 +157,5 @@
   </form>
 </div>
 {% endblock %}
+
+{% block page_scripts %}<script src="/static/agent-detail-notices.js"></script>{% endblock %}

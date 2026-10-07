@@ -1,8 +1,71 @@
 {% extends "base.html" %}
+
+{#- Live regions: the page and every snapshot render these same macros from the same context. The
+    heartbeat form and the dispatch error banner stay outside every region: they are local drafts and
+    action output. agent-detail-notices.js reports a heartbeat interval changed since the page loaded. -#}
+{% macro live_dispatch_status() -%}
+{% if dispatch.state == 'active' %}
+<p class="text-sm font-medium text-gray-900">Dispatcher active</p>
+<p class="mt-2 text-sm text-gray-500">The user-level system scheduler checks all enabled teams every {{ dispatch.expected_interval }} minutes.</p>
+{% elif dispatch.state == 'misconfigured' %}
+<p class="text-sm font-medium text-gray-900">Dispatcher misconfigured</p>
+<p class="mt-2 text-sm text-gray-500">Mismatched fields: {{ dispatch.mismatches | join(', ') }}</p>
+{% else %}
+<p class="text-sm font-medium text-gray-900">Dispatcher inactive</p>
+<p class="mt-2 text-sm text-gray-500">Set up the user-level system scheduler to run enabled team schedules.</p>
+{% endif %}
+{% if dispatch.error %}
+<p class="mt-2 text-sm text-red-700">{{ dispatch.error }}</p>
+{% endif %}
+<p class="sr-only" data-live-key="dispatch:interval" data-live-revision="{{ dispatch.expected_interval }}" data-live-scope="interval" data-live-changed="Heartbeat interval changed since this page loaded. Reload to see the latest.">Heartbeat every {{ dispatch.expected_interval }} minutes</p>
+{%- endmacro %}
+
+{#- The action is keyed by what it does, so a state change swaps the button form instead of leaving a stale label. -#}
+{% macro live_dispatch_action() -%}
+{% if dispatch.state != 'active' %}
+{% set action = ('repair-replace' if dispatch.config_conflict else 'repair') if dispatch.installed else 'install' %}
+<form method="post" action="/admin/dispatch/install" data-live-key="dispatch-action:{{ action }}" data-live-disposable
+      {% if dispatch.config_conflict %}data-confirm="Replace the existing dispatcher with this dashboard config?"{% endif %}>
+  {% if dispatch.config_conflict %}<input type="hidden" name="replace" value="true">{% endif %}
+  <button type="submit" class="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors">
+    {{ 'Set Up Dispatcher' if not dispatch.installed else 'Repair Dispatcher' }}
+  </button>
+</form>
+{% endif %}
+{%- endmacro %}
+
+{% macro live_dispatch_teams() -%}
+{% if team_summaries %}
+<div data-live-key="dispatch-teams:list" class="mt-6 pt-4 border-t border-gray-100">
+  <h3 class="text-sm font-semibold text-gray-700 mb-3">Team Dispatch Status</h3>
+  <div class="space-y-2">
+    {% for team in team_summaries %}
+    <div data-live-key="dispatch-team:{{ team.key }}" data-dispatch-enabled="{{ 'true' if team.dispatch_enabled else 'false' }}" class="flex items-center justify-between py-2">
+      <div class="flex items-center gap-2">
+        {% if team.dispatch_enabled %}
+        <span class="inline-block w-2 h-2 rounded-full bg-emerald-400"></span>
+        <span class="sr-only">Schedule enabled:</span>
+        {% else %}
+        <span class="inline-block w-2 h-2 rounded-full bg-gray-300"></span>
+        <span class="sr-only">Schedule disabled:</span>
+        {% endif %}
+        <span class="text-sm text-gray-700">{{ team.name }}</span>
+      </div>
+      <a href="/admin/teams/{{ team.key }}/edit" class="text-xs text-indigo-600 hover:text-indigo-800">Configure</a>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+{%- endmacro %}
+
 {% block title %}Dispatch — {{ flowgency_title }}{% endblock %}
 {% block content %}
 <div class="max-w-2xl">
   <h1 class="text-2xl font-bold text-gray-900 mb-6">Dispatch</h1>
+
+  {#- Empty until the saved heartbeat interval differs from the one this page loaded. -#}
+  <div data-live-notices role="status" aria-live="polite"></div>
 
   {% if dispatch_error %}
   <div class="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">
@@ -12,34 +75,12 @@
 
   <div class="bg-white rounded-xl border border-gray-200 p-6 space-y-6">
     <div class="flex items-start justify-between gap-4">
-      <div>
-        {% if dispatch.state == 'active' %}
-        <p class="text-sm font-medium text-gray-900">Dispatcher active</p>
-        <p class="mt-2 text-sm text-gray-500">The user-level system scheduler checks all enabled teams every {{ dispatch.expected_interval }} minutes.</p>
-        {% elif dispatch.state == 'misconfigured' %}
-        <p class="text-sm font-medium text-gray-900">Dispatcher misconfigured</p>
-        <p class="mt-2 text-sm text-gray-500">Mismatched fields: {{ dispatch.mismatches | join(', ') }}</p>
-        {% else %}
-        <p class="text-sm font-medium text-gray-900">Dispatcher inactive</p>
-        <p class="mt-2 text-sm text-gray-500">Set up the user-level system scheduler to run enabled team schedules.</p>
-        {% endif %}
-      {% if dispatch.error %}
-      <p class="mt-2 text-sm text-red-700">{{ dispatch.error }}</p>
-      {% endif %}
-      </div>
-      {% if dispatch.state != 'active' %}
-      <form method="post" action="/admin/dispatch/install"
-            {% if dispatch.config_conflict %}onsubmit="return confirm('Replace the existing dispatcher with this dashboard config?')"{% endif %}>
-        {% if dispatch.config_conflict %}<input type="hidden" name="replace" value="true">{% endif %}
-        <button type="submit" class="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors">
-          {{ 'Set Up Dispatcher' if not dispatch.installed else 'Repair Dispatcher' }}
-        </button>
-      </form>
-      {% endif %}
+      <div data-live-region="dispatch-status" role="status" aria-live="polite" aria-atomic="true">{{ live_dispatch_status() }}</div>
+      <div data-live-region="dispatch-action">{{ live_dispatch_action() }}</div>
     </div>
   </div>
 
-  <div class="mt-6 bg-white rounded-xl border border-gray-200 p-6 space-y-6">
+  <div class="mt-6 bg-white rounded-xl border border-gray-200 p-6">
     <!-- Interval Setting -->
     <div>
       <form method="post" action="/admin/settings" class="flex items-center gap-3">
@@ -58,26 +99,9 @@
     </div>
 
     <!-- Per-team status -->
-    {% if team_summaries %}
-    <div class="pt-4 border-t border-gray-100">
-      <h3 class="text-sm font-semibold text-gray-700 mb-3">Team Dispatch Status</h3>
-      <div class="space-y-2">
-        {% for team in team_summaries %}
-        <div class="flex items-center justify-between py-2">
-          <div class="flex items-center gap-2">
-            {% if team.dispatch_enabled %}
-            <span class="inline-block w-2 h-2 rounded-full bg-emerald-400"></span>
-            {% else %}
-            <span class="inline-block w-2 h-2 rounded-full bg-gray-300"></span>
-            {% endif %}
-            <span class="text-sm text-gray-700">{{ team.name }}</span>
-          </div>
-          <a href="/admin/teams/{{ team.key }}/edit" class="text-xs text-indigo-600 hover:text-indigo-800">Configure</a>
-        </div>
-        {% endfor %}
-      </div>
-    </div>
-    {% endif %}
+    <div data-live-region="dispatch-teams">{{ live_dispatch_teams() }}</div>
   </div>
 </div>
 {% endblock %}
+
+{% block page_scripts %}<script src="/static/confirm-submit.js"></script><script src="/static/agent-detail-notices.js"></script>{% endblock %}

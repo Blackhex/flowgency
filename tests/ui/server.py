@@ -110,6 +110,13 @@ LIVE_CHANGE_CASES = frozenset(
         "workspace-reordered",
         "workspace-removed",
         "workspace-added",
+        "admin-settings-changed",
+        "admin-dispatch-changed",
+        "admin-team-created",
+        "admin-team-changed",
+        "admin-team-removed",
+        "integration-registered",
+        "integration-available-added",
     }
 )
 INBOX_CLOCK_ADVANCE = timedelta(minutes=30)
@@ -443,6 +450,8 @@ def _apply_live_change(runtime: Path, case: str) -> None:
         _LOG_LIVE_CHANGES[case](runtime)
     elif case in _WORKSPACE_LIVE_CHANGES:
         _WORKSPACE_LIVE_CHANGES[case](runtime)
+    elif case in _ADMIN_LIVE_CHANGES:
+        _ADMIN_LIVE_CHANGES[case](runtime)
     else:
         raise ValueError(f"Unknown live change case: {case}")
 
@@ -910,6 +919,119 @@ _WORKSPACE_LIVE_CHANGES = {
     "workspace-added": _workspace_added,
 }
 
+INTEGRATION_SOURCE_DIR = "integration-source"
+INTEGRATION_SOURCE_ENV = "FLOWGENCY_UI_INTEGRATION_SOURCE"
+INTEGRATION_REGISTERED_MODULE = "acme.widget"
+INTEGRATION_ADDED_MODULE = "acme.gadget"
+ADMIN_SETTINGS_TITLE = "Flowgency UI Gate Renamed"
+ADMIN_DISPATCH_INTERVAL = 30
+ADMIN_CREATED_TEAM = "scribe-team"
+ADMIN_CHANGED_TEAM_NAME = "Newsletter Desk"
+_INTEGRATION_STUB = (
+    "from flowgency.integrations import BaseIntegration, _register\n"
+    "\n"
+    "# Fixture module: the integration scan reads it as text and never imports it.\n"
+)
+
+
+def _integration_source(runtime: Path) -> Path:
+    return runtime / INTEGRATION_SOURCE_DIR
+
+
+def _write_integration_module(runtime: Path, module_path: str) -> None:
+    author, name = module_path.split(".")
+    _write(_integration_source(runtime) / author / f"{name}.py", _INTEGRATION_STUB)
+
+
+def _seed_integration_source(runtime: Path) -> None:
+    """A private copy of the integration listing the admin page scans, so the product tree is never written."""
+    import flowgency.integrations as integrations_module
+
+    source = _integration_source(runtime)
+    _clear_directory(source)
+    shutil.copyfile(Path(integrations_module.__file__).parent / "integrations.yaml", source / "integrations.yaml")
+    _write_integration_module(runtime, INTEGRATION_REGISTERED_MODULE)
+
+
+def _integration_registered(runtime: Path) -> None:
+    config_path = _integration_source(runtime) / "integrations.yaml"
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    data["integrations"].append(INTEGRATION_REGISTERED_MODULE)
+    _write(config_path, yaml.safe_dump(data, sort_keys=False))
+
+
+def _integration_available_added(runtime: Path) -> None:
+    _write_integration_module(runtime, INTEGRATION_ADDED_MODULE)
+
+
+def _admin_settings_changed(runtime: Path) -> None:
+    def patch(raw: dict) -> None:
+        raw["flowgency"]["title"] = ADMIN_SETTINGS_TITLE
+        raw["flowgency"]["dispatch"] = {"interval": ADMIN_DISPATCH_INTERVAL}
+
+    _patch_runtime_config(runtime, patch)
+
+
+def _admin_dispatch_changed(runtime: Path) -> None:
+    _patch_runtime_config(runtime, lambda raw: raw["teams"]["research"].update(dispatch={"enabled": True}))
+
+
+def _admin_created_team_paths(runtime: Path) -> tuple[Path, Path]:
+    return runtime / "workspaces" / ADMIN_CREATED_TEAM, runtime / "groups" / ADMIN_CREATED_TEAM
+
+
+def _admin_team_created(runtime: Path) -> None:
+    workspace, team_path = _admin_created_team_paths(runtime)
+    workspace.mkdir(parents=True, exist_ok=True)
+    team_path.mkdir(parents=True, exist_ok=True)
+
+    def patch(raw: dict) -> None:
+        raw["teams"][ADMIN_CREATED_TEAM] = {
+            "name": "Scribe Team",
+            "workspace_path": workspace.as_posix(),
+            "path": team_path.as_posix(),
+            "default_integration": "copilot",
+            "permissions": {"mode": "unrestricted", "rules": []},
+            "agents": [],
+            "workspaces": [],
+        }
+
+    _patch_runtime_config(runtime, patch)
+
+
+def _admin_team_changed(runtime: Path) -> None:
+    def patch(raw: dict) -> None:
+        newsletter = raw["teams"]["newsletter"]
+        newsletter["name"] = ADMIN_CHANGED_TEAM_NAME
+        newsletter["dispatch"] = {"enabled": True}
+        newsletter["agents"].append(
+            {
+                "name": "scribe",
+                "blueprint": "reviewer",
+                "integration": "ticket-test",
+                "identity": {"display_name": "Scribe", "title": "Release Scribe", "emoji": "S"},
+                "default_memory": {"scope": "agent"},
+                "routines": [],
+            }
+        )
+
+    _patch_runtime_config(runtime, patch)
+
+
+def _admin_team_removed(runtime: Path) -> None:
+    _patch_runtime_config(runtime, lambda raw: raw["teams"].pop("research"))
+
+
+_ADMIN_LIVE_CHANGES = {
+    "admin-settings-changed": _admin_settings_changed,
+    "admin-dispatch-changed": _admin_dispatch_changed,
+    "admin-team-created": _admin_team_created,
+    "admin-team-changed": _admin_team_changed,
+    "admin-team-removed": _admin_team_removed,
+    "integration-registered": _integration_registered,
+    "integration-available-added": _integration_available_added,
+}
+
 
 def install_non_live_page(app):
     """Register the purpose-built page that extends the base layout and has no live policy."""
@@ -943,6 +1065,12 @@ def _install_ui_test_runtime() -> None:
         display_name = "UI Ticket Test Runtime"
 
     REGISTRY["ticket-test"] = UITicketRuntimeIntegration()
+    # Opt-in: the served process scans a private integration listing; in-process tests redirect it themselves.
+    integration_source = os.environ.get(INTEGRATION_SOURCE_ENV)
+    if integration_source:
+        import flowgency.integrations as integrations_module
+
+        integrations_module.INTEGRATIONS_DIR = Path(integration_source)
     if _REAL_COPILOT_INTEGRATION is None:
         _REAL_COPILOT_INTEGRATION = REGISTRY.get("copilot")
     submission_module.submit_job_request = _ui_submit_job_request
@@ -2293,6 +2421,9 @@ def _reset_runtime_state(runtime: Path, *, fixture: str = "default") -> None:
     _seed_memory(runtime, config)
     _seed_ticket_workflows(runtime, config)
     _seed_jobs(runtime, runtime / "config.yaml")
+    _seed_integration_source(runtime)
+    for created in _admin_created_team_paths(runtime):
+        shutil.rmtree(created, ignore_errors=True)
     _restore_external_sources(runtime)
     if fixture == ACTIVITY_LOGS_FIXTURE:
         _apply_activity_logs_fixture(runtime, runtime / "config.yaml")
@@ -2384,6 +2515,7 @@ def _prepare_runtime() -> tuple[Path, Path]:
     _seed_memory(runtime, config)
     _seed_ticket_workflows(runtime, config)
     _seed_jobs(runtime, config_path)
+    _seed_integration_source(runtime)
     (runtime / "server.pid").write_text(str(os.getpid()), encoding="ascii")
     return runtime, config_path
 
@@ -2430,6 +2562,7 @@ def main() -> int:
         env["FLOWGENCY_CONFIG"] = str(config_path)
         env["FLOWGENCY_UI_RUNTIME"] = str(runtime)
         env["FLOWGENCY_FIXED_NOW"] = FIXED_NOW
+        env[INTEGRATION_SOURCE_ENV] = str(_integration_source(runtime))
         env["PYTHONPATH"] = os.pathsep.join((str(support_path), str(ROOT)))
         command = [
             sys.executable,
