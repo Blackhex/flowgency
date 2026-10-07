@@ -26,7 +26,7 @@ from tests.test_job_routes import _seed_app as seed_job_app, _write_job_record
 
 
 _ACTIVITY_ROW_RE = re.compile(
-    r'<li class="grid grid-cols-\[3rem_1\.75rem_minmax\(0,1fr\)\] gap-x-3 pb-6 last:pb-0">(.*?)</li>',
+    r'<li data-live-key="[^"]+" class="grid grid-cols-\[3rem_1\.75rem_minmax\(0,1fr\)\] gap-x-3 pb-6 last:pb-0">(.*?)</li>',
     re.S,
 )
 
@@ -1548,3 +1548,320 @@ def test_memory_post_returns_423_when_memory_is_busy(monkeypatch, tmp_path, raw_
     assert response.status_code == 423
     assert "Memory is busy" in response.text
     assert config_path.read_bytes() == before_config_bytes
+
+# ── Live detail snapshots ────────────────────────────────────────────────────
+
+from tests._live_helpers import (  # noqa: E402
+    assert_snapshot_matches_page,
+    filesystem_tree,
+    live_regions,
+    page_regions,
+    registration,
+)
+from tests.test_agent_roster import _roster_job_spec  # noqa: E402
+from flowgency.jobs.authority import JobStore  # noqa: E402
+from flowgency.jobs.models import JobRecord  # noqa: E402
+
+_LIVE_TABS = ("profile", "blueprint", "runtime", "permissions", "prompts", "routines", "memory", "activity", "logs")
+_COMMON_REGIONS = ["agent-header", "agent-status"]
+_TAB_REGIONS = {
+    "profile": [],
+    "blueprint": ["agent-blueprint"],
+    "runtime": ["agent-runtime-summary"],
+    "permissions": ["agent-permissions-saved"],
+    "prompts": ["agent-prompts-catalog", "agent-prompts-edit"],
+    "routines": ["agent-routines-saved"],
+    "memory": ["agent-memory-status"],
+    "activity": ["agent-activity-count", "agent-activity-entries"],
+    "logs": ["agent-logs-count", "agent-logs-list"],
+}
+_NAV_REGIONS = ["navigation-teams", "navigation-primary", "navigation-workflows", "navigation-workspace"]
+
+
+def _live_url(tab: str, agent: str = "advisor", team: str = "newsletter") -> str:
+    return f"/{team}/agents/{agent}/{tab}?__live=1"
+
+
+def _live(client, tab: str):
+    response = client.get(_live_url(tab))
+    assert response.status_code == 200, response.text
+    return response
+
+
+def _config_patch(config_path: Path, patch) -> None:
+    ConfigStore(config_path).patch(_revision(config_path), patch)
+    app_mod.refresh_services()
+
+
+def _advisor(raw: dict) -> dict:
+    return raw["teams"]["newsletter"]["agents"][0]
+
+
+def _write_live_job(tmp_path: Path, job_id: str, status: str, **fields) -> None:
+    team_root = tmp_path / "groups" / "newsletter"
+    record = JobRecord.from_spec(
+        _roster_job_spec(tmp_path, team_root, job_id=job_id, created_at="2026-07-16T00:00:00+00:00")
+    )
+    record.status = status
+    for name, value in fields.items():
+        setattr(record, name, value)
+    write_job(JobStore(tmp_path / "memory-store").path("newsletter", job_id), record)
+
+
+@pytest.mark.parametrize("tab", _LIVE_TABS)
+def test_live_detail_snapshot_matches_the_initial_page_and_names_its_binding(monkeypatch, tmp_path, raw_config, tab):
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+    page = client.get(f"/newsletter/agents/advisor/{tab}")
+    response = _live(client, tab)
+    body = response.json()
+
+    assert body["binding"] == {
+        "page": "agent-detail", "team": "newsletter", "entity": "advisor", "tab": tab, "query": {},
+    }
+    assert body["structure"].startswith(f"agent-detail-{tab}")
+    assert list(live_regions(response)) == [*_NAV_REGIONS, *_COMMON_REGIONS, *_TAB_REGIONS[tab]]
+    assert_snapshot_matches_page(page.text, response)
+    data = registration(page.text)
+    assert data["url"] == _live_url(tab)
+    assert data["structure"] == body["structure"]
+    assert response.headers["cache-control"] == "private, no-cache"
+    assert client.get(_live_url(tab), headers={"If-None-Match": response.headers["etag"]}).status_code == 304
+
+
+def test_live_detail_structure_names_the_integration_for_runtime_and_permissions(monkeypatch, tmp_path, raw_config):
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+
+    assert _live(client, "runtime").json()["structure"] == "agent-detail-runtime.copilot.local-network:1"
+    assert _live(client, "permissions").json()["structure"] == "agent-detail-permissions.copilot:1"
+    assert _live(client, "profile").json()["structure"] == "agent-detail-profile:1"
+
+
+def test_live_detail_structure_changes_when_the_integration_changes_the_loaded_form(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    before = _live(client, "runtime").json()["structure"]
+
+    _config_patch(config_path, lambda raw: _advisor(raw).update(integration="script", integration_config={}))
+
+    after = _live(client, "runtime").json()["structure"]
+    assert after != before
+    assert after == "agent-detail-runtime.script.fixed:1"
+
+
+@pytest.mark.parametrize("tab", _LIVE_TABS)
+def test_live_detail_snapshot_creates_no_runtime_state(monkeypatch, tmp_path, raw_config, tab):
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+    before = filesystem_tree(tmp_path)
+
+    _live(client, tab)
+
+    assert filesystem_tree(tmp_path) == before
+
+
+@pytest.mark.parametrize("tab", _LIVE_TABS)
+def test_live_detail_regions_hold_no_editor_forms_except_owned_prompt_cards(monkeypatch, tmp_path, raw_config, tab):
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+
+    regions = live_regions(_live(client, tab))
+
+    for key, html in regions.items():
+        if key == "agent-prompts-edit":
+            assert "<form" in html
+        else:
+            assert "<form" not in html, key
+            assert "<textarea" not in html, key
+
+
+def test_live_detail_unavailable_agent_or_team_is_not_found(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+
+    for tab in _LIVE_TABS:
+        assert client.get(_live_url(tab, agent="ghost")).status_code == 404, tab
+        assert client.get(_live_url(tab, team="missing")).status_code == 404, tab
+
+    _config_patch(config_path, lambda raw: raw["teams"]["newsletter"]["agents"].clear())
+    for tab in _LIVE_TABS:
+        gone = client.get(_live_url(tab))
+        assert gone.status_code == 404, tab
+        assert "advisor" not in gone.text.replace("/newsletter/agents/advisor", "")
+
+
+def test_live_detail_status_follows_identity_active_job_and_config_revision(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    before = live_regions(_live(client, "profile"))
+    assert "job-live" not in before["agent-status"]
+    assert "Active jobs: 0" in before["agent-status"]
+
+    _write_live_job(tmp_path, "job-live", "running")
+    _config_patch(config_path, lambda raw: _advisor(raw)["identity"].update(title="Renamed Librarian"))
+
+    after = live_regions(_live(client, "profile"))
+    assert 'data-live-key="job:job-live"' in after["agent-status"]
+    assert "Running job job-live" in after["agent-status"]
+    assert "Active jobs: 1" in after["agent-status"]
+    assert "Renamed Librarian" in after["agent-header"]
+    assert after["agent-status"] != before["agent-status"]
+
+
+def test_live_detail_blueprint_and_prompt_digests_follow_external_source_edits(monkeypatch, tmp_path, raw_config):
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+    blueprint = live_regions(_live(client, "blueprint"))["agent-blueprint"]
+    prompts = live_regions(_live(client, "prompts"))["agent-prompts-edit"]
+
+    (tmp_path / "agent-library" / "advisor" / "AGENTS.md").write_text("# Advisor\n\nEdited externally.\n", encoding="utf-8")
+    (tmp_path / "prompts" / "newsletter" / "advisor" / "local-triage.prompt.md").write_text(
+        _local_triage_source("Edited externally.\n"), encoding="utf-8"
+    )
+
+    assert live_regions(_live(client, "blueprint"))["agent-blueprint"] != blueprint
+    after = live_regions(_live(client, "prompts"))["agent-prompts-edit"]
+    assert after != prompts
+    assert re.findall(r"Digest: ([0-9a-f]{64})", after) != re.findall(r"Digest: ([0-9a-f]{64})", prompts)
+    assert 'data-live-key="prompt:local-triage"' in after
+
+
+def test_live_detail_prompt_save_with_a_loaded_digest_still_hits_the_conflict_path(monkeypatch, tmp_path, raw_config):
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+    page = client.get("/newsletter/agents/advisor/prompts").text
+    loaded_digest = re.search(r'name="digest" value="([0-9a-f]{64})"', page).group(1)
+    (tmp_path / "prompts" / "newsletter" / "advisor" / "local-triage.prompt.md").write_text(
+        _local_triage_source("Edited externally.\n"), encoding="utf-8"
+    )
+    refreshed = live_regions(_live(client, "prompts"))["agent-prompts-edit"]
+    assert loaded_digest not in refreshed
+
+    response = client.post(
+        "/newsletter/agents/advisor/prompts/local-triage/save",
+        data={"digest": loaded_digest, "source": _local_triage_source("Local working draft.\n")},
+    )
+
+    assert response.status_code == 409
+    assert "Reload the latest prompt source before saving." in response.text
+    assert "Local working draft." in response.text
+
+
+def test_live_detail_runtime_summary_follows_the_team_default(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    assert "Timeout: 2400s" in live_regions(_live(client, "runtime"))["agent-runtime-summary"]
+
+    _config_patch(config_path, lambda raw: raw["teams"]["newsletter"]["runtime"].update(timeout=3000))
+
+    assert "Timeout: 3000s" in live_regions(_live(client, "runtime"))["agent-runtime-summary"]
+
+
+def test_live_detail_routines_and_permissions_status_follow_remote_config(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    routines = live_regions(_live(client, "routines"))["agent-routines-saved"]
+    permissions = live_regions(_live(client, "permissions"))["agent-permissions-saved"]
+    assert 'data-live-key="routine:daily-review"' in routines
+    assert "weekly-sweep" not in routines
+
+    def patch(raw: dict) -> None:
+        _advisor(raw)["routines"].append(
+            {
+                "id": "weekly-sweep",
+                "prompt": {"scope": "blueprint", "name": "pr-review"},
+                "schedule": {"every": "7d"},
+                "memory": {"scope": "agent"},
+            }
+        )
+        _advisor(raw)["permissions"]["rules"].append(
+            {"path": str((tmp_path / "Research" / "editorial").resolve()), "tools": ["read"]}
+        )
+
+    _config_patch(config_path, patch)
+
+    assert 'data-live-key="routine:weekly-sweep"' in live_regions(_live(client, "routines"))["agent-routines-saved"]
+    assert live_regions(_live(client, "permissions"))["agent-permissions-saved"] != permissions
+
+
+def test_live_detail_memory_status_follows_the_content_revision_without_creating_memory(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    services = app_mod.app.state.services
+    before_tree = filesystem_tree(tmp_path / "memory-store")
+    first = live_regions(_live(client, "memory"))["agent-memory-status"]
+    assert filesystem_tree(tmp_path / "memory-store") == before_tree
+    assert "Default memory: <strong>Agent memory</strong>" in first
+
+    snapshot = ConfigStore(config_path).load()
+    resolved = resolve_memory_selector(
+        MemorySelector(scope="agent"),
+        job_id="detail-newsletter-advisor",
+        team_key="newsletter",
+        agent_name="advisor",
+        routine_id=None,
+        channels=snapshot.config.memory.channels,
+        store_root=services.memory_store.root,
+    )
+    current = services.memory_store.ensure(resolved)
+    services.memory_store.try_update(resolved, current.revision, lambda cur: {**cur.files, "memory.md": b"Changed elsewhere\n"})
+
+    second = live_regions(_live(client, "memory"))["agent-memory-status"]
+    assert second != first
+    assert current.revision[:12] in first
+    assert current.revision[:12] not in second
+
+
+def test_live_detail_log_membership_and_report_history_update_in_place(monkeypatch, tmp_path, raw_config):
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+    logs = live_regions(_live(client, "logs"))
+    activity = live_regions(_live(client, "activity"))
+    assert "advisor-live.out" not in logs["agent-logs-list"]
+    assert "0 files" in logs["agent-logs-count"]
+
+    day = tmp_path / "groups" / "newsletter" / "logs" / "2026-07-16"
+    day.mkdir(parents=True, exist_ok=True)
+    (day / "advisor-live.out").write_text("live\n", encoding="utf-8")
+    _write_live_job(
+        tmp_path,
+        "advisor-live-report",
+        "complete",
+        started_at="2026-07-16T11:40:00+00:00",
+        completed_at="2026-07-16T11:50:00+00:00",
+        duration_seconds=600,
+        execution_summary="Published the live refresh handoff report.",
+    )
+
+    after_logs = live_regions(_live(client, "logs"))
+    assert 'data-live-key="log:2026-07-16:advisor-live.out"' in after_logs["agent-logs-list"]
+    assert "1 file" in after_logs["agent-logs-count"]
+    after_activity = live_regions(_live(client, "activity"))
+    assert 'data-live-key="activity:job:advisor-live-report"' in after_activity["agent-activity-entries"]
+    assert "Published the live refresh handoff report." in after_activity["agent-activity-entries"]
+    assert "data-live-local=\"style\"" in after_activity["agent-activity-entries"]
+    assert after_activity["agent-activity-count"] != activity["agent-activity-count"]
+
+
+def test_live_detail_post_error_pages_embed_the_canonical_snapshot_url(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+
+    runtime = client.post(
+        "/newsletter/agents/advisor/runtime",
+        data={"revision": "stale", "timeout": "900"},
+    )
+    profile = client.post(
+        "/newsletter/agents/advisor/profile",
+        data={"revision": "stale", "display_name": "Draft name", "title": "", "emoji": ""},
+    )
+    permissions = client.post("/newsletter/agents/advisor/permissions", data={"payload": "{"})
+    routines = client.post("/newsletter/agents/advisor/routines", data={"payload": "{"})
+
+    for tab, response in (("runtime", runtime), ("profile", profile), ("permissions", permissions), ("routines", routines)):
+        assert response.status_code in {409, 422}, tab
+        data = registration(response.text)
+        assert data["url"] == _live_url(tab), tab
+        assert data["binding"]["tab"] == tab
+        assert "?__live=1" in data["url"] and "POST" not in data["url"]
+        assert set(page_regions(response.text)) == set(live_regions(_live(client, tab))), tab
+    assert 'value="900"' in runtime.text
+
+
+def test_live_detail_post_never_answers_with_a_snapshot(monkeypatch, tmp_path, raw_config):
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+
+    response = client.post(
+        "/newsletter/agents/advisor/runtime?__live=1",
+        data={"revision": "stale", "timeout": "900"},
+    )
+
+    assert response.status_code == 409
+    assert response.headers["content-type"].startswith("text/html")

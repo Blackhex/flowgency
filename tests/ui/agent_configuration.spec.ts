@@ -424,3 +424,129 @@ test.describe('agent roster live refresh', () => {
     await expect(page.getByText('config.yaml changed; reload before previewing move')).toBeVisible();
   });
 });
+
+
+test.describe('agent detail live refresh', () => {
+  const status = (page: Page) => page.locator('[data-live-region="agent-status"]');
+  const header = (page: Page) => page.locator('[data-live-region="agent-header"]');
+
+  test('prompts keep the draft and loaded digest while the catalog digest and status update', async ({ page, request }) => {
+    await page.goto('/newsletter/agents/advisor/prompts');
+    const card = page.locator('[data-live-key="prompt:local-triage"]');
+    const digest = card.locator('form[action$="/save"] input[name="digest"]');
+    const loadedDigest = await digest.inputValue();
+    const source = card.locator('textarea[name="source"]');
+    const draft = '---\nname: local-triage\ndescription: Private local triage.\n---\n\nLocal working draft\n';
+    await source.fill(draft);
+    await card.evaluate((node) => { (node as unknown as { __kept: boolean }).__kept = true; });
+
+    await changeLiveFixture(request, 'agent-source-and-status');
+
+    await expect(card.locator('p', { hasText: 'Digest:' })).not.toContainText(loadedDigest);
+    await expect(header(page)).toContainText('Principal Strategist');
+    await expect(status(page)).toContainText('Running job agent-live-running');
+    await expect(source).toHaveValue(draft);
+    await expect(digest).toHaveValue(loadedDigest);
+    expect(await card.evaluate((node) => (node as unknown as { __kept?: boolean }).__kept)).toBe(true);
+
+    await card.getByRole('button', { name: 'Save source' }).click();
+    await expect(page.getByText('Reload the latest prompt source before saving.')).toBeVisible();
+    await expect(page.locator('textarea[name="source"]').nth(1)).toHaveValue(draft);
+  });
+
+  test('memory keeps the draft, loaded content revision and held file selector', async ({ page, request }) => {
+    await page.goto('/newsletter/agents/advisor/memory');
+    const memoryStatus = page.locator('[data-live-region="agent-memory-status"]');
+    const initialStatus = await memoryStatus.textContent();
+    const revision = page.locator('input[name="content_revision"]');
+    const loadedRevision = await revision.inputValue();
+    const content = page.locator('textarea[name="content"]');
+    await content.fill('Local memory draft');
+    const file = page.locator('select[name="filename"]');
+    await file.focus();
+    await file.evaluate((node) => { (node as unknown as { __kept: boolean }).__kept = true; });
+
+    await changeLiveFixture(request, 'agent-memory-revision');
+
+    await expect.poll(async () => await memoryStatus.textContent()).not.toBe(initialStatus);
+    await expect(content).toHaveValue('Local memory draft');
+    await expect(revision).toHaveValue(loadedRevision);
+    await expect(file).toBeFocused();
+    expect(await file.evaluate((node) => (node as unknown as { __kept?: boolean }).__kept)).toBe(true);
+
+    await page.getByRole('button', { name: 'Save memory' }).click();
+    await expect(page.getByText('Attempted content')).toBeVisible();
+    await expect(page.locator('pre').filter({ hasText: 'Local memory draft' })).toBeVisible();
+  });
+
+  test('runtime keeps the timeout draft and loaded revision while the team default updates', async ({ page, request }) => {
+    await page.goto('/newsletter/agents/advisor/runtime');
+    const timeout = page.locator('input[name="timeout"]');
+    const revision = page.locator('input[name="revision"]');
+    const loadedRevision = await revision.inputValue();
+    await timeout.fill('900');
+
+    await changeLiveFixture(request, 'agent-team-runtime');
+
+    await expect(page.locator('[data-live-region="agent-runtime-summary"]')).toContainText('Timeout: 3000s');
+    await expect(timeout).toHaveValue('900');
+    await expect(revision).toHaveValue(loadedRevision);
+    await page.getByRole('button', { name: 'Save runtime' }).click();
+    await expect(page.locator('input[name="timeout"]')).toHaveValue('900');
+    await expect(page.locator('.border-amber-200').filter({ hasText: /changed/i })).toBeVisible();
+  });
+
+  test('profile identity refreshes in the header while a name draft and its revision stay', async ({ page, request }) => {
+    await page.goto('/newsletter/agents/advisor/profile');
+    const name = page.locator('input[name="display_name"]');
+    const revision = page.locator('input[name="revision"]');
+    const loadedRevision = await revision.inputValue();
+    await name.fill('Draft Advisor');
+
+    await changeLiveFixture(request, 'agent-identity');
+
+    await expect(header(page)).toContainText('Principal Strategist');
+    await expect(status(page)).toContainText('Configuration revision');
+    await expect(name).toHaveValue('Draft Advisor');
+    await expect(revision).toHaveValue(loadedRevision);
+    await page.getByRole('button', { name: 'Save profile' }).click();
+    await expect(page.locator('.border-amber-200').filter({ hasText: /changed/i })).toBeVisible();
+  });
+
+  test('blueprint, logs and activity show remote digest, log and report changes in place', async ({ page, request }) => {
+    await page.goto('/newsletter/agents/advisor/blueprint');
+    const blueprint = page.locator('[data-live-region="agent-blueprint"]');
+    const initialBlueprint = await blueprint.textContent();
+    await changeLiveFixture(request, 'agent-catalog-digest');
+    await expect.poll(async () => await blueprint.textContent()).not.toBe(initialBlueprint);
+
+    await page.goto('/newsletter/agents/advisor/logs');
+    const list = page.locator('[data-live-region="agent-logs-list"]');
+    await expect(list).not.toContainText('advisor-live-refresh.out');
+    await changeLiveFixture(request, 'agent-log-membership');
+    await expect(list).toContainText('advisor-live-refresh.out');
+    await expect(page.locator('[data-live-region="agent-logs-count"]')).toContainText('file');
+
+    await page.goto('/newsletter/agents/advisor/activity');
+    const entries = page.locator('[data-live-region="agent-activity-entries"]');
+    await expect(entries).not.toContainText('Published the live refresh handoff report.');
+    await changeLiveFixture(request, 'agent-report-history');
+    await expect(entries).toContainText('Published the live refresh handoff report.');
+  });
+
+  test('an open add-agent dialog and its draft survive a refresh of the roster behind it', async ({ page, request }) => {
+    await page.goto('/newsletter/agents');
+    await page.getByRole('button', { name: 'Add agent' }).first().click();
+    const dialog = page.locator('#add-agent-dialog');
+    await expect(dialog).toBeVisible();
+    await dialog.locator('input[name="name"]').fill('draft-agent');
+    await dialog.evaluate((node) => { (node as unknown as { __kept: boolean }).__kept = true; });
+
+    await changeLiveFixture(request, 'agent-source-and-status');
+
+    await expect(page.locator('[data-live-key="agent:advisor"]')).toContainText('Principal Strategist');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator('input[name="name"]')).toHaveValue('draft-agent');
+    expect(await dialog.evaluate((node) => (node as unknown as { __kept?: boolean }).__kept)).toBe(true);
+  });
+});

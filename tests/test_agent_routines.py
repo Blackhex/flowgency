@@ -922,3 +922,39 @@ def test_routines_save_keeps_unsupported_saved_summary_when_schedule_controls_ar
     assert retained["summary_rows"][0]["recovery"] == "always"
     assert any(issue["field"] == "routines.0.prompt" for issue in retained["issues"])
     assert config_path.read_bytes() == before
+
+def test_live_routines_snapshot_reports_remote_status_while_a_stale_save_still_conflicts(monkeypatch, tmp_path, raw_config):
+    from tests._live_helpers import live_regions, registration
+
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    page = client.get("/newsletter/agents/advisor/routines")
+    initial = initial_payload(page.text)
+    payload = draft_payload(initial, draft_version=3)
+    payload["draft"]["routines"][0]["arguments"] = ["--local-draft"]
+    assert registration(page.text)["url"] == "/newsletter/agents/advisor/routines?__live=1"
+
+    remote = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    remote["teams"]["newsletter"]["agents"][0]["routines"].append(
+        {
+            "id": "server-live",
+            "prompt": {"scope": "blueprint", "name": "pr-review"},
+            "schedule": {"every": "12h"},
+        }
+    )
+    write_config(config_path, remote)
+    app_mod.refresh_services()
+
+    snapshot = client.get("/newsletter/agents/advisor/routines?__live=1")
+    assert snapshot.status_code == 200
+    regions = live_regions(snapshot)
+    assert 'data-live-key="routine:server-live"' in regions["agent-routines-saved"]
+    assert all("routines-initial" not in html and 'name="payload"' not in html for html in regions.values())
+
+    response = client.post("/newsletter/agents/advisor/routines", data={"payload": json.dumps(payload)})
+
+    assert response.status_code == 409
+    conflict = initial_payload(response.text)
+    assert conflict["conflict"] is True
+    assert conflict["draft"]["revision"] == payload["revision"]
+    assert conflict["draft"]["draft"]["routines"][0]["arguments"] == ["--local-draft"]
+    assert registration(response.text)["url"] == "/newsletter/agents/advisor/routines?__live=1"

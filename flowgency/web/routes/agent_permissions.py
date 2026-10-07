@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from typing import Any
@@ -222,6 +223,7 @@ def render_permissions_page(
             "permission_rows": permission_rows,
             "permission_summary_html": Markup(summary_html),
             "permission_summary_available": prepared.summary is not None,
+            "permission_summary_fingerprint": hashlib.sha256(saved_summary_html.encode("utf-8")).hexdigest()[:12],
             "permission_workspace_write": prepared.summary.workspace_write if prepared.summary is not None else False,
             "permission_conflict": conflict,
         },

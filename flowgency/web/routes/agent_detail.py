@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
+import re
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import quote
@@ -43,7 +44,13 @@ from flowgency.prompts import PromptConflictError, PromptNotFoundError
 from flowgency.prompts.catalog import effective_prompt_catalog
 from flowgency.web.agent_activity import build_agent_activity
 from flowgency.web.dependencies import FlowgencyServices, get_services
-from flowgency.web.job_presentation import load_team_jobs
+from flowgency.web.job_presentation import friendly_status, load_team_jobs
+from flowgency.web.live import (
+    LiveBinding,
+    LivePagePolicy,
+    respond_live_or_html,
+    shared_region_macros,
+)
 from flowgency.web.logs import collect_agent_logs, with_log_links
 from flowgency.web.team_navigation import build_team_context
 
@@ -141,7 +148,15 @@ def _preview_job_id(team_id: str, agent_id: str) -> str:
     return f"detail-{team_id}-{agent_id}"
 
 
-def _resolve_tab_memory(snapshot, services: FlowgencyServices, team_id: str, agent_id: str, selector: MemorySelector | None):
+def _resolve_tab_memory(
+    snapshot,
+    services: FlowgencyServices,
+    team_id: str,
+    agent_id: str,
+    selector: MemorySelector | None,
+    *,
+    read_only: bool = False,
+):
     if services.memory_store is None:
         raise HTTPException(status_code=409, detail="Memory store unavailable")
     resolved = resolve_memory_selector(
@@ -153,6 +168,9 @@ def _resolve_tab_memory(snapshot, services: FlowgencyServices, team_id: str, age
         channels=snapshot.config.memory.channels,
         store_root=services.memory_store.root,
     )
+    # A live snapshot is a read: it never creates the memory directory or its lock.
+    if read_only:
+        return services.memory_store.preview(resolved)
     return services.memory_store.ensure(resolved)
 
 
@@ -406,9 +424,13 @@ def _blueprint_context(services: FlowgencyServices, snapshot, team_id: str, agen
     }
 
 
-def _memory_context(snapshot, services: FlowgencyServices, team_id: str, agent_id: str) -> dict[str, Any]:
+def _memory_context(
+    snapshot, services: FlowgencyServices, team_id: str, agent_id: str, *, read_only: bool = False
+) -> dict[str, Any]:
     _, instance = _get_snapshot_instance(snapshot, team_id, agent_id)
-    memory_snapshot = _resolve_tab_memory(snapshot, services, team_id, agent_id, instance.default_memory)
+    memory_snapshot = _resolve_tab_memory(
+        snapshot, services, team_id, agent_id, instance.default_memory, read_only=read_only
+    )
     selected_file = _selected_file(memory_snapshot)
     channel_options = [
         {"key": key, "label": channel.display_name}
@@ -427,21 +449,42 @@ def _memory_context(snapshot, services: FlowgencyServices, team_id: str, agent_i
     }
 
 
-def _detail_context(
+def _agent_active_jobs(services: FlowgencyServices, team_id: str, agent_id: str) -> tuple[dict[str, str], ...]:
+    if services.job_store is None:
+        return ()
+    records = sorted(
+        services.job_store.active(team_id, agent_id),
+        key=lambda record: (record.spec.created_at, record.spec.job_id),
+        reverse=True,
+    )
+    return tuple(
+        {
+            "job_id": record.spec.job_id,
+            "status": friendly_status(record.status),
+            "href": f"/{team_id}/jobs/{record.spec.job_id}",
+        }
+        for record in records
+    )
+
+
+def build_agent_detail_context(
     request: Request,
     services: FlowgencyServices,
     team_id: str,
     agent_id: str,
     tab: str,
     *,
-    snapshot: ConfigSnapshot | None = None,
-    status_code: int = 200,
+    snapshot: ConfigSnapshot,
     issues: list[dict[str, str]] | None = None,
     banner: str = "",
     memory_conflict: dict[str, str] | None = None,
     overrides: dict[str, Any] | None = None,
-):
-    snapshot = snapshot or services.config_store.load()
+    read_only: bool = False,
+) -> dict[str, Any]:
+    """One context for a detail tab, its POST error renders and its live snapshots.
+
+    ``read_only`` is set for snapshot reads, which must not create directories.
+    """
     team_cfg, instance = _get_snapshot_instance(snapshot, team_id, agent_id)
     handler_issues = issues or []
     context: dict[str, Any] = {
@@ -454,6 +497,7 @@ def _detail_context(
         "tab_links": _tab_links(team_id, agent_id, tab),
         "config_revision": snapshot.revision,
         "agent_name": instance.name,
+        "agent_active_jobs": _agent_active_jobs(services, team_id, agent_id),
         "display_name": instance.identity.display_name or instance.name,
         "title": instance.identity.title,
         "emoji": instance.identity.emoji,
@@ -482,7 +526,7 @@ def _detail_context(
     elif tab == "prompts":
         context.update(_prompts_context(services, snapshot, team_id, agent_id))
     elif tab == "memory":
-        context.update(_memory_context(snapshot, services, team_id, agent_id))
+        context.update(_memory_context(snapshot, services, team_id, agent_id, read_only=read_only))
     elif tab == "activity":
         context.update(
             build_agent_activity(
@@ -522,7 +566,112 @@ def _detail_context(
     context["issues"] = merged
     if overrides:
         context.update(overrides)
-    return _templates(request).TemplateResponse(request, "agent_detail.html", context, status_code=status_code)
+    return context
+
+
+_LIVE_TEMPLATE = "agent_detail_live.html"
+_COMMON_REGION_MACROS = {
+    "agent-header": "agent_header",
+    "agent-status": "agent_status",
+}
+_TAB_REGION_MACROS: dict[str, dict[str, str]] = {
+    "profile": {},
+    "blueprint": {"agent-blueprint": "blueprint_body"},
+    "runtime": {"agent-runtime-summary": "runtime_summary"},
+    "permissions": {"agent-permissions-saved": "permissions_saved"},
+    "prompts": {
+        "agent-prompts-catalog": "prompts_catalog",
+        "agent-prompts-edit": "prompts_edit",
+    },
+    "routines": {"agent-routines-saved": "routines_saved"},
+    "memory": {"agent-memory-status": "memory_status"},
+    "activity": {
+        "agent-activity-count": "activity_count_label",
+        "agent-activity-entries": "activity_entries",
+    },
+    "logs": {"agent-logs-count": "logs_count_label", "agent-logs-list": "logs_list"},
+}
+
+
+def _structure_token(value: object) -> str:
+    return re.sub(r"[^A-Za-z0-9_-]", "-", str(value)) or "unknown"
+
+
+def _tab_structure(tab: str, context: dict[str, Any]) -> str:
+    """A compatibility token naming what shapes the loaded editor forms of this tab."""
+    qualifiers: list[str] = []
+    if tab in {"runtime", "permissions"}:
+        qualifiers.append(_structure_token(context.get("integration", "")))
+    if tab == "runtime":
+        qualifiers.append("local-network" if context.get("show_allow_local_network") else "fixed")
+    return ".".join([f"agent-detail-{tab}", *qualifiers]) + ":1"
+
+
+def agent_detail_policy(team_id: str, agent_id: str, tab: str, context: dict[str, Any]) -> LivePagePolicy:
+    macros = {
+        key: f"{_LIVE_TEMPLATE}#{macro}"
+        for key, macro in {**_COMMON_REGION_MACROS, **_TAB_REGION_MACROS[tab]}.items()
+    }
+    policy = LivePagePolicy(
+        template_name="agent_detail.html",
+        binding=LiveBinding(page="agent-detail", team=team_id, entity=agent_id, tab=tab),
+        structure=_tab_structure(tab, context),
+        region_macros=macros,
+        snapshot_url=f"/{team_id}/agents/{agent_id}/{tab}?__live=1",
+    )
+    return replace(policy, region_macros=shared_region_macros(context, policy))
+
+
+def respond_agent_detail(
+    request: Request,
+    context: dict[str, Any],
+    team_id: str,
+    agent_id: str,
+    tab: str,
+    *,
+    status_code: int = 200,
+):
+    return respond_live_or_html(
+        request,
+        _templates(request),
+        context,
+        agent_detail_policy(team_id, agent_id, tab, context),
+        status_code=status_code,
+    )
+
+
+def is_live_read(request: Request) -> bool:
+    return request.method == "GET" and request.query_params.get("__live") == "1"
+
+
+def _detail_context(
+    request: Request,
+    services: FlowgencyServices,
+    team_id: str,
+    agent_id: str,
+    tab: str,
+    *,
+    snapshot: ConfigSnapshot | None = None,
+    status_code: int = 200,
+    issues: list[dict[str, str]] | None = None,
+    banner: str = "",
+    memory_conflict: dict[str, str] | None = None,
+    overrides: dict[str, Any] | None = None,
+):
+    context = build_agent_detail_context(
+        request,
+        services,
+        team_id,
+        agent_id,
+        tab,
+        snapshot=snapshot or services.config_store.load(),
+        issues=issues,
+        banner=banner,
+        memory_conflict=memory_conflict,
+        overrides=overrides,
+        read_only=is_live_read(request),
+    )
+    return respond_agent_detail(request, context, team_id, agent_id, tab, status_code=status_code)
 
 
 @router.get("/{team}/agents/{agent}", response_class=HTMLResponse)

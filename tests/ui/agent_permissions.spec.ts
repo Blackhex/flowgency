@@ -614,3 +614,33 @@ test('save round trip uses the real endpoint and restores the original fixture p
   await assertNoLayoutIssues(page);
   await assertNoConsoleErrors(page);
 });
+
+test.describe('permissions live refresh', () => {
+  test.beforeEach(async ({ request }) => {
+    expect((await request.post('/__ui/reset')).status()).toBe(204);
+  });
+
+  test.afterEach(async ({ request }) => {
+    expect((await request.post('/__ui/reset')).status()).toBe(204);
+  });
+
+  test('the editor draft survives a remote permission change and its own preview reports the conflict', async ({ page, request }) => {
+    await page.goto(advisorPath);
+    const saved = page.locator('[data-live-region="agent-permissions-saved"]');
+    await expect(saved).toContainText('workspace-root write granted');
+    const initialStatus = await saved.textContent();
+    const pathField = page.locator('[data-rule-path]').first();
+    await pathField.fill('C:/draft/only/path');
+    await pathField.evaluate((node) => { (node as unknown as { __kept: boolean }).__kept = true; });
+
+    expect((await request.post('/__ui/live/change', { data: { case: 'agent-permissions' } })).status()).toBe(204);
+
+    await expect.poll(async () => await saved.textContent()).not.toBe(initialStatus);
+    expect(await pathField.evaluate((node) => (node as unknown as { __kept?: boolean }).__kept)).toBe(true);
+
+    await pathField.pressSequentially('2');
+    await expect(page.getByRole('button', { name: 'Reload page' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Save permissions' })).toBeDisabled();
+    await expect(page.locator('[data-rule-path]').first()).toHaveValue('C:/draft/only/path2');
+  });
+});

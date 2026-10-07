@@ -1,22 +1,9 @@
+{% import "agent_detail_live.html" as live with context %}
 <section class="space-y-6">
   <div class="flex items-baseline justify-between gap-3">
     <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Execution Logs</h2>
-    <p class="text-sm font-mono text-gray-500 dark:text-gray-400">{{ log_count }} file{{ '' if log_count == 1 else 's' }}</p>
+    <p data-live-region="agent-logs-count" class="text-sm font-mono text-gray-500 dark:text-gray-400">{{ live.logs_count_label() }}</p>
   </div>
 
-  {% if log_warnings %}
-  <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100">
-    <ul class="space-y-1">
-      {% for warning in log_warnings %}
-      <li>{{ warning }}</li>
-      {% endfor %}
-    </ul>
-  </div>
-  {% endif %}
-
-  {% if logs %}
-  {% include "log_entries.html" %}
-  {% else %}
-  <div class="rounded-lg border border-gray-200 bg-white p-8 text-center text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">No logs found.</div>
-  {% endif %}
+  <div data-live-region="agent-logs-list" class="space-y-6">{{ live.logs_list() }}</div>
 </section>

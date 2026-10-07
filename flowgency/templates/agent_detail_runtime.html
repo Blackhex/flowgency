@@ -1,20 +1,10 @@
+{% import "agent_detail_live.html" as live with context %}
 <section class="space-y-5">
   <div>
     <h2 class="text-lg font-semibold text-gray-900">Runtime</h2>
     <p class="text-sm text-gray-500">The integration is pinned by the agent record. Timeout inheritance stays here; permissions are edited on the dedicated Permissions tab.</p>
   </div>
-  <div class="grid gap-6 lg:grid-cols-2 text-sm text-gray-700">
-    <div class="space-y-2">
-      <h3 class="font-semibold text-gray-900">Pinned integration</h3>
-      <p>{{ integration_display_name }}</p>
-      <p class="font-mono text-xs text-gray-500">{{ integration_name }}</p>
-    </div>
-    <div class="space-y-2">
-      <h3 class="font-semibold text-gray-900">Team default</h3>
-      <p>Timeout: {{ team_timeout }}s</p>
-      <p>Permissions: <a href="/{{ team }}/agents/{{ agent }}/permissions" class="text-indigo-600 hover:text-indigo-800">Open Permissions</a></p>
-    </div>
-  </div>
+  <div data-live-region="agent-runtime-summary" class="grid gap-6 lg:grid-cols-2 text-sm text-gray-700">{{ live.runtime_summary() }}</div>
   <form method="post" action="/{{ team }}/agents/{{ agent }}/runtime" class="space-y-4 border-t border-gray-200 pt-4">
     <input type="hidden" name="revision" value="{{ config_revision }}">
     <div class="grid gap-4 md:grid-cols-2">

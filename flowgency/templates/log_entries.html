@@ -1,9 +1,9 @@
 {% for date, entries in logs.items() %}
-<div class="mb-6">
+<div data-live-key="log-day:{{ date }}" class="mb-6">
   <h2 class="mb-2 text-sm font-semibold uppercase tracking-wider text-gray-500">{{ date }}</h2>
   <ul class="divide-y divide-gray-100 rounded-lg border border-gray-200 bg-white dark:divide-slate-700" role="list">
     {% for e in entries %}
-    <li>
+    <li data-live-key="log:{{ date }}:{{ e.name }}">
     <a href="{{ e.href }}" aria-label="{{ e.name }}" class="block px-4 py-2.5 transition-colors hover:bg-gray-50">
       <div class="flex items-center justify-between gap-3">
         <div class="flex min-w-0 items-center gap-3">

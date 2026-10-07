@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% set active = "agents" %}
+{% from "agent_detail_live.html" import agent_header, agent_status, permissions_saved, routines_saved with context %}
 
 {% block title %}{{ display_name }} - Agents{% endblock %}
 
@@ -8,25 +9,15 @@
   <a href="/{{ team }}/agents" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; Back to agents</a>
 </div>
 
-<header class="mb-6 border-b border-gray-200 pb-4">
-  <div class="flex flex-wrap items-start justify-between gap-4">
-    <div class="min-w-0">
-      <div class="flex items-center gap-3 flex-wrap">
-        <div class="flex h-12 w-12 items-center justify-center rounded-full bg-gray-100 text-lg">
-          {% if emoji %}{{ emoji }}{% else %}{{ display_name[0]|upper }}{% endif %}
-        </div>
-        <div>
-          <h1 class="text-2xl font-bold text-gray-900">{{ display_name }}</h1>
-          {% if title %}<p class="text-sm text-gray-500">{{ title }}</p>{% endif %}
-        </div>
-      </div>
-      <div class="mt-3 flex flex-wrap items-center gap-2 text-sm text-gray-600">
-        <span class="inline-flex items-center rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700">Blueprint: {{ blueprint }}</span>
-        {{ integration | integration_badge }}
-      </div>
-    </div>
-  </div>
-</header>
+<header data-live-region="agent-header" class="mb-6 border-b border-gray-200 pb-4">{{ agent_header() }}</header>
+
+<div data-live-region="agent-status" class="sr-only">{{ agent_status() }}</div>
+{#- Out-of-flow status sits beside the header so it can never extend a long editor page. -#}
+{% if tab == "permissions" %}
+<div data-live-region="agent-permissions-saved" class="sr-only">{{ permissions_saved() }}</div>
+{% elif tab == "routines" %}
+<div data-live-region="agent-routines-saved" class="sr-only">{{ routines_saved() }}</div>
+{% endif %}
 
 {% if banner %}
 <div class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{{ banner }}</div>

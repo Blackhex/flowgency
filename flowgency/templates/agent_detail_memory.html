@@ -1,11 +1,10 @@
+{% import "agent_detail_live.html" as live with context %}
 <section class="space-y-5">
   <div>
     <h2 class="text-lg font-semibold text-gray-900">Memory</h2>
     <p class="text-sm text-gray-500">Choose the default selector and edit the resolved markdown content directly.</p>
   </div>
-  <div class="text-sm text-gray-700">
-    <p>Default memory: <strong>{{ memory_scope_label }}</strong></p>
-  </div>
+  <div data-live-region="agent-memory-status" class="text-sm text-gray-700">{{ live.memory_status() }}</div>
   {% if memory_conflict %}
   <div class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900 space-y-2">
     <p>Current revision: <span class="font-mono break-all">{{ memory_conflict.current_revision }}</span></p>

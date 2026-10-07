@@ -393,3 +393,38 @@ def test_permissions_preview_returns_preview_unavailable_when_catalog_is_unavail
     body = response.json()
     assert body["code"] == "preview-unavailable"
     assert body["summary_html"] is None
+
+def test_live_permissions_snapshot_reports_remote_status_while_a_stale_save_still_conflicts(monkeypatch, tmp_path, raw_config):
+    from tests._live_helpers import live_regions, registration
+
+    _pin_catalog(monkeypatch)
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    page = client.get("/newsletter/agents/advisor/permissions")
+    payload = initial_payload(page.text)["draft"]
+    payload["draft_version"] = 4
+    payload["draft"]["rules"][0]["path"] = str(tmp_path / "local-draft")
+    stale_revision = payload["revision"]
+    assert registration(page.text)["url"] == "/newsletter/agents/advisor/permissions?__live=1"
+    before = live_regions(client.get("/newsletter/agents/advisor/permissions?__live=1"))
+
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["teams"]["newsletter"]["agents"][0]["permissions"]["rules"].append(
+        {"path": str(tmp_path / "Research" / "editorial"), "tools": ["read"]}
+    )
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    app_mod.refresh_services()
+
+    snapshot = client.get("/newsletter/agents/advisor/permissions?__live=1")
+    assert snapshot.status_code == 200
+    after = live_regions(snapshot)
+    assert after["agent-permissions-saved"] != before["agent-permissions-saved"]
+    assert all("permissions-initial" not in html and 'name="payload"' not in html for html in after.values())
+
+    response = client.post("/newsletter/agents/advisor/permissions", data={"payload": json.dumps(payload)})
+
+    assert response.status_code == 409
+    conflict = initial_payload(response.text)
+    assert conflict["conflict"] is True
+    assert conflict["draft"]["revision"] == stale_revision
+    assert conflict["draft"]["draft"]["rules"][0]["path"] == str(tmp_path / "local-draft")
+    assert registration(response.text)["url"] == "/newsletter/agents/advisor/permissions?__live=1"

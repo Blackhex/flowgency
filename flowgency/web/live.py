@@ -409,7 +409,8 @@ def respond_live_or_html(
     *,
     status_code: int = 200,
 ) -> Response:
-    wants_live = request.query_params.get("__live") == "1"
+    # Only a read may answer with a snapshot; a POST error render is always the page.
+    wants_live = request.method == "GET" and request.query_params.get("__live") == "1"
     html_context = {**context, "live_registration": live_registration(policy)}
 
     if status_code >= 400:

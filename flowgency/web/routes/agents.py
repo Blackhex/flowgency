@@ -459,6 +459,32 @@ async def agent_remove(request: Request, team: str, agent: str, services: Flowge
     return RedirectResponse(f"/{team}/agents", status_code=303)
 
 
+def move_policy(team_id: str, agent_id: str, context: dict) -> LivePagePolicy:
+    policy = LivePagePolicy(
+        template_name="agent_move.html",
+        binding=LiveBinding(page="agent-move", team=team_id, entity=agent_id),
+        structure="agent-move:1",
+        region_macros={},
+        snapshot_url=f"/{team_id}/agents/{agent_id}/move?__live=1",
+    )
+    return replace(policy, region_macros=shared_region_macros(context, policy))
+
+
+@router.get("/{team}/agents/{agent}/move", response_class=HTMLResponse)
+async def agent_move_live(
+    request: Request, team: str, agent: str, services: FlowgencyServices = Depends(get_services)
+):
+    """Shell-only snapshot for the move review page, which is only ever a POST result."""
+    if request.query_params.get("__live") != "1":
+        raise HTTPException(status_code=405, detail="Method Not Allowed", headers={"Allow": "POST"})
+    snapshot = services.config_store.load()
+    team_cfg = snapshot.config.teams.get(team)
+    if team_cfg is None or agent not in team_cfg.agents:
+        raise HTTPException(status_code=404, detail="Unknown agent")
+    context = {**_team_context(request, snapshot, team), "active": "agents"}
+    return respond_live_or_html(request, _templates(request), context, move_policy(team, agent, context))
+
+
 @router.post("/{team}/agents/{agent}/move", response_class=HTMLResponse)
 async def agent_move_preview(request: Request, team: str, agent: str, services: FlowgencyServices = Depends(get_services)):
     if services.instances is None:
@@ -483,16 +509,13 @@ async def agent_move_preview(request: Request, team: str, agent: str, services: 
         memory_mode,
         expected_revision,
     )
-    return _templates(request).TemplateResponse(
-        request,
-        "agent_move.html",
-        {
-            "request": request,
-            **_team_context(request, snapshot, team),
-            "active": "agents",
-            "preview": asdict(preview),
-        },
-    )
+    context = {
+        "request": request,
+        **_team_context(request, snapshot, team),
+        "active": "agents",
+        "preview": asdict(preview),
+    }
+    return respond_live_or_html(request, _templates(request), context, move_policy(team, agent, context))
 
 
 @router.post("/{team}/agents/{agent}/move/apply", response_class=HTMLResponse)

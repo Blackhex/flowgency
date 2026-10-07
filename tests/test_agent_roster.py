@@ -811,3 +811,50 @@ def test_live_roster_post_error_page_embeds_the_canonical_snapshot_url(monkeypat
     assert data["binding"]["page"] == "agents"
     assert '<dialog id="add-agent-dialog" open' in response.text
     assert 'value="reviewer"' in response.text
+
+
+def test_live_move_confirmation_is_shell_only_and_keeps_the_preview_intent(monkeypatch, tmp_path, raw_config):
+    client, config_path, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+    revision = _revision(config_path)
+
+    page = client.post(
+        "/newsletter/agents/advisor/move",
+        data={"revision": revision, "target_team": "research", "memory_mode": "copy"},
+    )
+
+    assert page.status_code == 200
+    data = registration(page.text)
+    assert data["url"] == "/newsletter/agents/advisor/move?__live=1"
+    assert data["structure"] == "agent-move:1"
+    assert data["binding"] == {"page": "agent-move", "team": "newsletter", "entity": "advisor", "tab": None, "query": {}}
+    assert f'name="preview_revision" value="{revision}"' in page.text
+    assert 'name="target_team" value="research"' in page.text
+    assert 'name="memory_mode" value="copy"' in page.text
+
+    ConfigStore(config_path).patch(revision, lambda raw: raw["flowgency"].update(title="Changed elsewhere"))
+    app_mod.refresh_services()
+    snapshot = client.get("/newsletter/agents/advisor/move?__live=1")
+    assert snapshot.status_code == 200
+    assert list(live_regions(snapshot)) == ["navigation-teams", "navigation-primary", "navigation-workflows", "navigation-workspace"]
+    assert all("preview_revision" not in html for html in live_regions(snapshot).values())
+    assert client.get("/newsletter/agents/advisor/move?__live=1", headers={"If-None-Match": snapshot.headers["etag"]}).status_code == 304
+
+
+def test_live_move_snapshot_requires_an_existing_agent_and_is_not_a_page(monkeypatch, tmp_path, raw_config):
+    client, _, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+
+    assert client.get("/newsletter/agents/advisor/move").status_code == 405
+    assert client.get("/newsletter/agents/ghost/move?__live=1").status_code == 404
+    assert client.get("/missing/agents/advisor/move?__live=1").status_code == 404
+
+
+def test_live_roster_post_never_answers_with_a_snapshot(monkeypatch, tmp_path, raw_config):
+    client, _, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+
+    response = client.post(
+        "/newsletter/agents/create?__live=1",
+        data={"revision": "stale", "name": "reviewer", "blueprint": "advisor", "integration": "copilot"},
+    )
+
+    assert response.status_code == 409
+    assert response.headers["content-type"].startswith("text/html")

@@ -1,0 +1,300 @@
+{#- Live regions of the agent detail pages. The page templates and every live snapshot render these
+    same macros from the same context, so a refresh can never disagree with a reload. They hold only
+    read-only status: editor forms stay in the tab templates, outside every region, and keep their
+    loaded revisions, drafts and held controls. Keys are namespaced identities, never indices. -#}
+
+{% macro agent_header() -%}
+  <div class="flex flex-wrap items-start justify-between gap-4">
+    <div class="min-w-0">
+      <div class="flex items-center gap-3 flex-wrap">
+        <div class="flex h-12 w-12 items-center justify-center rounded-full bg-gray-100 text-lg">
+          {% if emoji %}{{ emoji }}{% else %}{{ display_name[0]|upper }}{% endif %}
+        </div>
+        <div>
+          <h1 class="text-2xl font-bold text-gray-900">{{ display_name }}</h1>
+          {% if title %}<p class="text-sm text-gray-500">{{ title }}</p>{% endif %}
+        </div>
+      </div>
+      <div class="mt-3 flex flex-wrap items-center gap-2 text-sm text-gray-600">
+        <span class="inline-flex items-center rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700">Blueprint: {{ blueprint }}</span>
+        {{ integration | integration_badge }}
+      </div>
+    </div>
+  </div>
+{%- endmacro %}
+
+{#- Screen-reader status: the configuration revision is shown separately from every form's loaded one. -#}
+{% macro agent_status() -%}
+<p data-live-key="agent-status:config">Configuration revision {{ config_revision[:12] }}</p>
+<p data-live-key="agent-status:write">Workspace write {{ 'granted' if can_write else 'not granted' }}</p>
+<p data-live-key="agent-status:jobs">Active jobs: {{ agent_active_jobs|length }}</p>
+{% for job in agent_active_jobs %}
+<p data-live-key="job:{{ job.job_id }}">{{ job.status }} job {{ job.job_id }}</p>
+{% endfor %}
+{%- endmacro %}
+
+{% macro blueprint_body() -%}
+  <div>
+    <h2 class="text-lg font-semibold text-gray-900">Blueprint</h2>
+    <p class="text-sm text-gray-600">Read-only source and runtime projection details for the pinned blueprint.</p>
+  </div>
+  {% if inspection %}
+  <dl class="grid gap-4 md:grid-cols-2 text-sm text-gray-700">
+    <div>
+      <dt class="text-xs uppercase tracking-wide text-gray-600">Source key</dt>
+      <dd class="font-mono">{{ inspection.key }}</dd>
+    </div>
+    <div>
+      <dt class="text-xs uppercase tracking-wide text-gray-600">Title</dt>
+      <dd>{{ inspection.title }}</dd>
+    </div>
+    <div>
+      <dt class="text-xs uppercase tracking-wide text-gray-600">Digest</dt>
+      <dd class="font-mono break-all">{{ inspection.snapshot.digest }}</dd>
+    </div>
+    <div>
+      <dt class="text-xs uppercase tracking-wide text-gray-600">Cache status</dt>
+      <dd>{{ cache_status.state }}</dd>
+    </div>
+    <div>
+      <dt class="text-xs uppercase tracking-wide text-gray-600">Instruction target</dt>
+      <dd class="font-mono">{{ compatibility.instruction_target }}</dd>
+    </div>
+    <div>
+      <dt class="text-xs uppercase tracking-wide text-gray-600">Skills target</dt>
+      <dd class="font-mono">{{ compatibility.skills_target }}</dd>
+    </div>
+  </dl>
+  <div>
+    <h3 class="text-sm font-semibold text-gray-700">Skills</h3>
+    <ul class="mt-2 flex flex-wrap gap-2">
+      {% for skill in inspection.skills %}
+      <li data-live-key="skill:{{ skill }}" class="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700">{{ skill }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  <div class="text-sm text-gray-700">
+    <p>Discovers skills: <strong>{{ 'Yes' if compatibility.discovers_skills else 'No' }}</strong></p>
+    <p>Activates selected skill: <strong>{{ 'Yes' if compatibility.activates_selected_skill else 'No' }}</strong></p>
+    <p>Cache path: <span class="font-mono break-all">{{ cache_status.path }}</span></p>
+  </div>
+  <div class="flex gap-3 text-sm">
+    <a href="{{ edit_library_href }}" class="text-indigo-600 hover:text-indigo-800">Open in Agent Library</a>
+    <a href="{{ edit_skills_href }}" class="text-indigo-600 hover:text-indigo-800">View skills in Agent Library</a>
+  </div>
+  {% endif %}
+{%- endmacro %}
+
+{% macro runtime_summary() -%}
+    <div class="space-y-2">
+      <h3 class="font-semibold text-gray-900">Pinned integration</h3>
+      <p>{{ integration_display_name }}</p>
+      <p class="font-mono text-xs text-gray-500">{{ integration_name }}</p>
+    </div>
+    <div class="space-y-2">
+      <h3 class="font-semibold text-gray-900">Team default</h3>
+      <p>Timeout: {{ team_timeout }}s</p>
+      <p>Permissions: <a href="/{{ team }}/agents/{{ agent }}/permissions" class="text-indigo-600 hover:text-indigo-800">Open Permissions</a></p>
+    </div>
+{%- endmacro %}
+
+{#- The fingerprint changes whenever the saved effective access does; the editor summary stays controller-owned. -#}
+{% macro permissions_saved() -%}
+<p data-live-key="permissions:workspace">Saved permissions: workspace-root write {{ 'granted' if permission_workspace_write else 'not granted' }}</p>
+<p data-live-key="permissions:effective">Saved effective access {{ permission_summary_fingerprint }}</p>
+{%- endmacro %}
+
+{% macro prompts_catalog() -%}
+  {% if prompt_issues %}
+  <div data-live-key="prompts:issues" class="rounded-lg border border-amber-200 bg-amber-50 p-4 space-y-3">
+    <p class="text-sm font-semibold text-amber-900">Prompt catalog unavailable</p>
+    {% for issue in prompt_issues %}
+    <div class="text-sm text-amber-900">
+      <div class="font-mono text-xs text-amber-800">{{ issue.field }}</div>
+      <div>{{ issue.message }}</div>
+      <div class="text-xs text-amber-700">{{ issue.hint }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="grid gap-4 lg:grid-cols-2">
+    <div class="rounded-lg border border-gray-200 bg-white p-4">
+      <h3 class="text-sm font-semibold text-gray-900">Shared from blueprint</h3>
+      <ul class="mt-3 space-y-2 text-sm">
+        {% for prompt in shared_prompts %}
+        <li data-live-key="shared-prompt:{{ prompt.name }}" class="rounded-md border border-gray-100 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
+          <div class="flex items-center justify-between gap-3">
+            <span class="font-mono text-xs text-gray-700 dark:text-gray-200">{{ prompt.name }}</span>
+            <a href="{{ prompt.library_href }}" class="text-xs text-indigo-600 hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-indigo-200">Open in Agent Library</a>
+          </div>
+          <p class="mt-1 text-xs text-gray-600 dark:text-gray-300">{{ prompt.description }}</p>
+        </li>
+        {% else %}
+        <li data-live-key="prompts:no-shared" class="text-gray-500">No shared prompts found.</li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    <div class="rounded-lg border border-gray-200 bg-white p-4">
+      <h3 class="text-sm font-semibold text-gray-900">Private to this instance</h3>
+      <ul class="mt-3 space-y-2 text-sm">
+        {% for prompt in private_prompts %}
+        <li data-live-key="private-prompt:{{ prompt.name }}" class="rounded-md border border-gray-100 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
+          <div class="font-mono text-xs text-gray-700 dark:text-gray-200">{{ prompt.name }}</div>
+          <p class="mt-1 text-xs text-gray-600 dark:text-gray-300">{{ prompt.description }}</p>
+        </li>
+        {% else %}
+        <li data-live-key="prompts:no-private" class="text-gray-500">No private prompts registered.</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+{%- endmacro %}
+
+{#- Each card's digest line is read-only status; its forms keep the digest they loaded, so a save after
+    an external edit still reaches the existing conflict path. -#}
+{% macro prompts_edit() -%}
+    <h3 class="text-sm font-semibold text-gray-900">Edit private prompts</h3>
+    {% for prompt in private_prompts %}
+    <div data-live-key="prompt:{{ prompt.name }}" class="rounded-lg border border-gray-200 p-3">
+      <div class="mb-2 flex items-center justify-between gap-3">
+        <div>
+          <p class="font-mono text-xs text-gray-700">{{ prompt.name }}</p>
+          <p class="text-xs text-gray-500">Digest: {{ prompt.digest }}</p>
+        </div>
+      </div>
+      <form method="post" action="/{{ team }}/agents/{{ agent }}/prompts/{{ prompt.name }}/save" class="space-y-3">
+        <input type="hidden" name="digest" value="{{ prompt.digest }}">
+        <label for="edit-prompt-source-{{ prompt.name }}" class="block text-sm font-medium text-gray-700">Prompt source for {{ prompt.name }}</label>
+        <textarea id="edit-prompt-source-{{ prompt.name }}" name="source" rows="9" class="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-xs">{{ prompt.source }}</textarea>
+        <div class="flex items-center justify-between gap-3">
+          <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-medium text-white hover:bg-indigo-700">Save source</button>
+        </div>
+      </form>
+      <form method="post" action="/{{ team }}/agents/{{ agent }}/prompts/{{ prompt.name }}/delete" class="mt-3 border-t border-gray-200 pt-3">
+        <input type="hidden" name="revision" value="{{ config_revision }}">
+        <input type="hidden" name="digest" value="{{ prompt.digest }}">
+        <button type="submit" class="rounded-lg bg-red-600 px-4 py-2 text-xs font-medium text-white hover:bg-red-700">Delete prompt</button>
+      </form>
+    </div>
+    {% else %}
+    <p data-live-key="prompts-edit:empty" class="text-sm text-gray-500">No private prompts to edit.</p>
+    {% endfor %}
+{%- endmacro %}
+
+{% macro routines_saved() -%}
+{% for row in routine_saved_status %}
+<p data-live-key="routine:{{ row.routine_id }}">Routine {{ row.routine_id }}: {{ 'enabled' if row.enabled else 'disabled' }}, {{ row.schedule }}, last fired {{ row.last_fired }}, next due {{ row.next_due }}</p>
+{% endfor %}
+{%- endmacro %}
+
+{% macro memory_status() -%}
+<p data-live-key="memory:default">Default memory: <strong>{{ memory_scope_label }}</strong></p>
+<p class="sr-only" data-live-key="memory:revision">Memory content revision {{ memory_snapshot.revision[:12] }}; files {{ memory_file_options | join(', ') }}</p>
+{%- endmacro %}
+
+{% macro activity_count_label() -%}
+{{ activity_count }} record{{ '' if activity_count == 1 else 's' }}
+{%- endmacro %}
+
+{% macro activity_entries() -%}
+  {% if activity_warnings %}
+  <div data-live-key="activity:warnings" class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100">
+    <ul class="space-y-1">
+      {% for warning in activity_warnings %}
+      <li>{{ warning }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if activity_groups %}
+    {% for group in activity_groups %}
+    <section data-live-key="activity-group:{{ group.date_label }}" class="space-y-3" aria-labelledby="activity-group-{{ loop.index }}">
+      <h3 id="activity-group-{{ loop.index }}" class="text-sm font-semibold text-gray-500 dark:text-gray-400">{{ group.date_label }}</h3>
+      <ol class="space-y-0" role="list">
+        {% for entry in group.entries %}
+        <li data-live-key="activity:{{ entry.identity }}" class="grid grid-cols-[3rem_1.75rem_minmax(0,1fr)] gap-x-3 pb-6 last:pb-0">
+          {% if entry.time_datetime %}
+          <time class="pt-1 text-xs font-mono text-gray-500 dark:text-gray-400" datetime="{{ entry.time_datetime }}">{{ entry.time_label }}</time>
+          {% else %}
+          <span class="pt-1 text-xs font-mono text-gray-500 dark:text-gray-400">{{ entry.time_label }}</span>
+          {% endif %}
+          <div class="relative flex justify-center pt-0.5">
+            <span class="flex h-7 w-7 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
+              <i data-lucide="{{ entry.icon }}" aria-hidden="true" class="h-3.5 w-3.5"></i>
+            </span>
+            {% if not loop.last %}
+            <span aria-hidden="true" class="absolute top-8 bottom-0 w-px bg-gray-200 dark:bg-gray-700"></span>
+            {% endif %}
+          </div>
+          <div class="min-w-0 space-y-1">
+            <div class="flex flex-wrap items-center gap-2">
+              <h4 class="min-w-0 text-sm font-semibold text-gray-900 dark:text-gray-100">{{ entry.title }}</h4>
+              {% if entry.status_label %}
+              <span class="inline-flex rounded px-2 py-0.5 text-xs font-medium {{ entry.status_classes }}">{{ entry.status_label }}</span>
+              {% endif %}
+            </div>
+            {% if entry.href %}
+              <p class="min-w-0 text-sm"><a href="{{ entry.href }}" class="break-words [overflow-wrap:anywhere] text-indigo-600 hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-indigo-200">{{ entry.subject }}</a></p>
+            {% endif %}
+            {% if entry.metadata %}
+            <p class="flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+              {% for value in entry.metadata %}
+              <span{% if loop.last %} class="font-mono"{% endif %}>{{ value }}</span>
+              {% endfor %}
+            </p>
+            {% endif %}
+            {% if entry.summary %}
+            <div class="max-w-4xl" data-activity-report>
+              <div id="{{ entry.identity }}-report" data-report-text data-live-local="style" class="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm text-gray-700 dark:text-gray-200">{{ entry.summary }}</div>
+              <button type="button" data-report-toggle data-live-local="hidden aria-expanded" hidden aria-expanded="false" aria-controls="{{ entry.identity }}-report" class="mt-2 text-xs text-indigo-600 hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-indigo-200">
+                Show more
+              </button>
+            </div>
+            {% endif %}
+            {% if entry.log_links %}
+            <div class="flex flex-wrap items-center gap-4 text-xs">
+              {% for link in entry.log_links %}
+              <a href="{{ link.href }}" class="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-indigo-200">
+                <i data-lucide="{{ link.icon }}" aria-hidden="true" class="h-3.5 w-3.5"></i>
+                <span>{{ link.label }}</span>
+              </a>
+              {% endfor %}
+            </div>
+            {% elif entry.no_logs_label %}
+            <p class="text-xs text-gray-500 dark:text-gray-400">{{ entry.no_logs_label }}</p>
+            {% endif %}
+          </div>
+        </li>
+        {% endfor %}
+      </ol>
+    </section>
+    {% endfor %}
+  {% else %}
+  <div data-live-key="activity:empty" class="rounded-lg border border-gray-200 bg-white p-8 text-center text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">No recent activity</div>
+  {% endif %}
+{%- endmacro %}
+
+{% macro logs_count_label() -%}
+{{ log_count }} file{{ '' if log_count == 1 else 's' }}
+{%- endmacro %}
+
+{% macro logs_list() -%}
+  {% if log_warnings %}
+  <div data-live-key="logs:warnings" class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100">
+    <ul class="space-y-1">
+      {% for warning in log_warnings %}
+      <li>{{ warning }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if logs %}
+  {% include "log_entries.html" %}
+  {% else %}
+  <div data-live-key="logs:empty" class="rounded-lg border border-gray-200 bg-white p-8 text-center text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">No logs found.</div>
+  {% endif %}
+{%- endmacro %}

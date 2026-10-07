@@ -124,6 +124,17 @@ def _read_memory_locked(
     )
 
 
+def preview_memory(resolved: ResolvedMemory) -> MemorySnapshot:
+    """What ``ensure_memory`` would return, without creating directories or taking the lock."""
+    _validate_resolved_memory(resolved)
+    files = _read_canonical_files(resolved.directory) or {"memory.md": b""}
+    return MemorySnapshot(
+        resolved=resolved,
+        files=files,
+        revision=memory_content_revision(files),
+    )
+
+
 def ensure_memory(resolved: ResolvedMemory) -> MemorySnapshot:
     _validate_resolved_memory(resolved)
     with _memory_lock(resolved, wait=True) as lease:
@@ -240,6 +251,10 @@ class MemoryStore:
     def ensure(self, resolved: ResolvedMemory) -> MemorySnapshot:
         _validate_resolved_memory(resolved, expected_root=self.root)
         return ensure_memory(resolved)
+
+    def preview(self, resolved: ResolvedMemory) -> MemorySnapshot:
+        _validate_resolved_memory(resolved, expected_root=self.root)
+        return preview_memory(resolved)
 
     def stage(self, resolved: ResolvedMemory, job_id: str) -> MemoryStage:
         _validate_resolved_memory(resolved, expected_root=self.root)

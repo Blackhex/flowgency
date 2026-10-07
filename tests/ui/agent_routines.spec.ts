@@ -523,3 +523,33 @@ test('beforeunload accept closes the page', async ({ page }) => {
   await closedPromise;
   expect(page.isClosed()).toBe(true);
 });
+
+test.describe('routines live refresh', () => {
+  test.beforeEach(async ({ request }) => {
+    expect((await request.post('/__ui/reset')).status()).toBe(204);
+  });
+
+  test.afterEach(async ({ request }) => {
+    expect((await request.post('/__ui/reset')).status()).toBe(204);
+  });
+
+  test('the editor draft survives a remote routine change and its own preview reports the conflict', async ({ page, request }) => {
+    await page.goto(pagePath);
+    const saved = page.locator('[data-live-region="agent-routines-saved"]');
+    await expect(saved).not.toContainText('weekly-sweep');
+    const idField = page.locator('[data-routine-row] [data-field="id"]').first();
+    await idField.fill('daily-review-draft');
+    await idField.evaluate((node) => { (node as unknown as { __kept: boolean }).__kept = true; });
+
+    expect((await request.post('/__ui/live/change', { data: { case: 'agent-routines' } })).status()).toBe(204);
+
+    await expect(saved).toContainText('weekly-sweep');
+    await expect(idField).toHaveValue('daily-review-draft');
+    expect(await idField.evaluate((node) => (node as unknown as { __kept?: boolean }).__kept)).toBe(true);
+
+    await idField.pressSequentially('2');
+    await expect(page.getByRole('button', { name: 'Reload page' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Save routines' })).toBeDisabled();
+    await expect(page.locator('[data-routine-row] [data-field="id"]').first()).toHaveValue('daily-review-draft2');
+  });
+});

@@ -650,12 +650,11 @@ def _agent_team_runtime(runtime: Path) -> None:
 
 
 def _agent_permissions(runtime: Path) -> None:
+    (runtime / "reference-material").mkdir(parents=True, exist_ok=True)
+
     def patch(raw: dict) -> None:
         _advisor_entry(raw)["permissions"]["rules"].append(
-            {
-                "path": (runtime / "workspaces" / "newsletter").as_posix(),
-                "tools": ["read", "search", "write"],
-            }
+            {"path": (runtime / "reference-material").as_posix(), "tools": ["read", "search"]}
         )
 
     _patch_runtime_config(runtime, patch)

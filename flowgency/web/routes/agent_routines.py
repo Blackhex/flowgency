@@ -16,7 +16,7 @@ from flowgency.memory import select_effective_memory
 from flowgency.prompts import PromptNotFoundError
 from flowgency.routines.editor import RoutineChoices, RoutinesRequest, find_agent, load_choices, prepare_routines, save_routines
 from flowgency.routines.forms import MemoryDraft, RecoveryDraft, RoutineDraft, RoutinesDraft, ScheduleDraft, build_form
-from flowgency.routines.presentation import RoutineSummary, saved_status, summarize
+from flowgency.routines.presentation import RoutineSummary, routine_status, saved_status, summarize
 from flowgency.web.dependencies import FlowgencyServices, get_services
 from flowgency.web.routes.agent_detail import _detail_context, _get_snapshot_instance
 
@@ -514,6 +514,7 @@ def render_routines_page(
             "routine_rows": _routine_rows(current.draft, choices),
             "routine_summary_rows": _summary_view(summary_rows, saved_rows, original_ids),
             "routine_conflict": conflict,
+            "routine_saved_status": routine_status(snapshot, team, snapshot.config.teams[team].agents[agent]),
         },
     )
 
