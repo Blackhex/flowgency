@@ -16,7 +16,6 @@ from flowgency.web.dependencies import FlowgencyServices, get_services
 from flowgency.web.live import (
     LiveBinding,
     LivePagePolicy,
-    live_registration,
     respond_live_or_html,
     shared_region_macros,
 )
@@ -45,23 +44,22 @@ def _team_context(request: Request, snapshot, team_id: str) -> dict:
     )
 
 
-def _roster_policy(team_id: str, context: dict) -> LivePagePolicy:
+ROSTER_REGION_MACROS = {
+    "roster-summary": "live_roster_summary",
+    "roster-rows": "live_roster_rows",
+    "roster-empty": "live_roster_empty",
+}
+
+
+def roster_policy(team_id: str, context: dict) -> LivePagePolicy:
     policy = LivePagePolicy(
         template_name="agents.html",
         binding=LiveBinding(page="agents", team=team_id),
-        structure="agents-shell:1",
-        region_macros={},
+        structure="agents:1",
+        region_macros=ROSTER_REGION_MACROS,
         snapshot_url=f"/{team_id}/agents?__live=1",
     )
     return replace(policy, region_macros=shared_region_macros(context, policy))
-
-
-def _roster_live_response(request: Request, services: FlowgencyServices, team_id: str):
-    snapshot = services.config_store.load()
-    if team_id not in snapshot.config.teams:
-        raise HTTPException(status_code=404, detail=f"Unknown team: {team_id}")
-    context = {**_team_context(request, snapshot, team_id), "active": "agents"}
-    return respond_live_or_html(request, _templates(request), context, _roster_policy(team_id, context))
 
 
 def _friendly_status(status: str) -> str:
@@ -290,9 +288,10 @@ def _available_blueprint_keys(services: FlowgencyServices) -> list[str]:
     return sorted(item.key for item in services.blueprint_library.list())
 
 
-def _render_roster(
+def build_roster_context(
     request: Request,
     services: FlowgencyServices,
+    snapshot,
     team_id: str,
     *,
     warning: str = "",
@@ -300,8 +299,11 @@ def _render_roster(
     creation_open: bool = False,
     creation_values: dict[str, str] | None = None,
     creation_issues: list[dict[str, str]] | None = None,
-):
-    snapshot = services.config_store.load()
+) -> dict[str, Any]:
+    """One context for the roster page, its POST error renders and its live snapshots.
+
+    ``roster_status`` carries the HTTP status the page derived (a warning may degrade it).
+    """
     if team_id not in snapshot.config.teams:
         raise HTTPException(status_code=404, detail=f"Unknown team: {team_id}")
     available_blueprints: list[str] = []
@@ -320,36 +322,58 @@ def _render_roster(
             warning = str(exc.detail)
         status_code = exc.status_code
         instances = _fallback_instance_rows(snapshot, team_id)
-    team_context = _team_context(request, snapshot, team_id)
-    return _templates(request).TemplateResponse(
+    return {
+        "request": request,
+        **_team_context(request, snapshot, team_id),
+        "active": "agents",
+        "instances": instances,
+        "config_revision": snapshot.revision,
+        "available_blueprints": available_blueprints,
+        "available_integrations": sorted(services.integrations.keys()),
+        "warning": warning,
+        "creation_open": creation_open,
+        "creation_values": creation_values or _creation_values(),
+        "creation_issues": creation_issues or [],
+        "memory_scope_options": _memory_scope_options(snapshot),
+        "memory_channel_options": _memory_channel_options(snapshot),
+        "roster_status": status_code,
+    }
+
+
+def _render_roster(
+    request: Request,
+    services: FlowgencyServices,
+    team_id: str,
+    *,
+    warning: str = "",
+    status_code: int = 200,
+    creation_open: bool = False,
+    creation_values: dict[str, str] | None = None,
+    creation_issues: list[dict[str, str]] | None = None,
+):
+    snapshot = services.config_store.load()
+    context = build_roster_context(
         request,
-        "agents.html",
-        {
-            "request": request,
-            **team_context,
-            "active": "agents",
-            "live_registration": live_registration(
-                _roster_policy(team_id, {**team_context, "active": "agents"})
-            ),
-            "instances": instances,
-            "config_revision": snapshot.revision,
-            "available_blueprints": available_blueprints,
-            "available_integrations": sorted(services.integrations.keys()),
-            "warning": warning,
-            "creation_open": creation_open,
-            "creation_values": creation_values or _creation_values(),
-            "creation_issues": creation_issues or [],
-            "memory_scope_options": _memory_scope_options(snapshot),
-            "memory_channel_options": _memory_channel_options(snapshot),
-        },
+        services,
+        snapshot,
+        team_id,
+        warning=warning,
         status_code=status_code,
+        creation_open=creation_open,
+        creation_values=creation_values,
+        creation_issues=creation_issues,
+    )
+    return respond_live_or_html(
+        request,
+        _templates(request),
+        context,
+        roster_policy(team_id, context),
+        status_code=context["roster_status"],
     )
 
 
 @router.get("/{team}/agents", response_class=HTMLResponse)
 async def agents_roster(request: Request, team: str, services: FlowgencyServices = Depends(get_services)):
-    if request.query_params.get("__live") == "1":
-        return _roster_live_response(request, services, team)
     if services.instances is None:
         if isinstance(services.startup_error, ValidationFailed):
             return _render_roster(

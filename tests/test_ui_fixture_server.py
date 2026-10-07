@@ -399,3 +399,56 @@ def test_live_change_inbox_membership_queue_activity_and_clock_cases_reset_clean
             assert _inbox_regions(client)["activity"] == before["activity"]
     finally:
         server._safe_remove_runtime(runtime)
+
+def test_live_change_cases_all_have_a_dispatcher():
+    dispatched = {
+        "navigation-membership",
+        "navigation-workflow-count",
+        *server._INBOX_LIVE_CHANGES,
+        *server._AGENT_LIVE_CHANGES,
+    }
+    assert dispatched == set(server.LIVE_CHANGE_CASES)
+
+
+def _roster_rows(client) -> str:
+    body = client.get("/newsletter/agents?__live=1").json()
+    return next(region["html"] for region in body["regions"] if region["key"] == "roster-rows")
+
+
+def test_live_change_agent_cases_update_the_roster_and_reset_restores_every_source(monkeypatch):
+    import flowgency.app as app_mod
+
+    runtime, config_path = server._prepare_runtime()
+    try:
+        monkeypatch.setenv("FLOWGENCY_CONFIG", str(config_path))
+        monkeypatch.setenv("FLOWGENCY_UI_RUNTIME", str(runtime))
+        monkeypatch.setenv("FLOWGENCY_FIXED_NOW", server.FIXED_NOW)
+        monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
+        server._install_ui_test_runtime()
+        app_mod.refresh_services()
+
+        with TestClient(app_mod.app) as client:
+            path = server.LIVE_CHANGE_PATH
+            before = _roster_rows(client)
+            assert server.ADVISOR_IDENTITY_TITLE not in before
+            assert "job:agent-live-running" not in before
+
+            assert client.post(path, json={"case": "agent-source-and-status"}).status_code == 204
+            changed = _roster_rows(client)
+            assert server.ADVISOR_IDENTITY_TITLE in changed
+            assert 'data-live-key="job:agent-live-running"' in changed
+            prompt_file = runtime / "prompts" / "newsletter" / "advisor" / "local-triage.prompt.md"
+            assert server.ADVISOR_EDITED_PROMPT_BODY.strip() in prompt_file.read_text(encoding="utf-8")
+            assert "edited externally" in (runtime / "agent-library" / "advisor" / "AGENTS.md").read_text(encoding="utf-8")
+
+            for case in ("agent-routines", "agent-log-membership", "agent-memory-revision", "agent-report-history",
+                         "agent-team-runtime", "agent-permissions"):
+                assert client.post(path, json={"case": case}).status_code == 204, case
+
+            assert client.post(server.UI_RESET_PATH).status_code == 204
+            assert _roster_rows(client) == before
+            assert prompt_file.read_bytes() == server._local_triage_payload()
+            assert "edited externally" not in (runtime / "agent-library" / "advisor" / "AGENTS.md").read_text(encoding="utf-8")
+            assert not (runtime / "teams" / "newsletter" / "logs" / "2026-07-16" / "advisor-live-refresh.out").exists()
+    finally:
+        server._safe_remove_runtime(runtime)

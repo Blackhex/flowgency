@@ -20,6 +20,12 @@ from flowgency.jobs.store import write_job
 from tests._team_helpers import apply_team_paths, create_team_environment
 from flowgency.configuration import ConfigStore
 from flowgency import app as app_mod
+from tests._live_helpers import (
+    assert_snapshot_matches_page,
+    filesystem_tree,
+    live_regions,
+    registration,
+)
 
 
 def _write_yaml(path: Path, raw: dict) -> Path:
@@ -208,10 +214,8 @@ def test_agents_page_is_instance_roster(monkeypatch, tmp_path, raw_config):
     assert '<dialog id="add-agent-dialog"' in response.text
     assert '<dialog id="add-agent-dialog" open' not in response.text
     assert 'value="advisor"' in response.text
-    assert (
-        "return window.confirm('Remove Advisor from Newsletter?')"
-        in response.text
-    )
+    assert 'data-confirm="Remove Advisor from Newsletter?"' in response.text
+    assert "window.confirm('Remove" not in response.text
 
 
 def test_roster_reopens_creation_dialog_with_values_and_issues_on_error(
@@ -712,3 +716,98 @@ def test_task14_route_ownership_is_unique_and_canonical(monkeypatch, tmp_path, r
 
     assert client.get("/admin/dispatch").status_code == 200
     assert client.post("/newsletter/agents/advisor/run", data={"routine_id": "daily-review"}).status_code in {202, 404, 400}
+
+# ── Live roster snapshots ────────────────────────────────────────────────────
+
+
+def _live_roster(client, team="newsletter"):
+    response = client.get(f"/{team}/agents?__live=1")
+    assert response.status_code == 200, response.text
+    return response
+
+
+def test_live_roster_snapshot_regions_match_the_initial_page(monkeypatch, tmp_path, raw_config):
+    client, _, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+
+    response = _live_roster(client)
+    body = response.json()
+    page = client.get("/newsletter/agents").text
+
+    assert body["binding"] == {"page": "agents", "team": "newsletter", "entity": None, "tab": None, "query": {}}
+    assert body["structure"] == "agents:1"
+    keys = list(live_regions(response))
+    assert keys[-3:] == ["roster-summary", "roster-rows", "roster-empty"]
+    assert_snapshot_matches_page(page, response)
+    registration_data = registration(page)
+    assert registration_data["url"] == "/newsletter/agents?__live=1"
+    assert registration_data["structure"] == "agents:1"
+
+
+def test_live_roster_rows_are_keyed_by_instance_identity_without_inline_handlers(
+    monkeypatch, tmp_path, raw_config
+):
+    client, _, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+
+    regions = live_regions(_live_roster(client))
+
+    assert 'data-live-key="agent:advisor"' in regions["roster-rows"]
+    assert 'data-confirm="Remove Advisor from Newsletter?"' in regions["roster-rows"]
+    assert "onsubmit" not in regions["roster-rows"].lower()
+    assert "onclick" not in regions["roster-rows"].lower()
+    assert "1 instance" in regions["roster-summary"]
+    assert regions["roster-empty"].strip() == ""
+
+
+def test_live_roster_snapshot_follows_active_job_and_identity_changes(monkeypatch, tmp_path, raw_config):
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    before = live_regions(_live_roster(client))["roster-rows"]
+    assert "/newsletter/jobs/" not in before
+
+    _write_roster_job(
+        tmp_path, team_root, job_id="job-live", status="running", created_at="2026-07-16T00:00:00+00:00"
+    )
+    ConfigStore(config_path).patch(
+        _revision(config_path),
+        lambda raw: raw["teams"]["newsletter"]["agents"][0]["identity"].update(title="Renamed Librarian"),
+    )
+    app_mod.refresh_services()
+
+    after = live_regions(_live_roster(client))["roster-rows"]
+    assert 'data-live-key="job:job-live"' in after
+    assert "Running" in after
+    assert "Renamed Librarian" in after
+
+
+def test_live_roster_snapshot_is_conditional_and_unknown_team_is_not_found(monkeypatch, tmp_path, raw_config):
+    client, _, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+    first = _live_roster(client)
+
+    assert first.headers["cache-control"] == "private, no-cache"
+    assert client.get("/newsletter/agents?__live=1", headers={"If-None-Match": first.headers["etag"]}).status_code == 304
+    assert client.get("/missing/agents?__live=1").status_code == 404
+
+
+def test_live_roster_snapshot_does_not_create_runtime_state(monkeypatch, tmp_path, raw_config):
+    client, _, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+    client.get("/newsletter/agents")
+    before = filesystem_tree(tmp_path)
+
+    _live_roster(client)
+
+    assert filesystem_tree(tmp_path) == before
+
+
+def test_live_roster_post_error_page_embeds_the_canonical_snapshot_url(monkeypatch, tmp_path, raw_config):
+    client, _, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+
+    response = client.post(
+        "/newsletter/agents/create",
+        data={"revision": "stale", "name": "reviewer", "blueprint": "advisor", "integration": "copilot"},
+    )
+
+    assert response.status_code == 409
+    data = registration(response.text)
+    assert data["url"] == "/newsletter/agents?__live=1"
+    assert data["binding"]["page"] == "agents"
+    assert '<dialog id="add-agent-dialog" open' in response.text
+    assert 'value="reviewer"' in response.text

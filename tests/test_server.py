@@ -2642,6 +2642,7 @@ _NAVIGATION_REGIONS = [
     "navigation-workflows",
     "navigation-workspace",
 ]
+_ROSTER_REGIONS = ["roster-summary", "roster-rows", "roster-empty"]
 
 
 def _live_regions(response) -> dict[str, str]:
@@ -2701,8 +2702,8 @@ def test_sidebar_live_snapshot_serves_shared_navigation_for_the_agents_roster(wo
     assert body["binding"] == {
         "page": "agents", "team": "newsletter", "entity": None, "tab": None, "query": {}
     }
-    assert body["structure"] == "agents-shell:1"
-    assert list(_live_regions(response)) == _NAVIGATION_REGIONS
+    assert body["structure"] == "agents:1"
+    assert list(_live_regions(response)) == [*_NAVIGATION_REGIONS, *_ROSTER_REGIONS]
     assert response.headers["cache-control"] == "private, no-cache"
 
 
@@ -2712,7 +2713,7 @@ def test_sidebar_live_snapshot_matches_the_initial_html_regions(workflow_web_env
 
     initial = {key: _squash(html) for key, html in _page_regions(page.text).items()}
     live = {key: _squash(html) for key, html in _live_regions(snapshot).items()}
-    assert set(initial) == set(_NAVIGATION_REGIONS)
+    assert set(initial) == {*_NAVIGATION_REGIONS, *_ROSTER_REGIONS}
     assert initial == live
 
 
@@ -2723,7 +2724,7 @@ def test_sidebar_roster_page_registers_the_live_page_with_its_status_shell(workf
     assert match is not None
     registration = json.loads(match.group(1))
     assert registration["url"] == _ROSTER_LIVE_URL
-    assert registration["structure"] == "agents-shell:1"
+    assert registration["structure"] == "agents:1"
     assert registration["binding"]["page"] == "agents"
     assert "secret" not in match.group(1).lower()
     assert '<script src="/static/live-refresh.js"></script>' in page

@@ -73,6 +73,16 @@ LIVE_CHANGE_CASES = frozenset(
         "inbox-ticket-activity",
         "inbox-queue-grows",
         "inbox-clock-advances",
+        "agent-source-and-status",
+        "agent-identity",
+        "agent-active-job",
+        "agent-routines",
+        "agent-catalog-digest",
+        "agent-log-membership",
+        "agent-memory-revision",
+        "agent-report-history",
+        "agent-team-runtime",
+        "agent-permissions",
     }
 )
 INBOX_CLOCK_ADVANCE = timedelta(minutes=30)
@@ -398,6 +408,8 @@ def _apply_live_change(runtime: Path, case: str) -> None:
         provider.create(ticket, _ticket_operation(ticket.id))
     elif case in _INBOX_LIVE_CHANGES:
         _INBOX_LIVE_CHANGES[case](runtime)
+    elif case in _AGENT_LIVE_CHANGES:
+        _AGENT_LIVE_CHANGES[case](runtime)
     else:
         raise ValueError(f"Unknown live change case: {case}")
 
@@ -527,6 +539,145 @@ _INBOX_LIVE_CHANGES = {
     "inbox-ticket-activity": _inbox_ticket_activity,
     "inbox-queue-grows": _inbox_queue_grows,
     "inbox-clock-advances": _inbox_clock_advances,
+}
+
+ADVISOR_IDENTITY_TITLE = "Principal Strategist"
+ADVISOR_EDITED_PROMPT_BODY = "Audit release blockers; an external editor changed this source.\n"
+
+
+def _advisor_entry(raw: dict) -> dict:
+    return next(agent for agent in raw["teams"]["newsletter"]["agents"] if agent["name"] == "advisor")
+
+
+def _agent_identity(runtime: Path) -> None:
+    def patch(raw: dict) -> None:
+        _advisor_entry(raw)["identity"]["title"] = ADVISOR_IDENTITY_TITLE
+
+    _patch_runtime_config(runtime, patch)
+
+
+def _agent_active_job(runtime: Path) -> None:
+    path = JobStore(runtime / "memory-store").path("newsletter", "agent-live-running")
+    write_job(path, JobRecord.from_spec(_job_spec(runtime, runtime / "config.yaml", "agent-live-running")))
+    transition_job(path, "queued", "running", started_at="2026-07-16T11:59:00+00:00")
+
+
+def _agent_routines(runtime: Path) -> None:
+    def patch(raw: dict) -> None:
+        _advisor_entry(raw)["routines"].append(
+            {
+                "id": "weekly-sweep",
+                "prompt": {"scope": "blueprint", "name": "release-window"},
+                "schedule": {"every": "7d"},
+                "memory": {"scope": "agent"},
+            }
+        )
+
+    _patch_runtime_config(runtime, patch)
+
+
+def _agent_catalog_digest(runtime: Path) -> None:
+    """Change the private prompt source and the blueprint source behind advisor's digests."""
+    store = PromptStore(runtime / "prompts")
+    current = store.read("newsletter", "advisor", "local-triage")
+    store.update(
+        "newsletter",
+        "advisor",
+        "local-triage",
+        expected_digest=current.document.digest,
+        payload=_prompt_bytes(
+            "local-triage",
+            "Private local triage.",
+            ADVISOR_EDITED_PROMPT_BODY,
+            argument_hint="Escalate blockers if the draft is stale.",
+        ),
+    )
+    _write(
+        runtime / "agent-library" / "advisor" / "AGENTS.md",
+        "# Advisor\n\nDeterministic release-gate instructions, edited externally.\n",
+    )
+
+
+def _agent_log_membership(runtime: Path) -> None:
+    _write_log(
+        runtime / "teams" / "newsletter" / "logs" / "2026-07-16" / "advisor-live-refresh.out",
+        "live refresh log\n",
+        mtime="2026-07-16T11:45:00+00:00",
+    )
+
+
+def _agent_memory_revision(runtime: Path) -> None:
+    config = ConfigStore(runtime / "config.yaml").load().config
+    store = MemoryStore(runtime / "memory-store")
+    resolved = resolve_memory_selector(
+        MemorySelector(scope="channel", channel="brand-strategy"),
+        job_id="ui-preview",
+        team_key="newsletter",
+        agent_name="advisor",
+        routine_id=None,
+        channels=config.memory.channels,
+        store_root=store.root,
+    )
+    current = store.read(resolved)
+    store.try_update(
+        resolved,
+        current.revision,
+        lambda snapshot: {**snapshot.files, "memory.md": b"# Brand Strategy\n\nRevised by another editor.\n"},
+    )
+
+
+def _agent_report_history(runtime: Path) -> None:
+    config_path = runtime / "config.yaml"
+    record = JobRecord.from_spec(
+        dataclasses.replace(
+            _job_spec(runtime, config_path, "advisor-live-report"),
+            created_at="2026-07-16T11:40:00+00:00",
+        )
+    )
+    record.status = "complete"
+    record.started_at = "2026-07-16T11:40:00+00:00"
+    record.completed_at = "2026-07-16T11:50:00+00:00"
+    record.duration_seconds = 600
+    record.execution_summary = "Published the live refresh handoff report."
+    write_job(JobStore(runtime / "memory-store").path("newsletter", "advisor-live-report"), record)
+
+
+def _agent_team_runtime(runtime: Path) -> None:
+    def patch(raw: dict) -> None:
+        raw["teams"]["newsletter"]["runtime"]["timeout"] = 3000
+
+    _patch_runtime_config(runtime, patch)
+
+
+def _agent_permissions(runtime: Path) -> None:
+    def patch(raw: dict) -> None:
+        _advisor_entry(raw)["permissions"]["rules"].append(
+            {
+                "path": (runtime / "workspaces" / "newsletter").as_posix(),
+                "tools": ["read", "search", "write"],
+            }
+        )
+
+    _patch_runtime_config(runtime, patch)
+
+
+def _agent_source_and_status(runtime: Path) -> None:
+    _agent_identity(runtime)
+    _agent_catalog_digest(runtime)
+    _agent_active_job(runtime)
+
+
+_AGENT_LIVE_CHANGES = {
+    "agent-source-and-status": _agent_source_and_status,
+    "agent-identity": _agent_identity,
+    "agent-active-job": _agent_active_job,
+    "agent-routines": _agent_routines,
+    "agent-catalog-digest": _agent_catalog_digest,
+    "agent-log-membership": _agent_log_membership,
+    "agent-memory-revision": _agent_memory_revision,
+    "agent-report-history": _agent_report_history,
+    "agent-team-runtime": _agent_team_runtime,
+    "agent-permissions": _agent_permissions,
 }
 
 
@@ -1768,17 +1919,28 @@ def _seed_git_evidence_fixture(runtime: Path, config: dict) -> None:
 
 
 
-def _seed_private_prompts(runtime: Path) -> None:
-    PromptStore(runtime / "prompts").create(
-        "newsletter",
-        "advisor",
+def _local_triage_payload() -> bytes:
+    return _prompt_bytes(
         "local-triage",
-        _prompt_bytes(
-            "local-triage",
-            "Private local triage.",
-            "Audit the current release blockers and call out anything that needs a human decision.\n",
-            argument_hint="Escalate blockers if the draft is stale.",
-        ),
+        "Private local triage.",
+        "Audit the current release blockers and call out anything that needs a human decision.\n",
+        argument_hint="Escalate blockers if the draft is stale.",
+    )
+
+
+def _seed_private_prompts(runtime: Path) -> None:
+    PromptStore(runtime / "prompts").create("newsletter", "advisor", "local-triage", _local_triage_payload())
+
+
+def _restore_external_sources(runtime: Path) -> None:
+    """Undo live-change edits to sources that live outside the config and job stores."""
+    atomic_write_bytes(
+        PromptStore(runtime / "prompts").path("newsletter", "advisor", "local-triage"),
+        _local_triage_payload(),
+    )
+    _write(
+        runtime / "agent-library" / "advisor" / "AGENTS.md",
+        "# Advisor\n\nDeterministic release-gate instructions.\n",
     )
 
 
@@ -1874,6 +2036,7 @@ def _reset_runtime_state(runtime: Path, *, fixture: str = "default") -> None:
     _seed_memory(runtime, config)
     _seed_ticket_workflows(runtime, config)
     _seed_jobs(runtime, runtime / "config.yaml")
+    _restore_external_sources(runtime)
     if fixture == ACTIVITY_LOGS_FIXTURE:
         _apply_activity_logs_fixture(runtime, runtime / "config.yaml")
     elif fixture == GIT_EVIDENCE_FIXTURE:

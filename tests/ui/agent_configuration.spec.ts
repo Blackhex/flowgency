@@ -387,3 +387,40 @@ test('mobile navigation preserves theme and keyboard focus', async ({ page }, te
   await expect(page).toHaveScreenshot('mobile-navigation.png', { fullPage: true });
   await assertNoConsoleErrors(page);
 });
+
+async function changeLiveFixture(request: APIRequestContext, name: string): Promise<void> {
+  expect((await request.post('/__ui/live/change', { data: { case: name } })).status()).toBe(204);
+}
+
+test.describe('agent roster live refresh', () => {
+  test('refreshes identity and active jobs in place without touching held controls or loaded revisions', async ({ page, request }) => {
+    await page.goto('/newsletter/agents');
+    const row = page.locator('[data-live-key="agent:advisor"]');
+    const move = row.locator('form[action$="/advisor/move"]');
+    const loadedRevision = await move.locator('input[name="revision"]').inputValue();
+    const target = move.locator('input[name="target_team"]');
+    await target.fill('research');
+    const memoryScope = row.locator('select[name="memory_scope"]');
+    await memoryScope.selectOption('team');
+    await memoryScope.focus();
+    const optionCount = await memoryScope.locator('option').count();
+    await row.evaluate((node) => { (node as unknown as { __kept: boolean }).__kept = true; });
+    await memoryScope.evaluate((node) => { (node as unknown as { __kept: boolean }).__kept = true; });
+
+    await changeLiveFixture(request, 'agent-source-and-status');
+
+    await expect(row).toContainText('Principal Strategist');
+    await expect(row.locator('[data-live-key="job:agent-live-running"]')).toHaveText('Running');
+    await expect(row.locator('[data-active-job-count]')).toHaveText('2');
+    await expect(target).toHaveValue('research');
+    await expect(memoryScope).toHaveValue('team');
+    await expect(memoryScope).toBeFocused();
+    expect(await memoryScope.locator('option').count()).toBe(optionCount);
+    expect(await memoryScope.evaluate((node) => (node as unknown as { __kept?: boolean }).__kept)).toBe(true);
+    expect(await row.evaluate((node) => (node as unknown as { __kept?: boolean }).__kept)).toBe(true);
+    await expect(move.locator('input[name="revision"]')).toHaveValue(loadedRevision);
+
+    await move.getByRole('button', { name: 'Move' }).click();
+    await expect(page.getByText('config.yaml changed; reload before previewing move')).toBeVisible();
+  });
+});

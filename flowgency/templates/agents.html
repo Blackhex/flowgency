@@ -1,82 +1,16 @@
 {% extends "base.html" %}
 {% set active = "agents" %}
 
-{% block title %}Agents - {{ team_name }}{% endblock %}
+{#- Live regions. The initial page and every live snapshot render these same macros from the
+    same context. Roster rows are keyed by instance identity; each row's forms are controller-owned
+    (never morphed), so loaded revisions and drafts survive a refresh. -#}
 
-{% block content %}
-<div class="flex items-baseline justify-between mb-6 gap-4 flex-wrap">
-  <div>
-    <h1 class="text-2xl font-bold text-gray-900">Instances assigned to {{ team_name }}</h1>
-    <p class="text-sm text-gray-600 mt-1">This roster is sourced from config records only.</p>
-  </div>
-  <div class="flex items-center gap-3 flex-wrap">
-    <span class="text-sm text-gray-500">{{ instances|length }} instance{{ 's' if instances|length != 1 else '' }}</span>
-    <button type="button" data-action="open-add-agent" class="inline-flex items-center px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors">Add agent</button>
-  </div>
-</div>
+{% macro live_roster_summary() -%}
+{{ instances|length }} instance{{ 's' if instances|length != 1 else '' }}
+{%- endmacro %}
 
-{% if warning %}
-<div class="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">{{ warning }}</div>
-{% endif %}
-
-<dialog id="add-agent-dialog" {% if creation_open %}open {% endif %}class="w-full max-w-3xl rounded-2xl border border-gray-200 bg-white p-0 shadow-2xl backdrop:bg-slate-900/60 dark:border-gray-700 dark:bg-slate-900">
-  <div class="p-6 sm:p-7">
-    <div class="flex items-start justify-between gap-4 mb-5">
-      <div>
-        <h2 class="text-lg font-semibold text-gray-900">Add agent</h2>
-        <p class="text-sm text-gray-600 mt-1">Create a new configured instance for {{ team_name }}.</p>
-      </div>
-      <button type="button" data-action="close-add-agent" class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors" aria-label="Close add agent dialog">&times;</button>
-    </div>
-
-    {% if creation_issues %}
-    <div class="mb-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 dark:bg-red-900/30 dark:border-red-800 dark:text-red-100">
-      {% for issue in creation_issues %}
-      <p>{{ issue.message }}</p>
-      {% if issue.hint %}
-      <p class="mt-1 text-xs opacity-80">{{ issue.hint }}</p>
-      {% endif %}
-      {% endfor %}
-    </div>
-    {% endif %}
-
-    <form method="post" action="/{{ team }}/agents/create" class="grid gap-4 md:grid-cols-4">
-      <input type="hidden" name="revision" value="{{ config_revision }}">
-      <label class="block md:col-span-2">
-        <span class="text-xs font-semibold uppercase tracking-wide text-gray-500">Instance name</span>
-        <input type="text" name="name" value="{{ creation_values.name }}" placeholder="instance name" class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono">
-      </label>
-      <label class="block md:col-span-1">
-        <span class="text-xs font-semibold uppercase tracking-wide text-gray-500">Blueprint</span>
-        <select name="blueprint" aria-label="Blueprint" class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white font-mono">
-        {% for blueprint in available_blueprints %}
-        <option value="{{ blueprint }}" {% if creation_values.blueprint == blueprint %}selected{% endif %}>{{ blueprint }}</option>
-        {% endfor %}
-        </select>
-      </label>
-      <label class="block md:col-span-1">
-        <span class="text-xs font-semibold uppercase tracking-wide text-gray-500">Integration</span>
-        <select name="integration" aria-label="Integration" class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
-        {% for integration in available_integrations %}
-        <option value="{{ integration }}" {% if creation_values.integration == integration %}selected{% endif %}>{{ integration }}</option>
-        {% endfor %}
-        </select>
-      </label>
-      <label class="block md:col-span-4">
-        <span class="text-xs font-semibold uppercase tracking-wide text-gray-500">Display name</span>
-        <input type="text" name="display_name" value="{{ creation_values.display_name }}" placeholder="Display name" class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
-      </label>
-      <div class="md:col-span-4 flex justify-end gap-3 pt-2">
-        <button type="button" data-action="close-add-agent" class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
-        <button type="submit" class="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors">Add agent</button>
-      </div>
-    </form>
-  </div>
-</dialog>
-
-<div class="space-y-4 mb-8">
-  {% for instance in instances %}
-  <div class="bg-white rounded-xl border border-gray-200 p-5">
+{% macro roster_row(instance) -%}
+  <div data-live-key="agent:{{ instance.name }}" data-roster-row class="bg-white rounded-xl border border-gray-200 p-5">
     <div class="flex items-start justify-between gap-4 flex-wrap">
       <div class="min-w-0">
         <div class="flex items-center gap-3 flex-wrap">
@@ -115,7 +49,7 @@
           </label>
           <button type="submit" class="px-3 py-2 text-sm font-medium text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors">Move</button>
         </form>
-        <form method="post" action="{{ instance.remove_href }}" onsubmit="return window.confirm('Remove {{ instance.display_name }} from {{ team_name }}?')">
+        <form method="post" action="{{ instance.remove_href }}" data-confirm="Remove {{ instance.display_name }} from {{ team_name }}?">
           <input type="hidden" name="revision" value="{{ config_revision }}">
           <input type="hidden" name="confirm" value="true">
           <button type="submit" class="px-3 py-2 text-sm font-medium text-red-700 bg-red-50 rounded-lg hover:bg-red-100 transition-colors dark:bg-red-900/40 dark:text-red-100 dark:hover:bg-red-900/60">Remove</button>
@@ -251,7 +185,7 @@
           </div>
           <div class="flex gap-2 flex-wrap" data-active-jobs-list>
             {% for job in instance.active_jobs %}
-            <a href="{{ job.href }}" title="{{ job.title }}" class="inline-flex min-w-[8.75rem] justify-center items-center px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap {{ job.classes }}">{{ job.status }}</a>
+            <a href="{{ job.href }}" data-live-key="job:{{ job.job_id }}" title="{{ job.title }}" class="inline-flex min-w-[8.75rem] justify-center items-center px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap {{ job.classes }}">{{ job.status }}</a>
             {% endfor %}
           </div>
         </div>
@@ -266,12 +200,96 @@
       </div>
     </div>
   </div>
-  {% endfor %}
+{%- endmacro %}
+
+{% macro live_roster_rows() -%}
+{% for instance in instances %}
+{{ roster_row(instance) }}
+{% endfor %}
+{%- endmacro %}
+
+{% macro live_roster_empty() -%}
+{% if not instances %}
+<div class="bg-white rounded-lg border border-gray-200 p-8 text-center text-gray-500 mb-8" data-live-key="roster:empty">No instances configured yet.</div>
+{% endif %}
+{%- endmacro %}
+
+{% block title %}Agents - {{ team_name }}{% endblock %}
+
+{% block content %}
+<div class="flex items-baseline justify-between mb-6 gap-4 flex-wrap">
+  <div>
+    <h1 class="text-2xl font-bold text-gray-900">Instances assigned to {{ team_name }}</h1>
+    <p class="text-sm text-gray-600 mt-1">This roster is sourced from config records only.</p>
+  </div>
+  <div class="flex items-center gap-3 flex-wrap">
+    <span data-live-region="roster-summary" class="text-sm text-gray-500">{{ live_roster_summary() }}</span>
+    <button type="button" data-action="open-add-agent" class="inline-flex items-center px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors">Add agent</button>
+  </div>
 </div>
 
-{% if not instances %}
-<div class="bg-white rounded-lg border border-gray-200 p-8 text-center text-gray-500 mb-8">No instances configured yet.</div>
+{% if warning %}
+<div class="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">{{ warning }}</div>
 {% endif %}
+
+<dialog id="add-agent-dialog" {% if creation_open %}open {% endif %}class="w-full max-w-3xl rounded-2xl border border-gray-200 bg-white p-0 shadow-2xl backdrop:bg-slate-900/60 dark:border-gray-700 dark:bg-slate-900">
+  <div class="p-6 sm:p-7">
+    <div class="flex items-start justify-between gap-4 mb-5">
+      <div>
+        <h2 class="text-lg font-semibold text-gray-900">Add agent</h2>
+        <p class="text-sm text-gray-600 mt-1">Create a new configured instance for {{ team_name }}.</p>
+      </div>
+      <button type="button" data-action="close-add-agent" class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors" aria-label="Close add agent dialog">&times;</button>
+    </div>
+
+    {% if creation_issues %}
+    <div class="mb-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 dark:bg-red-900/30 dark:border-red-800 dark:text-red-100">
+      {% for issue in creation_issues %}
+      <p>{{ issue.message }}</p>
+      {% if issue.hint %}
+      <p class="mt-1 text-xs opacity-80">{{ issue.hint }}</p>
+      {% endif %}
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <form method="post" action="/{{ team }}/agents/create" class="grid gap-4 md:grid-cols-4">
+      <input type="hidden" name="revision" value="{{ config_revision }}">
+      <label class="block md:col-span-2">
+        <span class="text-xs font-semibold uppercase tracking-wide text-gray-500">Instance name</span>
+        <input type="text" name="name" value="{{ creation_values.name }}" placeholder="instance name" class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono">
+      </label>
+      <label class="block md:col-span-1">
+        <span class="text-xs font-semibold uppercase tracking-wide text-gray-500">Blueprint</span>
+        <select name="blueprint" aria-label="Blueprint" class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white font-mono">
+        {% for blueprint in available_blueprints %}
+        <option value="{{ blueprint }}" {% if creation_values.blueprint == blueprint %}selected{% endif %}>{{ blueprint }}</option>
+        {% endfor %}
+        </select>
+      </label>
+      <label class="block md:col-span-1">
+        <span class="text-xs font-semibold uppercase tracking-wide text-gray-500">Integration</span>
+        <select name="integration" aria-label="Integration" class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
+        {% for integration in available_integrations %}
+        <option value="{{ integration }}" {% if creation_values.integration == integration %}selected{% endif %}>{{ integration }}</option>
+        {% endfor %}
+        </select>
+      </label>
+      <label class="block md:col-span-4">
+        <span class="text-xs font-semibold uppercase tracking-wide text-gray-500">Display name</span>
+        <input type="text" name="display_name" value="{{ creation_values.display_name }}" placeholder="Display name" class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+      </label>
+      <div class="md:col-span-4 flex justify-end gap-3 pt-2">
+        <button type="button" data-action="close-add-agent" class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
+        <button type="submit" class="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors">Add agent</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<div data-live-region="roster-rows" class="space-y-4 mb-8">{{ live_roster_rows() }}</div>
+
+<div data-live-region="roster-empty">{{ live_roster_empty() }}</div>
 
 <script>
   (function () {
@@ -349,7 +367,7 @@
     }
 
     function appendQueuedBadge(form, jobId) {
-      const card = form.closest('.bg-white');
+      const card = form.closest('[data-roster-row]');
       const summary = card?.querySelector('[data-active-jobs-summary]');
       const list = card?.querySelector('[data-active-jobs-list]');
       const countNode = card?.querySelector('[data-active-job-count]');
@@ -362,132 +380,185 @@
 
       const badge = document.createElement('a');
       badge.href = `/${encodeURIComponent('{{ team }}')}/jobs/${encodeURIComponent(jobId)}`;
+      badge.setAttribute('data-live-key', `job:${jobId}`);
       badge.title = 'Queued job awaiting execution';
       badge.className = 'inline-flex min-w-[8.75rem] justify-center items-center px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap bg-slate-100 text-slate-700 border border-slate-200 dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700';
       badge.textContent = 'Queued';
       list.prepend(badge);
     }
 
-    document.querySelectorAll('[data-launch-form]').forEach(function (form) {
-      const modeInputs = Array.from(form.querySelectorAll('[data-mode-toggle]'));
-      const pills = {
-        saved: form.querySelector('[data-mode-pill="saved"]'),
-        'one-off': form.querySelector('[data-mode-pill="one-off"]'),
+    function launchParts(form) {
+      return {
+        modeInputs: Array.from(form.querySelectorAll('[data-mode-toggle]')),
+        pills: {
+          saved: form.querySelector('[data-mode-pill="saved"]'),
+          'one-off': form.querySelector('[data-mode-pill="one-off"]'),
+        },
+        savedPanel: form.querySelector('[data-saved-panel]'),
+        oneOffPanel: form.querySelector('[data-one-off-panel]'),
+        savedButton: form.querySelector('[data-submit-saved]'),
+        oneOffButton: form.querySelector('[data-submit-one-off]'),
+        promptSelect: form.querySelector('[data-prompt-select]'),
+        promptScope: form.querySelector('[data-prompt-scope]'),
+        promptName: form.querySelector('[data-prompt-name]'),
+        taskInput: form.querySelector('[data-task-input]'),
+        description: form.querySelector('[data-prompt-description]'),
+        hint: form.querySelector('[data-prompt-hint]'),
+        memoryScope: form.querySelector('[data-memory-scope]'),
+        memoryChannelRow: form.querySelector('[data-memory-channel-row]'),
+        errorBox: form.querySelector('[data-launch-error]'),
+        status: form.querySelector('[data-launch-status]'),
       };
-      const savedPanel = form.querySelector('[data-saved-panel]');
-      const oneOffPanel = form.querySelector('[data-one-off-panel]');
-      const savedButton = form.querySelector('[data-submit-saved]');
-      const oneOffButton = form.querySelector('[data-submit-one-off]');
-      const promptSelect = form.querySelector('[data-prompt-select]');
-      const promptScope = form.querySelector('[data-prompt-scope]');
-      const promptName = form.querySelector('[data-prompt-name]');
-      const taskInput = form.querySelector('[data-task-input]');
-      const description = form.querySelector('[data-prompt-description]');
-      const hint = form.querySelector('[data-prompt-hint]');
-      const memoryScope = form.querySelector('[data-memory-scope]');
-      const memoryChannelRow = form.querySelector('[data-memory-channel-row]');
-      const errorBox = form.querySelector('[data-launch-error]');
-      const status = form.querySelector('[data-launch-status]');
+    }
 
-      function selectedMode() {
-        const current = form.querySelector('input[name="mode"]:checked');
-        return current ? current.value : 'one-off';
-      }
+    function selectedMode(form) {
+      const current = form.querySelector('input[name="mode"]:checked');
+      return current ? current.value : 'one-off';
+    }
 
-      function syncPromptSelection() {
-        const option = promptSelect?.options[promptSelect.selectedIndex];
-        if (!option) {
-          if (promptScope) {
-            promptScope.value = '';
-          }
-          if (promptName) {
-            promptName.value = '';
-          }
-          if (description) {
-            description.textContent = 'Select a saved prompt.';
-          }
-          if (hint) {
-            hint.hidden = true;
-            hint.textContent = '';
-          }
-          return;
-        }
+    function syncPromptSelection(form) {
+      const { promptSelect, promptScope, promptName, description, hint } = launchParts(form);
+      const option = promptSelect?.options[promptSelect.selectedIndex];
+      if (!option) {
         if (promptScope) {
-          promptScope.value = option.dataset.scope || '';
+          promptScope.value = '';
         }
         if (promptName) {
-          promptName.value = option.dataset.name || '';
+          promptName.value = '';
         }
         if (description) {
-          description.textContent = option.dataset.description || 'Select a saved prompt.';
+          description.textContent = 'Select a saved prompt.';
         }
         if (hint) {
-          hint.textContent = option.dataset.argumentHint || '';
-          hint.hidden = !hint.textContent;
+          hint.hidden = true;
+          hint.textContent = '';
         }
+        return;
       }
-
-      function syncMode() {
-        const mode = selectedMode();
-        if (savedPanel) {
-          savedPanel.hidden = mode !== 'saved';
-        }
-        if (oneOffPanel) {
-          oneOffPanel.hidden = mode !== 'one-off';
-        }
-        if (savedButton) {
-          savedButton.hidden = mode !== 'saved' || !(promptSelect && promptSelect.options.length);
-        }
-        if (oneOffButton) {
-          oneOffButton.hidden = mode !== 'one-off';
-        }
-        if (taskInput instanceof HTMLTextAreaElement) {
-          taskInput.required = mode === 'one-off';
-        }
-        Object.entries(pills).forEach(function ([modeName, pill]) {
-          if (pill) {
-            pill.dataset.active = String(modeName === mode);
-          }
-        });
+      if (promptScope) {
+        promptScope.value = option.dataset.scope || '';
       }
-
-      function syncMemoryScope() {
-        if (!memoryScope || !memoryChannelRow) {
-          return;
-        }
-        const isChannel = memoryScope.value === 'channel';
-        memoryChannelRow.hidden = !isChannel;
-        if (!isChannel) {
-          const channel = memoryChannelRow.querySelector('select');
-          if (channel) {
-            channel.value = '';
-          }
-        }
+      if (promptName) {
+        promptName.value = option.dataset.name || '';
       }
+      if (description) {
+        description.textContent = option.dataset.description || 'Select a saved prompt.';
+      }
+      if (hint) {
+        hint.textContent = option.dataset.argumentHint || '';
+        hint.hidden = !hint.textContent;
+      }
+    }
 
-      modeInputs.forEach(function (input) {
-        input.addEventListener('change', syncMode);
+    function syncMode(form) {
+      const parts = launchParts(form);
+      const mode = selectedMode(form);
+      if (parts.savedPanel) {
+        parts.savedPanel.hidden = mode !== 'saved';
+      }
+      if (parts.oneOffPanel) {
+        parts.oneOffPanel.hidden = mode !== 'one-off';
+      }
+      if (parts.savedButton) {
+        parts.savedButton.hidden = mode !== 'saved' || !(parts.promptSelect && parts.promptSelect.options.length);
+      }
+      if (parts.oneOffButton) {
+        parts.oneOffButton.hidden = mode !== 'one-off';
+      }
+      if (parts.taskInput instanceof HTMLTextAreaElement) {
+        parts.taskInput.required = mode === 'one-off';
+      }
+      Object.entries(parts.pills).forEach(function ([modeName, pill]) {
+        if (pill) {
+          pill.dataset.active = String(modeName === mode);
+        }
       });
-      promptSelect?.addEventListener('change', syncPromptSelection);
-      memoryScope?.addEventListener('change', syncMemoryScope);
+    }
 
-      syncPromptSelection();
-      syncMode();
-      syncMemoryScope();
-
-      form.addEventListener('submit', async function (event) {
-        event.preventDefault();
-        syncPromptSelection();
-        syncMode();
-        syncMemoryScope();
-        if (errorBox) {
-          errorBox.hidden = true;
-          errorBox.textContent = '';
+    function syncMemoryScope(form) {
+      const { memoryScope, memoryChannelRow } = launchParts(form);
+      if (!memoryScope || !memoryChannelRow) {
+        return;
+      }
+      const isChannel = memoryScope.value === 'channel';
+      memoryChannelRow.hidden = !isChannel;
+      if (!isChannel) {
+        const channel = memoryChannelRow.querySelector('select');
+        if (channel) {
+          channel.value = '';
         }
-        if (status) {
-          status.textContent = 'Launching...';
-        }
+      }
+    }
 
+    // A launch form inserted by a live refresh is initialized exactly once.
+    const initializedForms = new WeakSet();
+    function initLaunchForm(form) {
+      if (initializedForms.has(form)) {
+        return;
+      }
+      initializedForms.add(form);
+      syncPromptSelection(form);
+      syncMode(form);
+      syncMemoryScope(form);
+    }
+
+    function initLaunchFormsIn(node) {
+      if (!(node instanceof Element)) {
+        return;
+      }
+      if (node.matches('[data-launch-form]')) {
+        initLaunchForm(node);
+      }
+      node.querySelectorAll('[data-launch-form]').forEach(initLaunchForm);
+    }
+
+    document.addEventListener('change', function (event) {
+      const target = event.target;
+      const form = target instanceof Element ? target.closest('[data-launch-form]') : null;
+      if (!form) {
+        return;
+      }
+      if (target.matches('[data-mode-toggle]')) {
+        syncMode(form);
+      } else if (target.matches('[data-prompt-select]')) {
+        syncPromptSelection(form);
+      } else if (target.matches('[data-memory-scope]')) {
+        syncMemoryScope(form);
+      }
+    });
+
+    document.addEventListener('submit', async function (event) {
+      const target = event.target;
+      if (!(target instanceof HTMLFormElement)) {
+        return;
+      }
+      if (target.hasAttribute('data-confirm')) {
+        if (!window.confirm(target.getAttribute('data-confirm') || '')) {
+          event.preventDefault();
+        }
+        return;
+      }
+      if (!target.hasAttribute('data-launch-form')) {
+        return;
+      }
+      const form = target;
+      event.preventDefault();
+      const { errorBox, status } = launchParts(form);
+      syncPromptSelection(form);
+      syncMode(form);
+      syncMemoryScope(form);
+      if (errorBox) {
+        errorBox.hidden = true;
+        errorBox.textContent = '';
+      }
+      if (status) {
+        status.textContent = 'Launching...';
+      }
+
+      // The launch is a local action: passive refreshes pause until it settles.
+      const live = window.FlowgencyLive && window.FlowgencyLive.handles.get('page');
+      const finishAction = live ? live.beginAction() : function () {};
+      try {
         let response;
         try {
           response = await fetch(form.action, {
@@ -529,8 +600,17 @@
           errorBox.hidden = false;
           errorBox.textContent = payload?.detail || 'Launch failed.';
         }
-      });
+      } finally {
+        finishAction();
+      }
     });
+
+    initLaunchFormsIn(document.body);
+    new MutationObserver(function (records) {
+      records.forEach(function (record) {
+        record.addedNodes.forEach(initLaunchFormsIn);
+      });
+    }).observe(document.body, { childList: true, subtree: true });
   }());
 </script>
 {% endblock %}
