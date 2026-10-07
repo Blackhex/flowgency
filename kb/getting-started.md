@@ -13,7 +13,7 @@ Open `http://127.0.0.1:8500`. Set `FLOWGENCY_CONFIG` to select the one authorita
 
 ## First run
 
-Start Flowgency, choose the Flowgency data root and supported AI integration, complete the flowgency-setup conversation, and return to the dashboard automatically. The launcher safely creates a missing root, attaches the bundled skill, and the guided conversation asks for the project workspace as its first question. The Flowgency Setup Skill owns team naming, storage paths, blueprint source, instances, routines, runtime policy, workspaces, memory, validation, and the one atomic config write.
+Start Flowgency, choose the Flowgency data root and supported AI integration, and complete the flowgency-setup conversation. The launcher safely creates a missing root, attaches the bundled skill, and the guided conversation asks for the project workspace as its first question. The Flowgency Setup Skill owns team naming, storage paths, blueprint source, instances, routines, runtime policy, workspaces, memory, validation, and the one atomic config write.
 
 Open setup from a browser on the same computer as Flowgency. On supported
 POSIX hosts, GitHub Copilot setup runs in the page's terminal; refresh or
@@ -26,6 +26,11 @@ completes setup. A failed or unknown scheduler result completes only after the
 limitation is acknowledged. Enabling dispatch in the saved configuration is
 separate from an observed scheduler installation, and setup reports the two
 independently.
+
+Automatic return also requires the completion environment supplied by
+Flowgency. If an external terminal cannot receive it, or you run a copyable
+fallback command manually, finish the conversation and open the dashboard
+yourself. The displayed command never includes completion credentials.
 
 The installed Copilot CLI offers no verified way to exit automatically, so the
 terminal may stay open after setup completes. This is the explicit fallback and

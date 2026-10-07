@@ -2229,6 +2229,83 @@ def test_completion_connected_launch_failure_fallback_gets_a_fresh_scoped_capabi
         assert secret not in integration.fallback_requests[0].prompt
 
 
+@pytest.mark.parametrize("delivered", [False, True])
+def test_external_fallback_appends_completion_warning_to_existing_notice(tmp_path, monkeypatch, delivered):
+    notice = "Connected launch failed; cleanup confirmed."
+
+    def failing_factory(launch):
+        raise ConnectedLaunchError(notice, cleanup_confirmed=True)
+
+    class DeliveryIntegration(_EnvironmentLaunchIntegration):
+        def launch_interactive_setup(self, request):
+            self.requests.append(request)
+            return type("Result", (), {
+                "fallback_command": self._fallback_command,
+                "completion_environment_delivered": delivered,
+            })()
+
+    config_path, root, integration, _process, _manager = _start_connected_session(
+        tmp_path, monkeypatch, process_factory=failing_factory, integration=DeliveryIntegration()
+    )
+    with _local_client() as client:
+        csrf = _setup_csrf(client)
+        response = client.post(
+            "/setup/launch",
+            data={"data_root": str(root), "integration": "copilot", "setup_csrf": csrf},
+            headers={"Origin": _LOCAL_BASE_URL},
+        )
+
+    expected = notice
+    if not delivered:
+        expected += (
+            " Automatic setup completion is unavailable for this launch; "
+            "return to the dashboard yourself once setup has finished."
+        )
+    assert response.status_code == 200
+    assert response.context["launch_notice"] == expected
+    assert expected in response.text
+    token = integration.requests[0].environment["FLOWGENCY_SETUP_TOKEN"]
+    assert token not in response.text
+    assert token not in response.context["fallback_command"]
+
+
+@pytest.mark.parametrize("connected", [False, True])
+def test_setup_manual_fallback_discloses_unavailable_completion(tmp_path, monkeypatch, connected):
+    if connected:
+        config_path, root, integration, _process, _manager = _start_connected_session(
+            tmp_path, monkeypatch, integration=_EnvironmentLaunchIntegration()
+        )
+    else:
+        _configure_missing_config(tmp_path, monkeypatch)
+        root = tmp_path / "Flowgency"
+        integration = _LaunchIntegration()
+        monkeypatch.setattr(
+            "flowgency.web.routes.admin_teams.launchable_integrations",
+            lambda integrations, data_root: (integration,),
+        )
+    with _local_client() as client:
+        csrf = _setup_csrf(client)
+        response = client.post(
+            "/setup/launch",
+            data={"data_root": str(root), "integration": "copilot", "setup_csrf": csrf},
+            headers={"Origin": _LOCAL_BASE_URL},
+        )
+
+    assert response.status_code == 200
+    assert response.context["fallback_completion_notice"] == (
+        "Automatic setup completion is unavailable when you run this command manually; "
+        "return to the dashboard yourself once setup has finished."
+    )
+    assert response.context["fallback_completion_notice"] in response.text
+    assert 'id="fallback-completion-notice"' in response.text
+    assert 'aria-describedby="fallback-completion-notice"' in response.text
+    assert response.context["fallback_command"] == integration._fallback_command
+    requests = integration.connected_requests if connected else integration.requests
+    token = requests[0].environment["FLOWGENCY_SETUP_TOKEN"]
+    assert token not in response.text
+    assert token not in response.context["fallback_command"]
+
+
 def test_external_launch_reports_automatic_completion_unavailable_without_capability_in_page(
     tmp_path, monkeypatch
 ):

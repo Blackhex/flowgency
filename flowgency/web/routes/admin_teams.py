@@ -51,6 +51,10 @@ _AUTOMATIC_COMPLETION_UNAVAILABLE = (
     "Automatic setup completion is unavailable for this launch; "
     "return to the dashboard yourself once setup has finished."
 )
+_MANUAL_COMPLETION_UNAVAILABLE = (
+    "Automatic setup completion is unavailable when you run this command manually; "
+    "return to the dashboard yourself once setup has finished."
+)
 
 def _templates(request: Request):
     return request.app.state.templates
@@ -171,6 +175,7 @@ def _setup_response(
             "selected_integration_name": selected_integration_name,
             "integrations": integrations,
             "fallback_command": fallback_command,
+            "fallback_completion_notice": _MANUAL_COMPLETION_UNAVAILABLE,
             "launch_notice": launch_notice,
             "setup_csrf": setup_csrf,
         },
@@ -503,7 +508,7 @@ async def _external_setup_launch(
                 setup_request
             )
         if not getattr(result, "completion_environment_delivered", False):
-            launch_notice = launch_notice or _AUTOMATIC_COMPLETION_UNAVAILABLE
+            launch_notice = f"{launch_notice} {_AUTOMATIC_COMPLETION_UNAVAILABLE}".strip()
     except Exception as launch_error:
         if isinstance(launch_error, SetupSessionConflict) or (
             isinstance(launch_error, ConnectedLaunchError) and not launch_error.cleanup_confirmed
