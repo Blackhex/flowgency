@@ -59,6 +59,46 @@ def test_render_live_snapshot_shape_matches_policy():
     assert snapshot.regions[0].html == "<p>World</p>"
 
 
+def test_render_live_snapshot_does_not_execute_extends_layout_or_body():
+    calls: dict[str, int] = {}
+
+    def probe(label: str) -> str:
+        calls[label] = calls.get(label, 0) + 1
+        return ""
+
+    templates = Environment(
+        loader=DictLoader(
+            {
+                "base.html": (
+                    "{{ probe('base_top') }}"
+                    "<html><body>"
+                    "{% block content %}{{ probe('base_block_default') }}{% endblock %}"
+                    "</body></html>"
+                ),
+                "sample.html": (
+                    "{% extends 'base.html' %}"
+                    "{{ probe('child_top') }}"
+                    "{% macro live_rows() %}<p>{{ name }}</p>{% endmacro %}"
+                    "{% block content %}<div>{{ probe('child_block') }}</div>{% endblock %}"
+                ),
+            }
+        ),
+        autoescape=True,
+    )
+    templates.globals["probe"] = probe
+
+    policy = LivePagePolicy(
+        template_name="sample.html", binding=LiveBinding(page="sample"),
+        structure="sample:1", region_macros={"rows": "live_rows"},
+        snapshot_url="/sample?__live=1",
+    )
+
+    snapshot = render_live_snapshot(templates, {"name": "<b>World</b>"}, policy)
+
+    assert snapshot.regions[0].html == "<p>&lt;b&gt;World&lt;/b&gt;</p>"
+    assert calls == {}
+
+
 def test_live_etag_is_stable_for_equivalent_snapshots():
     templates = Environment(
         loader=DictLoader({"sample.html": "{% macro live_rows() %}<p>{{ name }}</p>{% endmacro %}"}),
@@ -78,7 +118,9 @@ def test_live_etag_is_stable_for_equivalent_snapshots():
 # ── Validation failures: a clear ValueError subclass ────────────────────────
 
 
-def test_duplicate_region_ids_rejected():
+def test_duplicate_region_macro_name_rejected():
+    # A dict can't have duplicate KEYS, but two different keys can legitimately
+    # resolve to the same macro name -- that's the real collision to catch.
     templates = Environment(
         loader=DictLoader({"sample.html": "{% macro live_rows() %}<p>rows</p>{% endmacro %}"}),
         autoescape=True,
@@ -86,11 +128,77 @@ def test_duplicate_region_ids_rejected():
     policy = LivePagePolicy(
         template_name="sample.html", binding=LiveBinding(page="sample"),
         structure="sample:1",
-        region_macros=[("rows", "live_rows"), ("rows", "live_rows_again")],
+        region_macros={"rows": "live_rows", "rows_again": "live_rows"},
         snapshot_url="/sample?__live=1",
     )
-    with pytest.raises(LiveSnapshotError, match="duplicate region id"):
+    with pytest.raises(LiveSnapshotError, match="duplicate region macro"):
         render_live_snapshot(templates, {}, policy)
+
+
+def test_duplicate_data_live_key_across_regions_rejected():
+    templates = Environment(
+        loader=DictLoader(
+            {
+                "sample.html": (
+                    '{% macro live_rows() %}<div data-live-key="shared">rows</div>{% endmacro %}'
+                    '{% macro live_cards() %}<div data-live-key="shared">cards</div>{% endmacro %}'
+                )
+            }
+        ),
+        autoescape=True,
+    )
+    policy = LivePagePolicy(
+        template_name="sample.html", binding=LiveBinding(page="sample"),
+        structure="sample:1",
+        region_macros={"rows": "live_rows", "cards": "live_cards"},
+        snapshot_url="/sample?__live=1",
+    )
+    with pytest.raises(LiveSnapshotError, match="duplicate data-live-key"):
+        render_live_snapshot(templates, {}, policy)
+
+
+def test_duplicate_root_id_within_region_rejected():
+    templates = Environment(
+        loader=DictLoader(
+            {
+                "sample.html": (
+                    '{% macro live_rows() %}<div id="row-1">a</div><div id="row-1">b</div>{% endmacro %}'
+                )
+            }
+        ),
+        autoescape=True,
+    )
+    policy = LivePagePolicy(
+        template_name="sample.html", binding=LiveBinding(page="sample"),
+        structure="sample:1", region_macros={"rows": "live_rows"},
+        snapshot_url="/sample?__live=1",
+    )
+    with pytest.raises(LiveSnapshotError, match="duplicate root id"):
+        render_live_snapshot(templates, {}, policy)
+
+
+def test_valid_multi_region_policy_renders_all_regions():
+    templates = Environment(
+        loader=DictLoader(
+            {
+                "sample.html": (
+                    '{% macro live_rows() %}<div data-live-key="rows-1">rows</div>{% endmacro %}'
+                    '{% macro live_cards() %}<div data-live-key="cards-1">cards</div>{% endmacro %}'
+                )
+            }
+        ),
+        autoescape=True,
+    )
+    policy = LivePagePolicy(
+        template_name="sample.html", binding=LiveBinding(page="sample"),
+        structure="sample:1",
+        region_macros={"rows": "live_rows", "cards": "live_cards"},
+        snapshot_url="/sample?__live=1",
+    )
+    snapshot = render_live_snapshot(templates, {}, policy)
+    assert [region.key for region in snapshot.regions] == ["rows", "cards"]
+    assert snapshot.regions[0].html == '<div data-live-key="rows-1">rows</div>'
+    assert snapshot.regions[1].html == '<div data-live-key="cards-1">cards</div>'
 
 
 def test_unsupported_structure_format_rejected():
@@ -169,7 +277,11 @@ def test_executable_url_rejected(href: str):
 
 
 @pytest.mark.parametrize(
-    "tag", ["script", "iframe", "object", "embed", "base", "link", "style"]
+    "tag",
+    [
+        "script", "iframe", "object", "embed", "base", "link", "style",
+        "meta", "svg", "math", "animate", "set", "foreignObject",
+    ],
 )
 def test_unsafe_fragment_tag_rejected(tag: str):
     templates = Environment(
@@ -210,6 +322,117 @@ def test_autofocus_attribute_rejected():
         snapshot_url="/sample?__live=1",
     )
     with pytest.raises(LiveSnapshotError, match="autofocus"):
+        render_live_snapshot(templates, {}, policy)
+
+
+def test_meta_refresh_rejected():
+    templates = Environment(
+        loader=DictLoader(
+            {
+                "sample.html": (
+                    '{% macro live_rows() %}<meta http-equiv="refresh" '
+                    'content="0;url=javascript:alert(1)">{% endmacro %}'
+                )
+            }
+        ),
+        autoescape=True,
+    )
+    policy = LivePagePolicy(
+        template_name="sample.html", binding=LiveBinding(page="sample"),
+        structure="sample:1", region_macros={"rows": "live_rows"},
+        snapshot_url="/sample?__live=1",
+    )
+    with pytest.raises(LiveSnapshotError, match="unsafe fragment tag"):
+        render_live_snapshot(templates, {}, policy)
+
+
+@pytest.mark.parametrize(
+    "markup",
+    [
+        '<a xlink:href="javascript:alert(1)">x</a>',
+        '<a ping="javascript:alert(1)">x</a>',
+        '<a background="javascript:alert(1)">x</a>',
+        '<a cite="javascript:alert(1)">x</a>',
+        '<a manifest="javascript:alert(1)">x</a>',
+        '<img srcset="javascript:alert(1)">',
+        '<img srcset="good.png 1x, javascript:alert(1) 2x">',
+    ],
+)
+def test_additional_url_attribute_vectors_rejected(markup: str):
+    templates = Environment(
+        loader=DictLoader({"sample.html": f"{{% macro live_rows() %}}{markup}{{% endmacro %}}"}),
+        autoescape=True,
+    )
+    policy = LivePagePolicy(
+        template_name="sample.html", binding=LiveBinding(page="sample"),
+        structure="sample:1", region_macros={"rows": "live_rows"},
+        snapshot_url="/sample?__live=1",
+    )
+    with pytest.raises(LiveSnapshotError, match="executable URL"):
+        render_live_snapshot(templates, {}, policy)
+
+
+def test_executable_url_with_leading_control_character_rejected():
+    templates = Environment(
+        loader=DictLoader(
+            {"sample.html": '{% macro live_rows() %}<a href="\x01javascript:alert(1)">x</a>{% endmacro %}'}
+        ),
+        autoescape=True,
+    )
+    policy = LivePagePolicy(
+        template_name="sample.html", binding=LiveBinding(page="sample"),
+        structure="sample:1", region_macros={"rows": "live_rows"},
+        snapshot_url="/sample?__live=1",
+    )
+    with pytest.raises(LiveSnapshotError, match="executable URL"):
+        render_live_snapshot(templates, {}, policy)
+
+
+def test_uppercase_tag_and_attribute_rejected():
+    templates = Environment(
+        loader=DictLoader(
+            {"sample.html": '{% macro live_rows() %}<A HREF="JAVASCRIPT:alert(1)">x</A>{% endmacro %}'}
+        ),
+        autoescape=True,
+    )
+    policy = LivePagePolicy(
+        template_name="sample.html", binding=LiveBinding(page="sample"),
+        structure="sample:1", region_macros={"rows": "live_rows"},
+        snapshot_url="/sample?__live=1",
+    )
+    with pytest.raises(LiveSnapshotError, match="executable URL"):
+        render_live_snapshot(templates, {}, policy)
+
+
+def test_unquoted_executable_url_attribute_rejected():
+    templates = Environment(
+        loader=DictLoader(
+            {"sample.html": "{% macro live_rows() %}<a href=javascript:alert(1)>x</a>{% endmacro %}"}
+        ),
+        autoescape=True,
+    )
+    policy = LivePagePolicy(
+        template_name="sample.html", binding=LiveBinding(page="sample"),
+        structure="sample:1", region_macros={"rows": "live_rows"},
+        snapshot_url="/sample?__live=1",
+    )
+    with pytest.raises(LiveSnapshotError, match="executable URL"):
+        render_live_snapshot(templates, {}, policy)
+
+
+def test_entity_obfuscated_scheme_rejected():
+    templates = Environment(
+        loader=DictLoader(
+            {"sample.html": '{% macro live_rows() %}<a href="&#106;avascript:alert(1)">x</a>{% endmacro %}'}
+        ),
+        autoescape=True,
+    )
+    policy = LivePagePolicy(
+        template_name="sample.html", binding=LiveBinding(page="sample"),
+        structure="sample:1", region_macros={"rows": "live_rows"},
+        snapshot_url="/sample?__live=1",
+    )
+    with pytest.raises(LiveSnapshotError, match="executable URL"):
         render_live_snapshot(templates, {}, policy)
 
 

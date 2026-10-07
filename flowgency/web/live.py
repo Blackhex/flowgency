@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import Any, Literal, Mapping
 from urllib.parse import parse_qsl, urlsplit
+from weakref import WeakKeyDictionary
 
 from fastapi import Request
 from fastapi.responses import JSONResponse, Response
@@ -68,10 +69,18 @@ class LivePagePolicy:
 # never an mtime, content hash or other control-plane schema value.
 _STRUCTURE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*:[0-9]+$")
 
-_UNSAFE_TAGS = frozenset({"script", "iframe", "object", "embed", "base", "link", "style"})
+_UNSAFE_TAGS = frozenset({
+    "script", "iframe", "object", "embed", "base", "link", "style",
+    "meta", "svg", "math", "animate", "set", "foreignobject",
+})
 _UNSAFE_ATTRS = frozenset({"srcdoc", "autofocus"})
-_URL_ATTRS = frozenset({"href", "src", "action", "formaction", "poster", "data"})
+_URL_ATTRS = frozenset({
+    "href", "src", "action", "formaction", "poster", "data",
+    "xlink:href", "srcset", "ping", "background", "cite", "manifest",
+})
 _UNSAFE_URL_SCHEMES = ("javascript:", "data:text/html", "vbscript:")
+# Browsers strip leading/embedded C0 controls before parsing a URL scheme.
+_CONTROL_OR_WHITESPACE = re.compile(r"[\x00-\x20]")
 
 
 class _FragmentSafetyParser(HTMLParser):
@@ -96,9 +105,23 @@ class _FragmentSafetyParser(HTMLParser):
             elif name_lower.startswith("on"):
                 self.violations.append(f"event-handler attribute {name_lower!r}")
             elif name_lower in _URL_ATTRS and value:
-                normalized = "".join(value.split()).lower()
-                if normalized.startswith(_UNSAFE_URL_SCHEMES):
-                    self.violations.append(f"executable URL in {name_lower!r}")
+                for candidate in _url_candidates(name_lower, value):
+                    normalized = _CONTROL_OR_WHITESPACE.sub("", candidate).lower()
+                    if normalized.startswith(_UNSAFE_URL_SCHEMES):
+                        self.violations.append(f"executable URL in {name_lower!r}")
+                        break
+
+
+def _url_candidates(attr_name: str, value: str) -> list[str]:
+    """srcset packs multiple comma-separated '<url> <descriptor>?' candidates."""
+    if attr_name != "srcset":
+        return [value]
+    candidates = []
+    for part in value.split(","):
+        token = part.strip()
+        if token:
+            candidates.append(token.split()[0] if token.split() else token)
+    return candidates
 
 
 def _validate_fragment_safety(html_fragment: str) -> None:
@@ -129,38 +152,131 @@ def _validate_query_binding(policy: LivePagePolicy) -> None:
         )
 
 
-def _region_items(region_macros: Mapping[str, str] | Any) -> list[tuple[str, str]]:
-    items = (
-        list(region_macros.items())
-        if isinstance(region_macros, Mapping)
-        else list(region_macros)
-    )
-    seen: set[str] = set()
-    for key, _macro_name in items:
-        if key in seen:
-            raise LiveSnapshotError(f"duplicate region id: {key!r}")
-        seen.add(key)
+def _region_items(region_macros: Mapping[str, str]) -> list[tuple[str, str]]:
+    # A real Mapping can't hold duplicate keys; the only reachable collision
+    # is two region keys resolving to the same macro name.
+    items = list(region_macros.items())
+    seen_macros: set[str] = set()
+    for _key, macro_name in items:
+        if macro_name in seen_macros:
+            raise LiveSnapshotError(
+                f"duplicate region macro: {macro_name!r} is bound to more than one region"
+            )
+        seen_macros.add(macro_name)
     return items
+
+
+class _KeyCollector(HTMLParser):
+    """Collects `id`/`data-live-key` values so keyed-reconciliation collisions can be found."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.ids: list[str] = []
+        self.live_keys: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._collect(attrs)
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._collect(attrs)
+
+    def _collect(self, attrs: list[tuple[str, str | None]]) -> None:
+        for name, value in attrs:
+            if not value:
+                continue
+            name_lower = (name or "").lower()
+            if name_lower == "id":
+                self.ids.append(value)
+            elif name_lower == "data-live-key":
+                self.live_keys.append(value)
+
+
+def _check_region_key_collisions(regions: list[LiveRegion]) -> None:
+    seen_ids: dict[str, str] = {}
+    seen_live_keys: dict[str, str] = {}
+    for region in regions:
+        collector = _KeyCollector()
+        collector.feed(region.html)
+        collector.close()
+        for value in collector.ids:
+            if value in seen_ids:
+                raise LiveSnapshotError(
+                    f"duplicate root id {value!r} in region {region.key!r} "
+                    f"(already present in region {seen_ids[value]!r})"
+                )
+            seen_ids[value] = region.key
+        for value in collector.live_keys:
+            if value in seen_live_keys:
+                raise LiveSnapshotError(
+                    f"duplicate data-live-key {value!r} in region {region.key!r} "
+                    f"(already present in region {seen_live_keys[value]!r})"
+                )
+            seen_live_keys[value] = region.key
+
+
+class _NonRenderingParent:
+    """Stands in for an `{% extends %}` parent: contributes no blocks, renders nothing."""
+
+    blocks: Mapping[str, Any] = {}
+
+    def root_render_func(self, context: Any) -> Any:
+        return iter(())
+
+
+def _non_rendering_parent(*_args: Any, **_kwargs: Any) -> _NonRenderingParent:
+    return _NonRenderingParent()
+
+
+# Per real Jinja Environment, a compiled template whose extends resolution is
+# stubbed out -- so top-level macros can be read without rendering any parent.
+_macro_template_cache: "WeakKeyDictionary[Any, dict[str, Any]]" = WeakKeyDictionary()
+
+
+def _macro_only_context(env: Any, template_name: str, context_vars: dict[str, Any]) -> Any:
+    """Build a render context with top-level macros defined, without executing
+    any `{% extends %}` parent's layout/body or the template's own non-macro output."""
+    per_env_cache = _macro_template_cache.setdefault(env, {})
+    fresh_template = per_env_cache.get(template_name)
+    if fresh_template is None:
+        source, filename, _ = env.loader.get_source(env, template_name)
+        overlay = env.overlay()
+        overlay.get_template = _non_rendering_parent
+        overlay.select_template = _non_rendering_parent
+        overlay.get_or_select_template = _non_rendering_parent
+        code = overlay.compile(source, name=template_name, filename=filename)
+        fresh_template = overlay.template_class.from_code(overlay, code, overlay.globals, uptodate=None)
+        per_env_cache[template_name] = fresh_template
+
+    render_context = fresh_template.new_context(context_vars)
+    for _ in fresh_template.root_render_func(render_context):
+        pass
+    return render_context
 
 
 def render_live_snapshot(
     templates: Any, context: dict[str, Any], policy: LivePagePolicy
 ) -> LiveSnapshot:
-    """Render only the policy's declared macros; never discover regions by parsing a full page."""
+    """Render only the policy's declared macros; never a full page or an internal request."""
     _validate_structure(policy.structure)
     _validate_query_binding(policy)
     items = _region_items(policy.region_macros)
 
     env = templates.env if hasattr(templates, "env") else templates
-    template = env.get_template(policy.template_name)
-    module = template.make_module(vars=context)
+    render_context = _macro_only_context(env, policy.template_name, context)
 
     regions: list[LiveRegion] = []
     for key, macro_name in items:
-        macro = getattr(module, macro_name)
+        try:
+            macro = render_context.vars[macro_name]
+        except KeyError:
+            raise LiveSnapshotError(
+                f"template {policy.template_name!r} defines no top-level macro {macro_name!r}"
+            ) from None
         html = str(macro())
         _validate_fragment_safety(html)
         regions.append(LiveRegion(key=key, html=html))
+
+    _check_region_key_collisions(regions)
 
     return LiveSnapshot(binding=policy.binding, structure=policy.structure, regions=regions)
 
