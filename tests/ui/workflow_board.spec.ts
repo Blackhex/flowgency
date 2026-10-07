@@ -1579,6 +1579,8 @@ test('older selection and refresh responses cannot replace a newer ticket select
   await expect(page).toHaveURL(/ticket=fixture-active-1/);
   await expect(page.getByRole('heading', { name: 'Implement atomic ticket assignment' })).toBeVisible();
   await expect(page.getByLabel('Acceptance criteria', { exact: true })).toHaveValue('Draft on the newer selection');
+  // The refresh that follows the navigation parks on this route forever; do not let it outlive the test.
+  await context.unrouteAll({ behavior: 'ignoreErrors' });
 });
 
 test.describe('javascript-disabled workflow forms', () => {
@@ -1750,6 +1752,22 @@ test('desktop board and mobile ticket detail keep keyboard access and stable scr
   await expect(page).toHaveURL(/\/newsletter\/workflows\/delivery/);
   await assertNoLayoutIssues(page);
   await assertNoConsoleErrors(page);
+});
+
+test('a refresh keeps the inactive ticket tab panels hidden', async ({ page }) => {
+  await page.goto('/newsletter/workflows/delivery/tickets/fixture-review');
+  await stopPollTimer(page);
+  const panel = (name: string) => page.locator(`[data-ticket-panel="${name}"]`);
+
+  await forcePoll(page);
+  await expect(panel('overview')).toBeVisible();
+  await expect(panel('requirements')).toBeHidden();
+  await expect(panel('history')).toBeHidden();
+
+  await page.getByRole('tab', { name: 'History' }).click();
+  await forcePoll(page);
+  await expect(panel('history')).toBeVisible();
+  await expect(panel('requirements')).toBeHidden();
 });
 
 const HOSTILE_OUTPUT_VALUE = '<b>bold</b> & "quoted" <script>window.__xssFired = true</script>';

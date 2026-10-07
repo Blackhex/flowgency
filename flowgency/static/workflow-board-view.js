@@ -444,8 +444,8 @@
       this.renderFragment(this.ticketIssues, detail.presentation?.issues_html || '', 'ticket-issues');
       this.renderFragment(this.description, detail.presentation?.description_html || '', 'description');
       this.renderFragment(this.outputs, detail.presentation?.outputs_html || '', 'outputs');
-      this.renderFragment(this.requirements, detail.presentation?.requirements_html || '', 'requirements');
-      this.renderFragment(this.history, detail.presentation?.history_html || '', 'history');
+      this.renderFragment(this.requirements, detail.presentation?.requirements_html || '', 'requirements', { tabPanel: true });
+      this.renderFragment(this.history, detail.presentation?.history_html || '', 'history', { tabPanel: true });
       const key = `card:${current.ref?.binding_id}:${current.ref?.team_id}:${current.ref?.workflow_id}:${current.ref?.ticket_id}`;
       const card = this.cards.get(key);
       if (card) {
@@ -453,7 +453,8 @@
       }
     }
 
-    renderFragment(host, html, key) {
+    // A tab panel's visibility belongs to the selected tab, never to its content.
+    renderFragment(host, html, key, { tabPanel = false } = {}) {
       if (!host) {
         return;
       }
@@ -462,7 +463,9 @@
         if (!nodesMatch(host, desired)) {
           reconcileChildren(host, desired.childNodes);
         }
-        host.hidden = !host.textContent.trim() && !host.children.length;
+        if (!tabPanel) {
+          host.hidden = !host.textContent.trim() && !host.children.length;
+        }
       });
     }
   }
