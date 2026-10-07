@@ -2176,3 +2176,152 @@ def test_job_navigation_falls_back_to_the_ticket_when_the_job_is_gone(workflow_w
     assert f"/{env.team_id}/jobs/git-evidence-run" not in without_job.text
     assert f"{env.base_path}/tickets/{ticket.ref.ticket_id}" in without_job.text
     assert "after" in without_job.text
+
+
+_EVIDENCE_NAVIGATION_REGIONS = [
+    "navigation-teams",
+    "navigation-primary",
+    "navigation-workflows",
+    "navigation-workspace",
+]
+_LIVE_INITIAL_JSON = re.compile(r'<script type="application/json" id="live-initial">(.*?)</script>', re.S)
+
+
+def _accepted_evidence_base(env, **kwargs):
+    fixture, actor, ticket = _git_evidence_ticket(env, **kwargs)
+    captured = _capture_evidence(env, fixture, actor, ticket)
+    _accept_evidence(env, actor, captured)
+    return ticket, captured, _evidence_base(env, ticket, captured)
+
+
+def _snapshot_regions(response) -> dict[str, str]:
+    assert response.status_code == 200, response.text
+    return {region["key"]: region["html"] for region in response.json()["regions"]}
+
+
+@requires_git
+def test_live_git_evidence_snapshot_is_shell_only_and_matches_the_page(workflow_web_env):
+    env = workflow_web_env
+    ticket, captured, base_url = _accepted_evidence_base(env)
+
+    page = env.client.get(f"{base_url}/diff")
+    snapshot = env.client.get(f"{base_url}/diff?source=ticket&__live=1")
+    regions = _snapshot_regions(snapshot)
+    registration = json.loads(_LIVE_INITIAL_JSON.search(page.text).group(1))
+
+    assert list(regions) == [*_EVIDENCE_NAVIGATION_REGIONS, "git-evidence-back"]
+    assert re.findall(r'data-live-region="([^"]+)"', page.text) == list(regions)
+    assert all(html in page.text for html in regions.values())
+    assert snapshot.json()["structure"] == "git-evidence:1"
+    assert snapshot.json()["binding"] == {
+        "page": "git-evidence",
+        "team": env.team_id,
+        "entity": f"{env.workflow_id}/{ticket.ref.ticket_id}/{captured.artifact.value}",
+        "tab": None,
+        "query": {"source": "ticket"},
+    }
+    assert registration["binding"] == snapshot.json()["binding"]
+    assert registration["structure"] == "git-evidence:1"
+    assert registration["url"] == f"{base_url}/diff?source=ticket&__live=1"
+    assert snapshot.headers["cache-control"] == "private, no-cache"
+    assert "Back to ticket" in regions["git-evidence-back"]
+
+
+@requires_git
+def test_live_git_evidence_snapshot_never_carries_or_recomputes_retained_content(
+    workflow_web_env, monkeypatch
+):
+    from flowgency.web.routes import git_evidence as evidence_routes
+
+    env = workflow_web_env
+    hostile = b"SECRET-RETAINED-LINE\n"
+    _, _, base_url = _accepted_evidence_base(env, commit=("retained.txt", hostile))
+    page = env.client.get(f"{base_url}/diff")
+    assert "SECRET-RETAINED-LINE" in page.text
+
+    def forbidden(_manifest):
+        raise AssertionError("a live snapshot must not parse the retained diff")
+
+    monkeypatch.setattr(evidence_routes, "parse_git_diff", forbidden)
+    snapshot = env.client.get(f"{base_url}/diff?__live=1")
+
+    assert snapshot.status_code == 200
+    assert "SECRET-RETAINED-LINE" not in snapshot.text
+    assert "git-evidence-changes" not in snapshot.text
+    assert "Download patch" not in snapshot.text
+
+
+@requires_git
+def test_live_git_evidence_back_link_follows_the_producing_job(workflow_web_env):
+    env = workflow_web_env
+    ticket, _, base_url = _accepted_evidence_base(env)
+    job_url = f"{base_url}/diff?source=job&__live=1"
+
+    first = _snapshot_regions(env.client.get(job_url))["git-evidence-back"]
+    env.job_store.path(env.team_id, "git-evidence-run").unlink()
+    second = _snapshot_regions(env.client.get(job_url))["git-evidence-back"]
+
+    assert "Back to job" in first and f"/{env.team_id}/jobs/git-evidence-run" in first
+    assert "Back to ticket" in second and "Back to job" not in second
+    assert f"{env.base_path}/tickets/{ticket.ref.ticket_id}" in second
+    assert 'data-live-key="git-evidence:back"' in second
+
+
+@requires_git
+def test_live_git_evidence_snapshot_is_conditional_and_stable(workflow_web_env):
+    env = workflow_web_env
+    _, _, base_url = _accepted_evidence_base(env)
+    url = f"{base_url}/diff?__live=1"
+
+    first = env.client.get(url)
+
+    assert env.client.get(url).headers["etag"] == first.headers["etag"]
+    assert env.client.get(url, headers={"If-None-Match": first.headers["etag"]}).status_code == 304
+
+
+@requires_git
+@pytest.mark.parametrize(
+    "case, expected",
+    [
+        ("wrong-team", 404),
+        ("wrong-workflow", 404),
+        ("wrong-ticket", 404),
+        ("traversal", 403),
+        ("unknown-source", 422),
+    ],
+)
+def test_live_git_evidence_snapshot_applies_the_viewer_checks_on_every_read(
+    workflow_web_env, case, expected
+):
+    env = workflow_web_env
+    ticket, captured, base_url = _accepted_evidence_base(env)
+    artifact_id = captured.artifact.value
+    paths = {
+        "wrong-team": f"/support/workflows/board-a/tickets/{ticket.ref.ticket_id}/artifacts/{artifact_id}/diff",
+        "wrong-workflow": f"/{env.team_id}/workflows/board-z/tickets/{ticket.ref.ticket_id}/artifacts/{artifact_id}/diff",
+        "wrong-ticket": f"{env.base_path}/tickets/ticket-absent/artifacts/{artifact_id}/diff",
+        "traversal": f"{env.base_path}/tickets/{ticket.ref.ticket_id}/artifacts/%2E%2E%5C%2E%2E%5Cconfig.yaml/diff",
+        "unknown-source": f"{base_url}/diff?source=https://evil.example",
+    }
+    separator = "&" if "?" in paths[case] else "?"
+
+    response = env.client.get(f"{paths[case]}{separator}__live=1")
+
+    assert response.status_code == expected
+    assert str(env.root_a) not in response.text
+
+
+@requires_git
+def test_live_git_evidence_snapshot_reports_damaged_storage_without_regenerating_it(workflow_web_env):
+    env = workflow_web_env
+    _, captured, base_url = _accepted_evidence_base(env)
+    stored = _artifact_file(env, captured)
+    original = stored.read_bytes()
+
+    stored.write_bytes(b"not an artifact envelope")
+    damaged = env.client.get(f"{base_url}/diff?__live=1")
+    stored.write_bytes(original)
+
+    assert damaged.status_code == 500
+    assert stored.read_bytes() == original
+    assert env.client.get(f"{base_url}/diff?__live=1").status_code == 200

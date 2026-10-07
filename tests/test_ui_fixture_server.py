@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import re
 import threading
 from urllib.parse import urlencode
 
@@ -410,6 +411,7 @@ def test_live_change_cases_all_have_a_dispatcher():
         *server._AGENT_LIVE_CHANGES,
         *server._JOB_LIVE_CHANGES,
         *server._LOG_LIVE_CHANGES,
+        *server._WORKSPACE_LIVE_CHANGES,
     }
     assert dispatched == set(server.LIVE_CHANGE_CASES)
 
@@ -645,3 +647,108 @@ def test_live_change_log_listing_membership_adds_and_removes_entries(monkeypatch
 
         _reset(client)
         assert _region(client, listing, "logs-list") == before
+
+
+def _workspaces_fixture(client) -> None:
+    response = client.post(server.UI_RESET_PATH, json={"fixture": server.WORKSPACES_FIXTURE})
+    assert response.status_code == 204
+
+
+def _workspace_file_url(client, index: int = 0) -> str:
+    page = client.get(f"/newsletter/workspaces/{index}/file")
+    assert page.status_code == 200
+    initial = re.search(r'<script type="application/json" id="live-initial">(.*?)</script>', page.text, re.S)
+    return json.loads(initial.group(1))["url"]
+
+
+def test_the_default_fixture_has_no_workspaces_and_the_opt_in_fixture_seeds_two(monkeypatch):
+    with _live_fixture(monkeypatch) as (client, runtime):
+        assert "No workspaces configured" in _region(client, "/newsletter/workspaces", "workspaces-status")
+
+        _workspaces_fixture(client)
+        listing = _region(client, "/newsletter/workspaces", "workspaces-list")
+        assert "Editorial Notes" in listing and "Session Script" in listing
+        notes = runtime / server.WORKSPACE_SOURCES_DIR / server.WORKSPACE_NOTES_NAME
+        assert notes.read_bytes() == server.WORKSPACE_NOTES_TEXT.encode("utf-8")
+
+        _reset(client)
+        assert "No workspaces configured" in _region(client, "/newsletter/workspaces", "workspaces-status")
+        assert list((runtime / server.WORKSPACE_SOURCES_DIR).iterdir()) == []
+
+
+def test_live_change_workspace_file_changes_moves_the_status_and_reset_restores_it(monkeypatch):
+    with _live_fixture(monkeypatch) as (client, runtime):
+        _workspaces_fixture(client)
+        url = _workspace_file_url(client)
+        before = _region(client, url, "workspace-metadata")
+        assert f"{len(server.WORKSPACE_NOTES_TEXT.encode('utf-8'))} bytes" in before
+
+        _apply(client, "workspace-file-changes")
+        after = _region(client, url, "workspace-metadata")
+        assert f"{len(server.WORKSPACE_CHANGED_NOTES_TEXT.encode('utf-8'))} bytes" in after
+        assert before != after
+        notes = runtime / server.WORKSPACE_SOURCES_DIR / server.WORKSPACE_NOTES_NAME
+        assert notes.read_bytes() == server.WORKSPACE_CHANGED_NOTES_TEXT.encode("utf-8")
+
+        _workspaces_fixture(client)
+        assert _region(client, _workspace_file_url(client), "workspace-metadata").count("bytes") == 1
+        assert notes.read_bytes() == server.WORKSPACE_NOTES_TEXT.encode("utf-8")
+
+
+def test_live_change_workspace_file_removed_reports_the_source_missing(monkeypatch):
+    with _live_fixture(monkeypatch) as (client, _runtime):
+        _workspaces_fixture(client)
+        url = _workspace_file_url(client)
+
+        _apply(client, "workspace-file-removed")
+
+        assert "File not found" in _region(client, url, "workspace-metadata")
+        assert "Config file not found: Notes" in _region(client, "/newsletter/workspaces", "workspaces-list")
+
+        _workspaces_fixture(client)
+        assert "File not found" not in _region(client, _workspace_file_url(client), "workspace-metadata")
+
+
+def test_live_change_workspace_reordered_makes_the_loaded_position_incompatible(monkeypatch):
+    with _live_fixture(monkeypatch) as (client, _runtime):
+        _workspaces_fixture(client)
+        url = _workspace_file_url(client)
+        assert client.get(url).json()["regions"] != []
+
+        _apply(client, "workspace-reordered")
+
+        assert client.get(url).json()["regions"] == []
+        listing = _region(client, "/newsletter/workspaces", "workspaces-list")
+        assert listing.index("Session Script") < listing.index("Editorial Notes")
+
+        _workspaces_fixture(client)
+        assert client.get(url).json()["regions"] != []
+
+
+def test_live_change_workspace_removed_and_added_change_the_list_and_the_second_page(monkeypatch):
+    with _live_fixture(monkeypatch) as (client, _runtime):
+        _workspaces_fixture(client)
+        second = _workspace_file_url(client, index=1)
+        assert client.get(second).status_code == 200
+
+        _apply(client, "workspace-removed")
+        assert client.get(second).status_code == 404
+        assert "Session Script" not in _region(client, "/newsletter/workspaces", "workspaces-list")
+
+        _apply(client, "workspace-added")
+        added = _region(client, "/newsletter/workspaces", "workspaces-list")
+        assert "Review Script" in added and "Editorial Notes" in added
+
+        _workspaces_fixture(client)
+        assert "Review Script" not in _region(client, "/newsletter/workspaces", "workspaces-list")
+        assert client.get(second).status_code == 200
+
+
+def test_the_non_live_fixture_page_registers_nothing(monkeypatch):
+    with _live_fixture(monkeypatch) as (client, _runtime):
+        response = client.get(server.NON_LIVE_PAGE_PATH)
+
+        assert response.status_code == 200
+        assert 'id="live-initial"' not in response.text
+        assert "live-refresh.js" not in response.text
+        assert "data-live-status" not in response.text

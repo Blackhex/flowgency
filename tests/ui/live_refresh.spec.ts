@@ -990,6 +990,7 @@ test('the handles registry is read-only and each key can be registered once', as
 // ── Shared navigation shell: base-page registration ─────────────────────────
 
 const ROSTER_SNAPSHOT = /\/newsletter\/agents\?__live=1$/;
+const NON_LIVE_PAGE = '/__ui/non-live-page';
 
 async function openRoster(page: Page): Promise<void> {
   await page.clock.install({ time: 0 });
@@ -1000,7 +1001,8 @@ test('a page without live regions registers nothing and sends no periodic reques
   const live: string[] = [];
   page.on('request', (request) => { if (request.url().includes('__live=1')) live.push(request.url()); });
   await page.clock.install({ time: 0 });
-  const response = await page.goto('/newsletter/workspaces');
+  // A purpose-built fixture page: every product page is live or retired, so none is a stable example.
+  const response = await page.goto(NON_LIVE_PAGE);
   expect(response?.status()).toBe(200);
   await page.clock.pauseAt(600_000);
   await page.clock.runFor(10_000);

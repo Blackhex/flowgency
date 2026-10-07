@@ -21,6 +21,7 @@ from flowgency.jobs.connected_process import ConnectedLaunchError
 from flowgency.jobs.processes import ProcessStopEvidence
 from flowgency.web.setup_sessions import SetupSessionConflict, SetupSessionManager
 from tests._connected_setup_helpers import FakeProcess
+from tests.ui.server import NON_LIVE_PAGE_PATH, install_non_live_page
 
 _LOCAL_BASE_URL = "http://127.0.0.1:8500"
 _LOCAL_PEER = ("127.0.0.1", 50000)
@@ -2732,8 +2733,15 @@ def test_sidebar_roster_page_registers_the_live_page_with_its_status_shell(workf
     assert "data-live-manual-refresh" in page
 
 
-def test_sidebar_pages_without_a_live_policy_do_not_register(workflow_web_env):
-    response = workflow_web_env.client.get("/newsletter/workspaces")
+@pytest.fixture
+def non_live_page():
+    route = install_non_live_page(app_mod.app)
+    yield NON_LIVE_PAGE_PATH
+    app_mod.app.router.routes.remove(route)
+
+
+def test_sidebar_pages_without_a_live_policy_do_not_register(workflow_web_env, non_live_page):
+    response = workflow_web_env.client.get(non_live_page)
     page = response.text
 
     assert response.status_code == 200

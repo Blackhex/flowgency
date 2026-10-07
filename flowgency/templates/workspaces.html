@@ -1,6 +1,51 @@
 {% extends "base.html" %}
 {% set active = "workspaces" %}
 
+{#- The page and every live snapshot render these same macros from the same context. -#}
+{% macro live_workspaces_status() -%}
+{% if enriched_workspaces %}{{ enriched_workspaces | length }} workspace{{ '' if enriched_workspaces | length == 1 else 's' }} configured{% else %}No workspaces configured{% endif %}
+{%- endmacro %}
+
+{% macro live_workspaces_list() -%}
+{% if enriched_workspaces %}
+{% for ws in enriched_workspaces %}
+<div data-live-key="workspace:{{ ws.row_key }}" class="bg-white rounded-lg border border-gray-200 p-4 md:p-6">
+  <div class="flex items-center justify-between mb-2">
+    <div class="flex items-center gap-3">
+      {% if ws.plugin %}
+        <span class="text-gray-400">{{ ws.plugin.icon_svg | safe }}</span>
+      {% endif %}
+      <h2 class="text-lg font-semibold text-gray-900">{{ ws.name }}</h2>
+      <span class="px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-600">{{ ws.type }}</span>
+    </div>
+    <div class="flex items-center gap-2">
+      {% if ws.config_files %}
+        <a href="/{{ team }}/workspaces/{{ loop.index0 }}/file"
+           class="px-3 py-1 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">
+          View Files
+        </a>
+      {% endif %}
+      {% if ws.can_launch %}
+        <span class="px-3 py-1 text-xs text-gray-400 border border-gray-200 rounded-lg" title="Launch command available">
+          Launchable
+        </span>
+      {% endif %}
+    </div>
+  </div>
+  <div class="text-sm text-gray-600">{{ ws.summary | safe }}</div>
+  {% for source in ws.sources if not source.available %}
+  <p data-live-key="workspace-source:{{ ws.row_key }}:{{ loop.index0 }}" class="mt-2 text-xs text-amber-700 dark:text-amber-300">Config file not found: {{ source.label }}</p>
+  {% endfor %}
+</div>
+{% endfor %}
+{% else %}
+<div data-live-key="workspaces:empty" class="bg-white rounded-lg border border-gray-200 p-8 text-center">
+  <p class="text-gray-500 mb-2">No workspaces configured for this team.</p>
+  <p class="text-sm text-gray-400">Add workspaces in <a href="/admin/teams/{{ team }}/edit" class="text-indigo-600 hover:underline">team settings</a> to define how you visualize and interact with these agents.</p>
+</div>
+{% endif %}
+{%- endmacro %}
+
 {% block title %}Workspaces - {{ team_name }}{% endblock %}
 
 {% block content %}
@@ -9,40 +54,7 @@
   <span class="text-sm text-gray-500">How you interact with these agents at runtime</span>
 </div>
 
-{% if enriched_workspaces %}
-<div class="space-y-4">
-  {% for ws in enriched_workspaces %}
-  <div class="bg-white rounded-lg border border-gray-200 p-4 md:p-6">
-    <div class="flex items-center justify-between mb-2">
-      <div class="flex items-center gap-3">
-        {% if ws.plugin %}
-          <span class="text-gray-400">{{ ws.plugin.icon_svg | safe }}</span>
-        {% endif %}
-        <h2 class="text-lg font-semibold text-gray-900">{{ ws.name }}</h2>
-        <span class="px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-600">{{ ws.type }}</span>
-      </div>
-      <div class="flex items-center gap-2">
-        {% if ws.config_files %}
-          <a href="/{{ team }}/workspaces/{{ loop.index0 }}/file"
-             class="px-3 py-1 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">
-            View Files
-          </a>
-        {% endif %}
-        {% if ws.can_launch %}
-          <span class="px-3 py-1 text-xs text-gray-400 border border-gray-200 rounded-lg" title="Launch command available">
-            Launchable
-          </span>
-        {% endif %}
-      </div>
-    </div>
-    <div class="text-sm text-gray-600">{{ ws.summary | safe }}</div>
-  </div>
-  {% endfor %}
-</div>
-{% else %}
-<div class="bg-white rounded-lg border border-gray-200 p-8 text-center">
-  <p class="text-gray-500 mb-2">No workspaces configured for this team.</p>
-  <p class="text-sm text-gray-400">Add workspaces in <a href="/admin/teams/{{ team }}/edit" class="text-indigo-600 hover:underline">team settings</a> to define how you visualize and interact with these agents.</p>
-</div>
-{% endif %}
+<div data-live-region="workspaces-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true">{{ live_workspaces_status() }}</div>
+
+<div data-live-region="workspaces-list" class="space-y-4">{{ live_workspaces_list() }}</div>
 {% endblock %}

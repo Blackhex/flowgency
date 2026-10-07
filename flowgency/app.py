@@ -66,6 +66,12 @@ from flowgency.tickets.models import UserTicketContext
 from flowgency.tickets.views import build_board_view
 import json as json_module
 from flowgency.workspaces import REGISTRY as WORKSPACE_REGISTRY
+from flowgency.workspaces.live import (
+    parse_loaded_identity,
+    source_metadata,
+    workspace_identity,
+    workspace_row_keys,
+)
 from flowgency.web import FlowgencyServices, build_services, get_services
 from flowgency.web.job_presentation import load_team_jobs
 from flowgency.web.logs import collect_agent_logs
@@ -74,7 +80,13 @@ from flowgency.web.logs import describe_log_file, log_belongs_to_agent, with_log
 from flowgency.web.log_preview import read_log_preview
 from flowgency.web.setup_security import SetupAccessDenied, SetupBrowserAccess
 from flowgency.web.setup_sessions import SetupSessionManager
-from flowgency.web.live import LiveBinding, LivePagePolicy, respond_live_or_html, shared_region_macros
+from flowgency.web.live import (
+    LiveBinding,
+    LivePagePolicy,
+    LiveSnapshot,
+    respond_live_or_html,
+    shared_region_macros,
+)
 from flowgency.web.state import flowgency_settings, runtime_team
 from flowgency.web.team_navigation import build_team_context
 from flowgency.web.routes import (
@@ -2044,70 +2056,171 @@ async def log_view(
     )
 
 
-@app.get("/{team}/workspaces", response_class=HTMLResponse)
-async def workspaces_list(request: Request, team: str):
-    """List all workspaces for a team."""
+WORKSPACES_LIST_STRUCTURE = "workspaces-list:1"
+WORKSPACES_LIST_REGION_MACROS = {
+    "workspaces-status": "live_workspaces_status",
+    "workspaces-list": "live_workspaces_list",
+}
+WORKSPACE_FILE_STRUCTURE = "workspace-file:1"
+WORKSPACE_FILE_REGION_MACROS = {"workspace-metadata": "live_workspace_metadata"}
+
+
+def _workspaces_list_context(request: Request, team: str) -> dict:
     g = get_team(team)
     workspace_list = g.get("workspaces", [])
     from flowgency.workspaces import REGISTRY
     enriched = []
-    for ws in workspace_list:
+    for ws, row_key in zip(workspace_list, workspace_row_keys(workspace_list)):
         plugin = REGISTRY.get(ws.get("type", "custom"))
+        config_files = plugin.get_config_files(ws.get("config", {})) if plugin else []
         enriched.append({
             **ws,
+            "row_key": row_key,
             "plugin": plugin,
             "summary": plugin.render_summary(ws.get("config", {})) if plugin else "",
-            "config_files": plugin.get_config_files(ws.get("config", {})) if plugin else [],
+            "config_files": config_files,
+            "sources": [
+                {"label": cf["label"], "available": source_metadata(cf["path"]).available}
+                for cf in config_files
+            ],
             "can_launch": plugin.supports_launch() if plugin else False,
         })
-    return templates.TemplateResponse(request, "workspaces.html", {
+    return {
         "request": request,
         **team_context(g),
         "enriched_workspaces": enriched,
         "active": "workspaces",
-    })
+    }
 
 
-@app.get("/{team}/workspaces/{idx}/file", response_class=HTMLResponse)
-async def workspace_file_view(request: Request, team: str, idx: int):
-    """View/edit a config file within a workspace."""
+def _workspaces_list_policy(team: str, context: dict) -> LivePagePolicy:
+    policy = LivePagePolicy(
+        template_name="workspaces.html",
+        binding=LiveBinding(page="workspaces", team=team),
+        structure=WORKSPACES_LIST_STRUCTURE,
+        region_macros=WORKSPACES_LIST_REGION_MACROS,
+        snapshot_url=f"/{quote(team, safe='')}/workspaces?__live=1",
+    )
+    return replace(policy, region_macros=shared_region_macros(context, policy))
+
+
+@app.get("/{team}/workspaces", response_class=HTMLResponse)
+async def workspaces_list(request: Request, team: str):
+    """List all workspaces for a team; ``?__live=1`` returns the live region snapshot."""
+    context = await run_in_threadpool(_workspaces_list_context, request, team)
+    return respond_live_or_html(request, templates, context, _workspaces_list_policy(team, context))
+
+
+class _IncompatibleWorkspaceBinding(Exception):
+    """The workspace at this position is no longer the one the page loaded."""
+
+    def __init__(self, identity: str) -> None:
+        super().__init__("workspace binding changed")
+        self.identity = identity
+
+
+def _workspace_file_context(
+    request: Request, team: str, idx: int, requested_path: str, loaded_identity: str | None
+) -> dict:
+    """Resolve the workspace file page; a live read (``loaded_identity`` set) never reads content."""
     g = get_team(team)
     workspace_list = g.get("workspaces", [])
     if idx < 0 or idx >= len(workspace_list):
         raise HTTPException(404, "Workspace not found")
     ws = workspace_list[idx]
+    identity = workspace_identity(ws)
+    # Compared before the allowlist, the stat and any read, so a reordered or edited
+    # workspace can never answer for the one this page loaded.
+    if loaded_identity is not None and loaded_identity != identity:
+        raise _IncompatibleWorkspaceBinding(identity)
     from flowgency.workspaces import REGISTRY
     plugin = REGISTRY.get(ws.get("type", "custom"))
     config_files = plugin.get_config_files(ws.get("config", {})) if plugin else []
-    file_path = request.query_params.get("path", "")
+    file_path = requested_path
     if not file_path and config_files:
         file_path = config_files[0]["path"]
     # Validate file is in the plugin's allowlist
     allowed_paths = [cf["path"] for cf in config_files]
     if file_path and file_path not in allowed_paths:
         raise HTTPException(403, "File not in workspace config files")
+    file_source = source_metadata(file_path) if file_path else None
     raw = ""
     language = "text"
     if file_path:
-        fpath = Path(file_path)
-        if fpath.exists():
-            raw = fpath.read_text()
+        if loaded_identity is None:
+            fpath = Path(file_path)
+            if fpath.exists():
+                raw = fpath.read_text()
         for cf in config_files:
             if cf["path"] == file_path:
                 language = cf.get("language", "text")
                 break
-    return templates.TemplateResponse(request, "workspace_detail.html", {
+    return {
         "request": request,
         **team_context(g),
         "ws": ws,
         "ws_idx": idx,
+        "ws_identity": identity,
         "plugin": plugin,
         "config_files": config_files,
         "current_file": file_path,
+        "file_source": file_source,
         "raw": raw,
         "language": language,
         "active": "workspaces",
-    })
+    }
+
+
+def _workspace_file_policy(team: str, idx: int, context: dict) -> LivePagePolicy:
+    # The identity the page loaded is part of the binding, so a snapshot never answers for
+    # a different workspace that now occupies this position.
+    query = {"path": context["current_file"], "__live_identity": context["ws_identity"]}
+    policy = LivePagePolicy(
+        template_name="workspace_detail.html",
+        binding=LiveBinding(page="workspace-file", team=team, entity=str(idx), query=query),
+        structure=WORKSPACE_FILE_STRUCTURE,
+        region_macros=WORKSPACE_FILE_REGION_MACROS,
+        snapshot_url=(
+            f"/{quote(team, safe='')}/workspaces/{idx}/file?{urlencode({**query, '__live': '1'})}"
+        ),
+    )
+    return replace(policy, region_macros=shared_region_macros(context, policy))
+
+
+def _incompatible_workspace_snapshot(
+    team: str, idx: int, requested_path: str, current_identity: str
+) -> JSONResponse:
+    """Content-free snapshot whose binding differs, so the page reports it needs a reload."""
+    snapshot = LiveSnapshot(
+        binding=LiveBinding(
+            page="workspace-file",
+            team=team,
+            entity=str(idx),
+            query={"path": requested_path, "__live_identity": current_identity},
+        ),
+        structure=WORKSPACE_FILE_STRUCTURE,
+        regions=[],
+    )
+    return JSONResponse(snapshot.model_dump(mode="json"), headers={"Cache-Control": "no-store"})
+
+
+@app.get("/{team}/workspaces/{idx}/file", response_class=HTMLResponse)
+async def workspace_file_view(request: Request, team: str, idx: int):
+    """View/edit a config file within a workspace; ``?__live=1`` returns metadata regions only."""
+    loaded_identity = None
+    if request.query_params.get("__live") == "1":
+        try:
+            loaded_identity = parse_loaded_identity(request.query_params.get("__live_identity"))
+        except ValueError:
+            raise HTTPException(400, "Invalid workspace binding")
+    requested_path = request.query_params.get("path", "")
+    try:
+        context = await run_in_threadpool(
+            _workspace_file_context, request, team, idx, requested_path, loaded_identity
+        )
+    except _IncompatibleWorkspaceBinding as mismatch:
+        return _incompatible_workspace_snapshot(team, idx, requested_path, mismatch.identity)
+    return respond_live_or_html(request, templates, context, _workspace_file_policy(team, idx, context))
 
 
 @app.post("/{team}/workspaces/{idx}/file/save", response_class=HTMLResponse)

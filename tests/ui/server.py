@@ -49,9 +49,19 @@ UI_RESET_PATH = "/__ui/reset"
 ACTIVITY_LOGS_FIXTURE = "agent-activity-logs"
 GIT_EVIDENCE_FIXTURE = "git-evidence"
 CONNECTED_SETUP_FIXTURE = "connected-setup"
+WORKSPACES_FIXTURE = "workspaces"
 SUPPORTED_UI_FIXTURES = frozenset(
-    {"default", ACTIVITY_LOGS_FIXTURE, GIT_EVIDENCE_FIXTURE, CONNECTED_SETUP_FIXTURE}
+    {"default", ACTIVITY_LOGS_FIXTURE, GIT_EVIDENCE_FIXTURE, CONNECTED_SETUP_FIXTURE, WORKSPACES_FIXTURE}
 )
+# A base-derived page that never opts in to live refresh; every product page is live or retired.
+NON_LIVE_PAGE_PATH = "/__ui/non-live-page"
+WORKSPACE_SOURCES_DIR = "workspace-sources"
+WORKSPACE_NOTES_NAME = "notes.md"
+WORKSPACE_SCRIPT_NAME = "session.sh"
+WORKSPACE_REVIEW_SCRIPT_NAME = "review.sh"
+WORKSPACE_NOTES_TEXT = "# Editorial notes\n\nSaved by the editor.\n"
+WORKSPACE_CHANGED_NOTES_TEXT = "# Editorial notes\n\nChanged elsewhere by another process.\n"
+WORKSPACE_SCRIPT_TEXT = "#!/bin/bash\ntmux new-session -d -s newsletter\n"
 # Small enough that a browser test can exceed it deliberately (via the emit
 # endpoint below) without pushing megabytes through a fake PTY queue.
 CONNECTED_SETUP_REPLAY_LIMIT = 4096
@@ -95,6 +105,11 @@ LIVE_CHANGE_CASES = frozenset(
         "log-oversized",
         "log-removed",
         "log-listing-membership",
+        "workspace-file-changes",
+        "workspace-file-removed",
+        "workspace-reordered",
+        "workspace-removed",
+        "workspace-added",
     }
 )
 INBOX_CLOCK_ADVANCE = timedelta(minutes=30)
@@ -426,6 +441,8 @@ def _apply_live_change(runtime: Path, case: str) -> None:
         _JOB_LIVE_CHANGES[case](runtime)
     elif case in _LOG_LIVE_CHANGES:
         _LOG_LIVE_CHANGES[case](runtime)
+    elif case in _WORKSPACE_LIVE_CHANGES:
+        _WORKSPACE_LIVE_CHANGES[case](runtime)
     else:
         raise ValueError(f"Unknown live change case: {case}")
 
@@ -829,6 +846,91 @@ _LOG_LIVE_CHANGES = {
 }
 
 
+def _workspace_sources(runtime: Path) -> Path:
+    return runtime / WORKSPACE_SOURCES_DIR
+
+
+def _workspace_entry(name: str, kind: str, path: Path) -> dict:
+    if kind == "custom":
+        config = {"label": "Notes", "config_path": str(path), "language": "markdown"}
+    else:
+        config = {"script_path": str(path)}
+    return {"name": name, "type": kind, "config": config}
+
+
+def _fixture_workspaces(runtime: Path) -> list[dict]:
+    sources = _workspace_sources(runtime)
+    return [
+        _workspace_entry("Editorial Notes", "custom", sources / WORKSPACE_NOTES_NAME),
+        _workspace_entry("Session Script", "tmux", sources / WORKSPACE_SCRIPT_NAME),
+    ]
+
+
+def _write_workspace_source(runtime: Path, name: str, text: str) -> None:
+    # Bytes, so Windows does not rewrite the newlines the status line reports a size for.
+    sources = _workspace_sources(runtime)
+    sources.mkdir(parents=True, exist_ok=True)
+    (sources / name).write_bytes(text.encode("utf-8"))
+
+
+def _seed_workspace_sources(runtime: Path) -> None:
+    _write_workspace_source(runtime, WORKSPACE_NOTES_NAME, WORKSPACE_NOTES_TEXT)
+    _write_workspace_source(runtime, WORKSPACE_SCRIPT_NAME, WORKSPACE_SCRIPT_TEXT)
+
+
+def _workspace_file_changes(runtime: Path) -> None:
+    _write_workspace_source(runtime, WORKSPACE_NOTES_NAME, WORKSPACE_CHANGED_NOTES_TEXT)
+
+
+def _workspace_file_removed(runtime: Path) -> None:
+    (_workspace_sources(runtime) / WORKSPACE_NOTES_NAME).unlink(missing_ok=True)
+
+
+def _workspace_reordered(runtime: Path) -> None:
+    _patch_runtime_config(runtime, lambda raw: raw["teams"]["newsletter"]["workspaces"].reverse())
+
+
+def _workspace_removed(runtime: Path) -> None:
+    _patch_runtime_config(runtime, lambda raw: raw["teams"]["newsletter"]["workspaces"].pop())
+
+
+def _workspace_added(runtime: Path) -> None:
+    _write_workspace_source(runtime, WORKSPACE_REVIEW_SCRIPT_NAME, WORKSPACE_SCRIPT_TEXT)
+    entry = _workspace_entry(
+        "Review Script", "tmux", _workspace_sources(runtime) / WORKSPACE_REVIEW_SCRIPT_NAME
+    )
+    _patch_runtime_config(runtime, lambda raw: raw["teams"]["newsletter"]["workspaces"].append(entry))
+
+
+_WORKSPACE_LIVE_CHANGES = {
+    "workspace-file-changes": _workspace_file_changes,
+    "workspace-file-removed": _workspace_file_removed,
+    "workspace-reordered": _workspace_reordered,
+    "workspace-removed": _workspace_removed,
+    "workspace-added": _workspace_added,
+}
+
+
+def install_non_live_page(app):
+    """Register the purpose-built page that extends the base layout and has no live policy."""
+    from fastapi.responses import HTMLResponse
+
+    from flowgency.app import get_team, team_context
+
+    for route in app.router.routes:
+        if getattr(route, "path", None) == NON_LIVE_PAGE_PATH:
+            return route
+
+    @app.get(NON_LIVE_PAGE_PATH, response_class=HTMLResponse, include_in_schema=False)
+    async def non_live_page(request: Request) -> Response:
+        context = team_context(get_team("newsletter"))
+        return request.app.state.templates.TemplateResponse(
+            request, "base.html", {"request": request, **context, "active": "none"}
+        )
+
+    return app.router.routes[-1]
+
+
 def _install_ui_test_runtime() -> None:
     global _REAL_COPILOT_INTEGRATION
     import flowgency.jobs.submission as submission_module
@@ -845,6 +947,9 @@ def _install_ui_test_runtime() -> None:
         _REAL_COPILOT_INTEGRATION = REGISTRY.get("copilot")
     submission_module.submit_job_request = _ui_submit_job_request
     web_dependencies.submit_job_request = _ui_submit_job_request
+
+    # Idempotent and independent of the flag below, so a scoped removal never leaves the page absent.
+    install_non_live_page(app)
 
     if getattr(app.state, "ui_reset_route_installed", False):
         return
@@ -2164,6 +2269,10 @@ def _reset_runtime_state(runtime: Path, *, fixture: str = "default") -> None:
             "mode": "local",
             "allowed_refs": [GIT_EVIDENCE_REF],
         }
+    _clear_directory(_workspace_sources(runtime))
+    if fixture == WORKSPACES_FIXTURE:
+        config["teams"]["newsletter"]["workspaces"] = _fixture_workspaces(runtime)
+        _seed_workspace_sources(runtime)
     _write_runtime_config(runtime / "config.yaml", config)
 
     _clear_directory(runtime / "workflow-library")
@@ -2189,7 +2298,7 @@ def _reset_runtime_state(runtime: Path, *, fixture: str = "default") -> None:
         _apply_activity_logs_fixture(runtime, runtime / "config.yaml")
     elif fixture == GIT_EVIDENCE_FIXTURE:
         _seed_git_evidence_fixture(runtime, config)
-    elif fixture != "default":
+    elif fixture not in {"default", WORKSPACES_FIXTURE}:
         raise ValueError(f"Unknown UI fixture: {fixture}")
 
 

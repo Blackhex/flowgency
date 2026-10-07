@@ -229,6 +229,65 @@ test('keyboard and a 320px viewport reach the diff controls', async ({ page }) =
   await assertNoConsoleErrors(page);
 });
 
+test('a navigation change refreshes the shell while the retained diff stays byte and DOM stable', async ({ page, request }) => {
+  const index = await fixtureIndex();
+  await page.goto(diffHref(index, index.current, 'ticket'));
+  const changes = page.locator('#git-evidence-changes');
+  await expect(changes.locator('.git-diff-table').first()).toBeVisible();
+  const bytesBefore = await changes.evaluate((node) => node.innerHTML);
+  const headBefore = await page.locator('.git-evidence-meta').evaluate((node) => node.outerHTML);
+  const navBefore = await page.locator('nav[aria-label="Changed files"]').evaluate((node) => node.outerHTML);
+  const changesNode = await changes.elementHandle();
+  await page.evaluate(() => {
+    const code = Array.from(document.querySelectorAll('.git-diff-table code'))
+      .find((node) => (node.textContent ?? '').trim() !== '')!;
+    const range = document.createRange();
+    range.selectNodeContents(code);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+  });
+  const selected = await page.evaluate(() => String(window.getSelection()));
+  expect(selected.length).toBeGreaterThan(0);
+  await expect(page.locator('#team-switcher option[value="research"]')).not.toHaveText('Research updated');
+
+  expect((await request.post('/__ui/live/change', { data: { case: 'navigation-membership' } })).status()).toBe(204);
+
+  await expect(page.locator('#team-switcher option[value="research"]')).toHaveText('Research updated');
+  expect(await changesNode!.evaluate((node) => node.isConnected)).toBe(true);
+  expect(await changes.evaluate((node) => node.innerHTML)).toBe(bytesBefore);
+  expect(await page.locator('.git-evidence-meta').evaluate((node) => node.outerHTML)).toBe(headBefore);
+  expect(await page.locator('nav[aria-label="Changed files"]').evaluate((node) => node.outerHTML)).toBe(navBefore);
+  expect(await page.evaluate(() => String(window.getSelection()))).toBe(selected);
+  await expect(page.locator('[data-live-status]')).toBeHidden();
+  // The immutable download is served from the retained bytes, not from anything the refresh touched.
+  const downloadUrl = await page.getByRole('link', { name: 'Download patch', exact: true }).getAttribute('href');
+  const patch = await (await request.get(downloadUrl!)).body();
+  expect(createHash('sha256').update(patch).digest('hex')).toBe(index.current.patch_sha256);
+  await assertNoConsoleErrors(page);
+});
+
+test('the evidence page registers one shell-only handle and never polls the diff content', async ({ page }) => {
+  const index = await fixtureIndex();
+  const live: string[] = [];
+  page.on('request', (request) => { if (request.url().includes('__live=1')) live.push(request.url()); });
+  await page.goto(diffHref(index, index.current, 'job'));
+
+  expect(await page.evaluate(() => Array.from(window.FlowgencyLive.handles.keys()))).toEqual(['page']);
+  await expect.poll(() => live.length).toBeGreaterThan(0);
+  const snapshot = await (await page.request.get(live[0])).json();
+  expect(snapshot.binding.page).toBe('git-evidence');
+  expect(snapshot.binding.query).toEqual({ source: 'job' });
+  expect(snapshot.regions.map((entry: { key: string }) => entry.key)).toEqual([
+    'navigation-teams',
+    'navigation-primary',
+    'navigation-workflows',
+    'navigation-workspace',
+    'git-evidence-back',
+  ]);
+  expect(JSON.stringify(snapshot)).not.toContain('git-evidence-changes');
+});
+
 async function regionFit(page: Page, selector: string) {
   return page.evaluate((target) => {
     const region = document.querySelector(target) as HTMLElement | null;

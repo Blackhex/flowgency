@@ -1,5 +1,14 @@
 {% extends "base.html" %}
 
+{#- The page and every live snapshot render this same macro from the same context. It is the only
+    live part of the viewer; the retained evidence below is immutable and never a region. -#}
+{% macro live_git_evidence_back() -%}
+<a data-live-key="git-evidence:back" class="git-evidence-back" href="{{ back_href }}">
+  <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.5 3 4.5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  <span>{{ back_label }}</span>
+</a>
+{%- endmacro %}
+
 {% block title %}Committed changes - {{ team_name }}{% endblock %}
 
 {% block content %}
@@ -8,10 +17,7 @@
   <a class="git-evidence-skip" href="#git-evidence-changes">Skip to changes</a>
   <header class="git-evidence-head">
     <div class="git-evidence-head-row">
-      <a class="git-evidence-back" href="{{ back_href }}">
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.5 3 4.5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        <span>{{ back_label }}</span>
-      </a>
+      <span data-live-region="git-evidence-back" style="display: contents">{{ live_git_evidence_back() }}</span>
       <a class="git-evidence-download" href="{{ patch_href }}">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8M5 7l3 3 3-3M3 13h10" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         <span>Download patch</span>

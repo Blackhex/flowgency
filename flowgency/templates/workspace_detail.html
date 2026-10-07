@@ -1,6 +1,16 @@
 {% extends "base.html" %}
 {% set active = "workspaces" %}
 
+{#- The page and every live snapshot render this same macro from the same context.
+    It carries only the selected path and the file's size and modification time; the
+    file content and the editor stay controller-owned and are never part of a snapshot. -#}
+{% macro live_workspace_metadata() -%}
+<div data-live-key="workspace-file:path" class="break-all">{{ current_file }}</div>
+{% if file_source %}
+<div data-live-key="workspace-file:source" data-live-revision="{{ file_source.revision }}" data-live-scope="workspace-file" data-live-changed="This file changed outside the editor. Reload to see the saved version.">{% if file_source.available %}{{ file_source.size }} bytes · Last changed {{ file_source.modified }}{% else %}File not found{% endif %}</div>
+{% endif %}
+{%- endmacro %}
+
 {% block title %}{{ ws.name }} - Workspaces - {{ team_name }}{% endblock %}
 
 {% block content %}
@@ -27,14 +37,17 @@
 </div>
 {% endif %}
 
-<div class="bg-white rounded-lg border border-gray-200 p-4 md:p-6">
-  <div class="text-xs text-gray-400 font-mono mb-4 break-all">{{ current_file }}</div>
+{#- Empty until agent-detail-notices.js sees the file change after this page loaded it. -#}
+<div data-live-notices role="status" aria-live="polite"></div>
 
-  <div id="rendered">
+<div class="bg-white rounded-lg border border-gray-200 p-4 md:p-6">
+  <div data-live-region="workspace-metadata" class="text-xs text-gray-400 font-mono mb-4">{{ live_workspace_metadata() }}</div>
+
+  <div id="rendered" data-live-owned>
     <pre class="whitespace-pre-wrap text-sm bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto"><code>{{ raw }}</code></pre>
   </div>
 
-  <div id="editor" class="hidden">
+  <div id="editor" class="hidden" data-live-owned>
     <form method="POST" action="/{{ team }}/workspaces/{{ ws_idx }}/file/save">
       <input type="hidden" name="file_path" value="{{ current_file }}">
       <textarea name="content" rows="30" class="w-full font-mono text-sm border border-gray-300 rounded-lg p-3 bg-gray-50">{{ raw }}</textarea>
@@ -45,3 +58,5 @@
   </div>
 </div>
 {% endblock %}
+
+{% block page_scripts %}<script src="/static/agent-detail-notices.js"></script>{% endblock %}
