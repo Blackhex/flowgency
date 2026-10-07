@@ -22,7 +22,10 @@ __all__ = [
     "LivePagePolicy",
     "render_live_snapshot",
     "live_etag",
+    "live_registration",
     "respond_live_or_html",
+    "shared_region_macros",
+    "SHARED_NAVIGATION_TEMPLATE",
 ]
 
 
@@ -66,13 +69,30 @@ class LivePagePolicy:
     snapshot_url: str
 
 
+# A region macro is normally a top-level macro of the policy's own template. A
+# "<template>#<macro>" reference names a macro of another template instead, so
+# shared regions (base.html navigation) need no import in every page template.
+_MACRO_REFERENCE_SEPARATOR = "#"
+
+SHARED_NAVIGATION_TEMPLATE = "_live_shell.html"
+_SHARED_NAVIGATION_REGIONS: Mapping[str, str] = {
+    "navigation-teams": "live_navigation_teams",
+    "navigation-primary": "live_navigation_primary",
+    "navigation-workflows": "live_navigation_workflows",
+    "navigation-workspace": "live_navigation_workspace",
+}
+# Admin pages render the static admin menu; only the team switcher is data-driven.
+_SHARED_ADMIN_REGIONS = frozenset({"navigation-teams"})
+
 # A structure identifier is an explicit "<name>:<version>" compatibility token,
 # never an mtime, content hash or other control-plane schema value.
 _STRUCTURE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*:[0-9]+$")
 
+# Inline <svg> icons are inert; the active svg elements below stay blocked.
 _UNSAFE_TAGS = frozenset({
     "script", "iframe", "object", "embed", "base", "link", "style",
-    "meta", "svg", "math", "animate", "set", "foreignobject",
+    "meta", "math", "animate", "animatetransform", "animatemotion", "set",
+    "foreignobject", "use", "image",
 })
 _UNSAFE_ATTRS = frozenset({"srcdoc", "autofocus"})
 _URL_ATTRS = frozenset({
@@ -321,15 +341,20 @@ def render_live_snapshot(
     items = _region_items(policy.region_macros)
 
     env = templates.env if hasattr(templates, "env") else templates
-    render_context = _macro_only_context(env, policy.template_name, context)
+    macro_contexts: dict[str, Any] = {}
 
     regions: list[LiveRegion] = []
-    for key, macro_name in items:
+    for key, reference in items:
+        template_name, _, macro_name = reference.rpartition(_MACRO_REFERENCE_SEPARATOR)
+        template_name = template_name or policy.template_name
+        # Compile each template once per snapshot, and only when a region needs it.
+        if template_name not in macro_contexts:
+            macro_contexts[template_name] = _macro_only_context(env, template_name, context)
         try:
-            macro = render_context.vars[macro_name]
+            macro = macro_contexts[template_name].vars[macro_name]
         except KeyError:
             raise LiveSnapshotError(
-                f"template {policy.template_name!r} defines no top-level macro {macro_name!r}"
+                f"template {template_name!r} defines no top-level macro {macro_name!r}"
             ) from None
         html = str(macro())
         _validate_fragment_safety(html)
@@ -338,6 +363,32 @@ def render_live_snapshot(
     _check_region_key_collisions(regions)
 
     return LiveSnapshot(binding=policy.binding, structure=policy.structure, regions=regions)
+
+
+def shared_region_macros(context: Mapping[str, Any], policy: LivePagePolicy) -> Mapping[str, str]:
+    """The policy's own region macros plus the shared navigation regions that
+    ``base.html`` renders for this context, ready for ``replace(policy, region_macros=...)``."""
+    admin = bool(context.get("admin_active"))
+    merged: dict[str, str] = {}
+    for key, macro_name in _SHARED_NAVIGATION_REGIONS.items():
+        if admin and key not in _SHARED_ADMIN_REGIONS:
+            continue
+        merged[key] = f"{SHARED_NAVIGATION_TEMPLATE}{_MACRO_REFERENCE_SEPARATOR}{macro_name}"
+    for key, macro_name in policy.region_macros.items():
+        if key in merged:
+            raise LiveSnapshotError(f"page region {key!r} collides with a shared navigation region")
+        merged[key] = macro_name
+    return merged
+
+
+def live_registration(policy: LivePagePolicy) -> dict[str, Any]:
+    """Non-secret registration data a page embeds as ``#live-initial`` (via ``tojson``)."""
+    return {
+        "format": 1,
+        "binding": policy.binding.model_dump(mode="json"),
+        "structure": policy.structure,
+        "url": policy.snapshot_url,
+    }
 
 
 def live_etag(snapshot: LiveSnapshot) -> str:
@@ -359,6 +410,7 @@ def respond_live_or_html(
     status_code: int = 200,
 ) -> Response:
     wants_live = request.query_params.get("__live") == "1"
+    html_context = {**context, "live_registration": live_registration(policy)}
 
     if status_code >= 400:
         headers = {"Cache-Control": "no-store"}
@@ -368,7 +420,7 @@ def respond_live_or_html(
                 snapshot.model_dump(mode="json"), status_code=status_code, headers=headers
             )
         return templates.TemplateResponse(
-            request, policy.template_name, context, status_code=status_code, headers=headers
+            request, policy.template_name, html_context, status_code=status_code, headers=headers
         )
 
     if wants_live:
@@ -385,4 +437,4 @@ def respond_live_or_html(
             return Response(status_code=304, headers=headers)
         return JSONResponse(snapshot.model_dump(mode="json"), status_code=status_code, headers=headers)
 
-    return templates.TemplateResponse(request, policy.template_name, context, status_code=status_code)
+    return templates.TemplateResponse(request, policy.template_name, html_context, status_code=status_code)

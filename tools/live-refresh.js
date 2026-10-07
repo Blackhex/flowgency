@@ -22,7 +22,8 @@ const LOCAL_ATTRIBUTES = ['open', 'aria-expanded'];
 // Kept in step with the server-side fragment policy in flowgency/web/live.py.
 const UNSAFE_TAGS = new Set([
   'script', 'iframe', 'object', 'embed', 'base', 'link', 'style',
-  'meta', 'svg', 'math', 'animate', 'set', 'foreignobject',
+  'meta', 'math', 'animate', 'animatetransform', 'animatemotion', 'set',
+  'foreignobject', 'use', 'image',
 ]);
 const UNSAFE_ATTRIBUTES = new Set(['srcdoc', 'autofocus']);
 const URL_ATTRIBUTES = new Set([
@@ -745,6 +746,105 @@ class LiveRegionView {
   }
 }
 
+// ── Base-page registration ────────────────────────────────────────────────
+
+const PAGE_KEY = 'page';
+const PAGE_STATUS_TEXT = Object.freeze({
+  stale: 'Live updates are paused. This page shows the last data it loaded.',
+  incompatible: 'This page has changed. Refresh to load the current version.',
+  unavailable: 'This page is no longer available. Refresh to check.',
+});
+
+let iconScriptRequested = false;
+
+function renderStatusIcons() {
+  const lucide = window.lucide;
+  if (lucide && typeof lucide.createIcons === 'function') {
+    lucide.createIcons({ attrs: { 'aria-hidden': 'true', focusable: 'false' } });
+    return;
+  }
+  if (iconScriptRequested) return;
+  iconScriptRequested = true;
+  const script = document.createElement('script');
+  script.src = '/static/lucide.min.js';
+  script.addEventListener('load', renderStatusIcons);
+  document.head.append(script);
+}
+
+function readPageRegistration() {
+  const holder = document.getElementById('live-initial');
+  if (!holder) return null;
+  let initial;
+  try {
+    initial = JSON.parse(holder.textContent || '');
+  } catch {
+    return null;
+  }
+  if (
+    !initial || initial.format !== VERSION || typeof initial.structure !== 'string'
+    || typeof initial.url !== 'string' || !initial.binding || typeof initial.binding !== 'object'
+  ) return null;
+  try {
+    if (new URL(initial.url, window.location.href).origin !== window.location.origin) return null;
+  } catch {
+    return null;
+  }
+  return initial;
+}
+
+// A page registers only when it embeds #live-initial and owns real live regions.
+function registerPage() {
+  if (handles.has(PAGE_KEY) || !document.querySelector(REGION_SELECTOR)) return;
+  const initial = readPageRegistration();
+  if (!initial) return;
+
+  const shell = document.querySelector('[data-live-status][role="status"]');
+  const label = shell && shell.querySelector('[data-live-status-label]');
+  const button = shell && shell.querySelector('[data-live-manual-refresh]');
+  let kind = 'healthy';
+  let handle = null;
+
+  const view = new LiveRegionView(
+    document.body,
+    { binding: initial.binding, structure: initial.structure },
+    {
+      onDrop: () => {
+        if (handle) handle.invalidate().catch(reportError);
+      },
+    },
+  );
+
+  handle = register({
+    key: PAGE_KEY,
+    binding: () => initial.binding,
+    url: () => initial.url,
+    apply: (snapshot) => view.apply(snapshot),
+    flushDeferred: () => view.flushDeferred(),
+    invalidate: () => view.invalidate(initial.binding),
+    dispose: () => view.dispose(),
+    status: (next) => {
+      kind = next;
+      if (!shell) return;
+      shell.setAttribute('data-live-status', next);
+      if (next === 'healthy') {
+        shell.hidden = true;
+        return;
+      }
+      if (label) label.textContent = PAGE_STATUS_TEXT[next] || '';
+      shell.hidden = false;
+      renderStatusIcons();
+    },
+  });
+
+  // Only an explicit click refreshes; a passive failure never reloads the page.
+  if (button) {
+    button.addEventListener('click', () => {
+      if (kind === 'stale') handle.refresh().catch(reportError);
+      else window.location.reload();
+    });
+  }
+}
+
 if (!window.FlowgencyLive) {
   window.FlowgencyLive = Object.freeze({
     version: VERSION,
@@ -752,4 +852,6 @@ if (!window.FlowgencyLive) {
     handles,
     LiveRegionView,
   });
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', registerPage);
+  else registerPage();
 }

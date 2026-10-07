@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +13,13 @@ from flowgency.fs.snapshot import AssetValidationError
 from flowgency.instances import AgentInstanceCreate, InstanceMoveConflict
 from flowgency.prompts import PromptNotFoundError
 from flowgency.web.dependencies import FlowgencyServices, get_services
+from flowgency.web.live import (
+    LiveBinding,
+    LivePagePolicy,
+    live_registration,
+    respond_live_or_html,
+    shared_region_macros,
+)
 from flowgency.web.team_navigation import build_team_context
 
 
@@ -36,6 +43,25 @@ def _team_context(request: Request, snapshot, team_id: str) -> dict:
         tips_dismissed=[],
         ticket_service=request.app.state.services.tickets,
     )
+
+
+def _roster_policy(team_id: str, context: dict) -> LivePagePolicy:
+    policy = LivePagePolicy(
+        template_name="agents.html",
+        binding=LiveBinding(page="agents", team=team_id),
+        structure="agents-shell:1",
+        region_macros={},
+        snapshot_url=f"/{team_id}/agents?__live=1",
+    )
+    return replace(policy, region_macros=shared_region_macros(context, policy))
+
+
+def _roster_live_response(request: Request, services: FlowgencyServices, team_id: str):
+    snapshot = services.config_store.load()
+    if team_id not in snapshot.config.teams:
+        raise HTTPException(status_code=404, detail=f"Unknown team: {team_id}")
+    context = {**_team_context(request, snapshot, team_id), "active": "agents"}
+    return respond_live_or_html(request, _templates(request), context, _roster_policy(team_id, context))
 
 
 def _friendly_status(status: str) -> str:
@@ -294,13 +320,17 @@ def _render_roster(
             warning = str(exc.detail)
         status_code = exc.status_code
         instances = _fallback_instance_rows(snapshot, team_id)
+    team_context = _team_context(request, snapshot, team_id)
     return _templates(request).TemplateResponse(
         request,
         "agents.html",
         {
             "request": request,
-            **_team_context(request, snapshot, team_id),
+            **team_context,
             "active": "agents",
+            "live_registration": live_registration(
+                _roster_policy(team_id, {**team_context, "active": "agents"})
+            ),
             "instances": instances,
             "config_revision": snapshot.revision,
             "available_blueprints": available_blueprints,
@@ -318,6 +348,8 @@ def _render_roster(
 
 @router.get("/{team}/agents", response_class=HTMLResponse)
 async def agents_roster(request: Request, team: str, services: FlowgencyServices = Depends(get_services)):
+    if request.query_params.get("__live") == "1":
+        return _roster_live_response(request, services, team)
     if services.instances is None:
         if isinstance(services.startup_error, ValidationFailed):
             return _render_roster(

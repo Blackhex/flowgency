@@ -1,9 +1,11 @@
 """Tests for web server startup and reload configuration."""
 
+import json
 import re
 import shutil
 import threading
 from dataclasses import replace
+from html.parser import HTMLParser
 from pathlib import Path
 
 import pytest
@@ -2629,3 +2631,162 @@ def test_dashboard_terminal_link_opens_an_inspection_view(completion_session, ra
     page = session.client.get("/newsletter/")
 
     assert 'href="/setup/session?view=inspection"' in page.text
+
+
+# ── Shared team navigation: live snapshot of the base-page shell ────────────
+
+_ROSTER_LIVE_URL = "/newsletter/agents?__live=1"
+_NAVIGATION_REGIONS = [
+    "navigation-teams",
+    "navigation-primary",
+    "navigation-workflows",
+    "navigation-workspace",
+]
+
+
+def _live_regions(response) -> dict[str, str]:
+    return {region["key"]: region["html"] for region in response.json()["regions"]}
+
+
+class _RegionExtractor(HTMLParser):
+    """Inner HTML of each [data-live-region] root, sliced from the source markup."""
+
+    def __init__(self, html: str) -> None:
+        super().__init__(convert_charrefs=False)
+        self._html = html
+        self._line_starts = [0] + [match.end() for match in re.finditer("\n", html)]
+        self._open: tuple[str, str, int, int] | None = None
+        self.regions: dict[str, str] = {}
+
+    def _offset(self) -> int:
+        line, column = self.getpos()
+        return self._line_starts[line - 1] + column
+
+    def handle_starttag(self, tag, attrs):
+        if self._open is None:
+            key = dict(attrs).get("data-live-region")
+            if key:
+                start = self._offset() + len(self.get_starttag_text())
+                self._open = (key, tag, 1, start)
+        elif tag == self._open[1]:
+            key, name, depth, start = self._open
+            self._open = (key, name, depth + 1, start)
+
+    def handle_endtag(self, tag):
+        if self._open is None or tag != self._open[1]:
+            return
+        key, name, depth, start = self._open
+        if depth == 1:
+            self.regions[key] = self._html[start:self._offset()]
+            self._open = None
+        else:
+            self._open = (key, name, depth - 1, start)
+
+
+def _page_regions(html: str) -> dict[str, str]:
+    extractor = _RegionExtractor(html)
+    extractor.feed(html)
+    return extractor.regions
+
+
+def _squash(markup: str) -> str:
+    return re.sub(r">\s+<", "><", re.sub(r"\s+", " ", markup)).strip()
+
+
+def test_sidebar_live_snapshot_serves_shared_navigation_for_the_agents_roster(workflow_web_env):
+    response = workflow_web_env.client.get(_ROSTER_LIVE_URL)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["binding"] == {
+        "page": "agents", "team": "newsletter", "entity": None, "tab": None, "query": {}
+    }
+    assert body["structure"] == "agents-shell:1"
+    assert list(_live_regions(response)) == _NAVIGATION_REGIONS
+    assert response.headers["cache-control"] == "private, no-cache"
+
+
+def test_sidebar_live_snapshot_matches_the_initial_html_regions(workflow_web_env):
+    page = workflow_web_env.client.get("/newsletter/agents")
+    snapshot = workflow_web_env.client.get(_ROSTER_LIVE_URL)
+
+    initial = {key: _squash(html) for key, html in _page_regions(page.text).items()}
+    live = {key: _squash(html) for key, html in _live_regions(snapshot).items()}
+    assert set(initial) == set(_NAVIGATION_REGIONS)
+    assert initial == live
+
+
+def test_sidebar_roster_page_registers_the_live_page_with_its_status_shell(workflow_web_env):
+    page = workflow_web_env.client.get("/newsletter/agents").text
+
+    match = re.search(r'<script type="application/json" id="live-initial">(.*?)</script>', page, re.DOTALL)
+    assert match is not None
+    registration = json.loads(match.group(1))
+    assert registration["url"] == _ROSTER_LIVE_URL
+    assert registration["structure"] == "agents-shell:1"
+    assert registration["binding"]["page"] == "agents"
+    assert "secret" not in match.group(1).lower()
+    assert '<script src="/static/live-refresh.js"></script>' in page
+    assert re.search(r'<div data-live-status role="status" hidden', page)
+    assert "data-live-manual-refresh" in page
+
+
+def test_sidebar_pages_without_a_live_policy_do_not_register(workflow_web_env):
+    page = workflow_web_env.client.get("/newsletter/logs").text
+
+    assert 'id="live-initial"' not in page
+    assert "live-refresh.js" not in page
+    assert "data-live-status" not in page
+
+
+def test_sidebar_live_snapshot_unknown_team_is_not_found(workflow_web_env):
+    assert workflow_web_env.client.get("/missing/agents?__live=1").status_code == 404
+
+
+def test_sidebar_live_snapshot_is_conditional_and_changes_with_team_label(workflow_web_env):
+    client = workflow_web_env.client
+    first = client.get(_ROSTER_LIVE_URL)
+    etag = first.headers["etag"]
+    assert client.get(_ROSTER_LIVE_URL, headers={"If-None-Match": etag}).status_code == 304
+
+    store = workflow_web_env.store
+    store.patch(store.load().revision, lambda raw: raw["teams"]["support"].update(name="Support updated"))
+
+    changed = client.get(_ROSTER_LIVE_URL, headers={"If-None-Match": etag})
+    assert changed.status_code == 200
+    assert changed.headers["etag"] != etag
+    assert "Support updated" in _live_regions(changed)["navigation-teams"]
+
+
+def test_sidebar_live_snapshot_reflects_workflow_count_and_unavailability(workflow_web_env):
+    client = workflow_web_env.client
+    workflows = _live_regions(client.get(_ROSTER_LIVE_URL))["navigation-workflows"]
+    assert 'data-workflow-state="count">0<' in _squash(workflows)
+
+    workflow_web_env.seed_ticket()
+    counted = _live_regions(client.get(_ROSTER_LIVE_URL))["navigation-workflows"]
+    assert 'data-workflow-state="count">1<' in _squash(counted)
+
+    shutil.rmtree(workflow_web_env.root_a)
+    unavailable = _live_regions(client.get(_ROSTER_LIVE_URL))["navigation-workflows"]
+    assert 'data-workflow-state="unavailable"' in unavailable
+    assert 'data-workflow-state="count"' not in unavailable
+
+
+def test_sidebar_live_snapshot_reflects_workspace_membership(workflow_web_env):
+    client = workflow_web_env.client
+    store = workflow_web_env.store
+    assert 'data-live-key="nav:workspaces"' in _live_regions(client.get(_ROSTER_LIVE_URL))["navigation-workspace"]
+
+    store.patch(store.load().revision, lambda raw: raw["teams"]["newsletter"].update(workspaces=[]))
+
+    assert 'data-live-key="nav:workspaces"' not in _live_regions(client.get(_ROSTER_LIVE_URL))["navigation-workspace"]
+
+
+def test_sidebar_live_snapshot_is_keyed_by_team_and_workflow_identity(workflow_web_env):
+    regions = _live_regions(workflow_web_env.client.get(_ROSTER_LIVE_URL))
+
+    assert 'data-live-key="team:newsletter"' in regions["navigation-teams"]
+    assert 'data-live-key="team:support"' in regions["navigation-teams"]
+    assert 'data-live-key="workflow:board-a"' in regions["navigation-workflows"]
+    assert 'data-live-key="nav:agents"' in regions["navigation-primary"]

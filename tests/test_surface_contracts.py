@@ -225,6 +225,7 @@ def test_retired_templates_are_deleted_and_navigation_uses_current_surfaces():
     template_root = REPO_ROOT / "flowgency" / "templates"
     assert not {path.name for path in template_root.iterdir()} & RETIRED_TEMPLATES
     navigation = (template_root / "base.html").read_text(encoding="utf-8")
+    navigation += (template_root / "_live_shell.html").read_text(encoding="utf-8")
     for retired_href in ("/{{ group }}/documents", "/{{ group }}/prompts", "/{{ group }}/memory"):
         assert retired_href not in navigation
     for retained_label in ("Agent Library", "Memory Channels", "Jobs", "Agents"):
@@ -323,6 +324,18 @@ def test_setup_skill_copilot_setup_is_automatic_not_manual_junction():
     setup_skill = (REPO_ROOT / "kb" / "setup-skill.md").read_text(encoding="utf-8")
     assert "automatically" in setup_skill
     assert "New-Item -ItemType Junction" not in setup_skill
+
+
+def test_base_template_renders_shared_navigation_through_live_regions():
+    base = (REPO_ROOT / "flowgency" / "templates" / "base.html").read_text(encoding="utf-8")
+
+    for key in ("navigation-teams", "navigation-primary", "navigation-workflows", "navigation-workspace"):
+        assert f'data-live-region="{key}"' in base
+    assert '<div data-live-status role="status" hidden' in base
+    assert "data-live-manual-refresh" in base
+    assert 'data-lucide="refresh-cw"' in base
+    assert 'id="live-initial"' in base and "live_registration | tojson" in base
+    assert "{% if live_registration %}" in base
 
 
 def test_non_domain_group_tokens_remain_unchanged():

@@ -245,3 +245,59 @@ def test_completion_fixture_endpoint_rejects_invalid_bodies_without_an_attempt(m
             assert client.post(path, json={"scheduler_result": "confirmed"}).status_code == 404
     finally:
         server._safe_remove_runtime(runtime)
+
+
+def test_live_change_case_accepts_only_the_closed_allowlist():
+    assert server._live_change_case({"case": "navigation-membership"}) == "navigation-membership"
+    assert server._live_change_case({"case": "navigation-workflow-count"}) == "navigation-workflow-count"
+
+    rejected = [
+        None,
+        [],
+        {},
+        {"case": "unknown"},
+        {"case": ""},
+        {"case": 1},
+        {"case": "navigation-membership", "path": "config.yaml"},
+        {"case": "../navigation-membership"},
+        {"case": "navigation-membership; import os"},
+    ]
+    for payload in rejected:
+        with pytest.raises(ValueError):
+            server._live_change_case(payload)
+
+
+def test_live_change_endpoint_changes_navigation_and_reset_restores_it(monkeypatch):
+    import flowgency.app as app_mod
+
+    runtime, config_path = server._prepare_runtime()
+    try:
+        monkeypatch.setenv("FLOWGENCY_CONFIG", str(config_path))
+        monkeypatch.setenv("FLOWGENCY_UI_RUNTIME", str(runtime))
+        monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
+        server._install_ui_test_runtime()
+        app_mod.refresh_services()
+
+        with TestClient(app_mod.app) as client:
+            path = server.LIVE_CHANGE_PATH
+            assert client.post(path, json={"case": "unknown"}).status_code == 400
+            assert client.post(path, json={"case": "navigation-membership", "x": 1}).status_code == 400
+            assert client.post(path, content=b"not json").status_code == 400
+
+            before = client.get("/newsletter/agents?__live=1").text
+            assert "Research updated" not in before
+
+            assert client.post(path, json={"case": "navigation-membership"}).status_code == 204
+            changed = client.get("/newsletter/agents?__live=1").text
+            assert changed.count("Research updated") == 2
+            assert 'data-live-key=\\"nav:workspaces\\"' in changed
+
+            assert client.post(path, json={"case": "navigation-workflow-count"}).status_code == 204
+            assert 'data-workflow-state=\\"count\\">' in client.get("/newsletter/agents?__live=1").text
+
+            assert client.post(server.UI_RESET_PATH).status_code == 204
+            restored = client.get("/newsletter/agents?__live=1").text
+            assert "Research updated" not in restored
+            assert 'data-live-key=\\"nav:workspaces\\"' not in restored
+    finally:
+        server._safe_remove_runtime(runtime)

@@ -833,3 +833,100 @@ test('the handles registry is read-only and each key can be registered once', as
   await page.clock.runFor(10_000);
   expect(server.requests.length).toBe(0);
 });
+
+
+// ── Shared navigation shell: base-page registration ─────────────────────────
+
+const ROSTER_SNAPSHOT = /\/newsletter\/agents\?__live=1$/;
+
+async function openRoster(page: Page): Promise<void> {
+  await page.clock.install({ time: 0 });
+  await page.goto('/newsletter/agents');
+}
+
+test('a page without live regions registers nothing and sends no periodic request', async ({ page }) => {
+  const live: string[] = [];
+  page.on('request', (request) => { if (request.url().includes('__live=1')) live.push(request.url()); });
+  await page.clock.install({ time: 0 });
+  await page.goto('/newsletter/logs');
+  await page.clock.pauseAt(600_000);
+  await page.clock.runFor(10_000);
+
+  expect(await page.evaluate(() => typeof window.FlowgencyLive)).toBe('undefined');
+  await expect(page.locator('[data-live-status]')).toHaveCount(0);
+  expect(live).toEqual([]);
+});
+
+test('an opted-in page registers one handle and sends a conditional poll', async ({ page }) => {
+  const live: Record<string, string>[] = [];
+  page.on('request', (request) => {
+    if (request.url().includes('__live=1')) live.push(request.headers());
+  });
+  await openRoster(page);
+  await page.clock.pauseAt(60_000);
+
+  expect(await page.evaluate(() => Array.from(window.FlowgencyLive.handles.keys()))).toEqual(['page']);
+  await expect(page.locator('[data-live-status]')).toBeHidden();
+  await expect.poll(() => live.length).toBe(1);
+  expect(live[0]['if-none-match']).toBeUndefined();
+  expect(live[0].accept).toContain('application/json');
+
+  await expect.poll(() => page.evaluate(() => window.FlowgencyLive.handles.get('page')!.status)).toBe('healthy');
+  await page.clock.runFor(2000);
+  await expect.poll(() => live.length).toBe(2);
+  expect(live[1]['if-none-match']).toMatch(/^"[0-9a-f]{64}"$/);
+  await expect(page.locator('[data-live-status]')).toBeHidden();
+});
+
+test('a passive failure shows the status shell and only a click retries', async ({ page }) => {
+  await openRoster(page);
+  await page.clock.pauseAt(60_000);
+  await expect.poll(() => page.evaluate(() => window.FlowgencyLive.handles.get('page')!.status)).toBe('healthy');
+
+  let navigations = 0;
+  page.on('framenavigated', (frame) => { if (frame === page.mainFrame()) navigations += 1; });
+  await page.route(ROSTER_SNAPSHOT, (route) => route.fulfill({ status: 500, body: 'down' }));
+  await page.clock.runFor(2000);
+
+  const shell = page.locator('[data-live-status]');
+  await expect(shell).toBeVisible();
+  await expect(shell).toHaveAttribute('data-live-status', 'stale');
+  await expect(shell).toHaveAttribute('role', 'status');
+  await expect(shell.locator('[data-live-status-label]')).not.toBeEmpty();
+  await expect(shell.locator('[data-live-manual-refresh] svg')).toHaveCount(1);
+  await expect(shell.getByRole('button', { name: 'Refresh page' })).toBeVisible();
+  await page.clock.runFor(10_000);
+  expect(navigations).toBe(0);
+
+  await page.unroute(ROSTER_SNAPSHOT);
+  await shell.getByRole('button', { name: 'Refresh page' }).click();
+  await expect(shell).toBeHidden();
+  expect(navigations).toBe(0);
+});
+
+test('an incompatible snapshot asks for a reload instead of mutating the page', async ({ page }) => {
+  await openRoster(page);
+  await page.clock.pauseAt(60_000);
+  await expect.poll(() => page.evaluate(() => window.FlowgencyLive.handles.get('page')!.status)).toBe('healthy');
+
+  await page.route(ROSTER_SNAPSHOT, async (route) => {
+    const { 'if-none-match': _conditional, ...headers } = route.request().headers();
+    const response = await route.fetch({ headers });
+    const body = await response.json() as LiveSnapshotShape;
+    await route.fulfill({ response, json: { ...body, structure: 'agents-shell:99' } });
+  });
+  const before = await page.locator('#sidebar').innerHTML();
+  await page.clock.runFor(2000);
+
+  const shell = page.locator('[data-live-status]');
+  await expect(shell).toHaveAttribute('data-live-status', 'incompatible');
+  await expect(shell).toBeVisible();
+  expect(await page.locator('#sidebar').innerHTML()).toBe(before);
+
+  await page.unroute(ROSTER_SNAPSHOT);
+  await Promise.all([
+    page.waitForEvent('framenavigated'),
+    shell.getByRole('button', { name: 'Refresh page' }).click(),
+  ]);
+  await expect(page.locator('[data-live-status]')).toBeHidden();
+});

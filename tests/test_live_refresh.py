@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -9,13 +10,16 @@ from jinja2 import DictLoader, Environment
 from starlette.templating import Jinja2Templates
 
 from flowgency.web.live import (
+    SHARED_NAVIGATION_TEMPLATE,
     LiveBinding,
     LivePagePolicy,
     LiveSnapshot,
     LiveSnapshotError,
     live_etag,
+    live_registration,
     render_live_snapshot,
     respond_live_or_html,
+    shared_region_macros,
 )
 
 
@@ -367,7 +371,8 @@ def test_executable_url_rejected(href: str):
     "tag",
     [
         "script", "iframe", "object", "embed", "base", "link", "style",
-        "meta", "svg", "math", "animate", "set", "foreignObject",
+        "meta", "math", "animate", "animateTransform", "animateMotion", "set",
+        "foreignObject", "use", "image",
     ],
 )
 def test_unsafe_fragment_tag_rejected(tag: str):
@@ -382,6 +387,43 @@ def test_unsafe_fragment_tag_rejected(tag: str):
     )
     with pytest.raises(LiveSnapshotError, match="unsafe fragment tag"):
         render_live_snapshot(templates, {}, policy)
+
+
+def test_inert_svg_icon_is_accepted():
+    snapshot = _render_fragment(
+        '<svg class="nav-icon" viewBox="0 0 24 24"><path stroke-width="2" d="M4 6h16"/></svg>'
+    )
+
+    assert "<path" in snapshot.regions[0].html
+
+
+@pytest.mark.parametrize(
+    "markup",
+    [
+        "<svg><script>x</script></svg>",
+        '<svg onload="x()"></svg>',
+        '<svg><a xlink:href="javascript:x()"><path d="M0 0"/></a></svg>',
+        '<svg><use href="#a"/></svg>',
+        "<svg><foreignObject><p>x</p></foreignObject></svg>",
+        '<svg><path d="M0 0"><animate attributeName="d"/></path></svg>',
+    ],
+)
+def test_active_svg_content_is_rejected(markup: str):
+    with pytest.raises(LiveSnapshotError):
+        _render_fragment(markup)
+
+
+def _render_fragment(markup: str) -> LiveSnapshot:
+    templates = Environment(
+        loader=DictLoader({"sample.html": "{% macro live_rows() %}" + markup + "{% endmacro %}"}),
+        autoescape=True,
+    )
+    policy = LivePagePolicy(
+        template_name="sample.html", binding=LiveBinding(page="sample"),
+        structure="sample:1", region_macros={"rows": "live_rows"},
+        snapshot_url="/sample?__live=1",
+    )
+    return render_live_snapshot(templates, {}, policy)
 
 
 def test_srcdoc_attribute_rejected():
@@ -618,3 +660,201 @@ def test_failure_reply_json_is_not_cacheable():
     assert response.headers["cache-control"] == "no-store"
     body = response.json()
     assert body["format"] == 1
+
+
+# ── Shared navigation regions ───────────────────────────────────────────────
+
+
+def _shell_policy(**overrides: Any) -> LivePagePolicy:
+    values: dict[str, Any] = dict(
+        template_name="page.html",
+        binding=LiveBinding(page="page", team="acme"),
+        structure="page-shell:1",
+        region_macros={},
+        snapshot_url="/acme/page?__live=1",
+    )
+    values.update(overrides)
+    return LivePagePolicy(**values)
+
+
+def test_shared_region_macros_adds_team_navigation_regions():
+    merged = shared_region_macros({"team": "acme"}, _shell_policy(region_macros={"rows": "live_rows"}))
+
+    assert list(merged) == [
+        "navigation-teams",
+        "navigation-primary",
+        "navigation-workflows",
+        "navigation-workspace",
+        "rows",
+    ]
+    assert merged["navigation-primary"] == f"{SHARED_NAVIGATION_TEMPLATE}#live_navigation_primary"
+    assert merged["rows"] == "live_rows"
+
+
+def test_shared_region_macros_for_admin_pages_only_keep_the_team_switcher():
+    merged = shared_region_macros({"admin_active": True}, _shell_policy())
+
+    assert list(merged) == ["navigation-teams"]
+
+
+def test_shared_region_macros_rejects_a_page_region_that_shadows_navigation():
+    with pytest.raises(LiveSnapshotError):
+        shared_region_macros({}, _shell_policy(region_macros={"navigation-primary": "live_rows"}))
+
+
+def test_qualified_macro_reference_renders_without_compiling_the_page_template():
+    templates = Environment(
+        loader=DictLoader({"shell.html": "{% macro live_nav() %}<a>{{ name }}</a>{% endmacro %}"}),
+        autoescape=True,
+    )
+    policy = _shell_policy(template_name="missing-page.html", region_macros={"nav": "shell.html#live_nav"})
+
+    snapshot = render_live_snapshot(templates, {"name": "Acme"}, policy)
+
+    assert [(region.key, region.html) for region in snapshot.regions] == [("nav", "<a>Acme</a>")]
+
+
+def test_qualified_and_page_macros_share_one_context():
+    templates = Environment(
+        loader=DictLoader(
+            {
+                "shell.html": "{% macro live_nav() %}<a>{{ name }}</a>{% endmacro %}",
+                "page.html": "{% macro live_rows() %}<p>{{ name }}</p>{% endmacro %}",
+            }
+        ),
+        autoescape=True,
+    )
+    policy = _shell_policy(region_macros={"nav": "shell.html#live_nav", "rows": "live_rows"})
+
+    snapshot = render_live_snapshot(templates, {"name": "Acme"}, policy)
+
+    assert [region.html for region in snapshot.regions] == ["<a>Acme</a>", "<p>Acme</p>"]
+
+
+def test_qualified_reference_to_a_missing_macro_is_rejected():
+    templates = Environment(loader=DictLoader({"shell.html": ""}), autoescape=True)
+
+    with pytest.raises(LiveSnapshotError):
+        render_live_snapshot(templates, {}, _shell_policy(region_macros={"nav": "shell.html#live_nav"}))
+
+
+def test_live_registration_carries_only_non_secret_registration_data():
+    registration = live_registration(_shell_policy(binding=LiveBinding(page="page", team="acme", query={"tab": "a"}),
+                                                   snapshot_url="/acme/page?tab=a&__live=1"))
+
+    assert registration == {
+        "format": 1,
+        "binding": {"page": "page", "team": "acme", "entity": None, "tab": None, "query": {"tab": "a"}},
+        "structure": "page-shell:1",
+        "url": "/acme/page?tab=a&__live=1",
+    }
+
+
+def test_html_render_receives_the_live_registration():
+    env = Environment(
+        loader=DictLoader({"sample.html": "{{ live_registration.url }}|{{ live_registration.structure }}"}),
+        autoescape=True,
+    )
+    app = FastAPI()
+    templates = Jinja2Templates(env=env)
+    policy = _make_policy_for("sample.html")
+
+    @app.get("/sample")
+    async def sample(request: Request) -> Any:
+        return respond_live_or_html(request, templates, {"request": request}, policy)
+
+    assert TestClient(app).get("/sample").text == "/sample?__live=1|sample:1"
+
+
+def _make_policy_for(template_name: str) -> LivePagePolicy:
+    return LivePagePolicy(
+        template_name=template_name,
+        binding=LiveBinding(page="sample"),
+        structure="sample:1",
+        region_macros={},
+        snapshot_url="/sample?__live=1",
+    )
+
+
+def _shell_context(**overrides: Any) -> dict[str, Any]:
+    context: dict[str, Any] = {
+        "team": "acme",
+        "teams": {"acme": "Acme", "beta": "Beta <b>"},
+        "active": "agents",
+        "active_workflow_id": None,
+        "nav_open_observations": 0,
+        "nav_actionable": 0,
+        "nav_agent_count": 3,
+        "workflow_nav_available": True,
+        "workflow_nav": [
+            {"id": "delivery", "name": "Delivery", "count": 4, "status": "count"},
+            {"id": "research", "name": "Research", "count": None, "status": "unavailable"},
+        ],
+        "workspaces_available": True,
+        "workspaces": [{"name": "Grid"}],
+    }
+    context.update(overrides)
+    return context
+
+
+def _shell_snapshot(context: dict[str, Any]) -> LiveSnapshot:
+    from flowgency.app import templates as app_templates
+
+    policy = _shell_policy(template_name="agents.html")
+    policy = replace(policy, region_macros=shared_region_macros(context, policy))
+    return render_live_snapshot(app_templates, context, policy)
+
+
+def _region_html(snapshot: LiveSnapshot, key: str) -> str:
+    return next(region.html for region in snapshot.regions if region.key == key)
+
+
+def test_shared_navigation_snapshot_keys_items_by_identity():
+    snapshot = _shell_snapshot(_shell_context())
+
+    assert [region.key for region in snapshot.regions] == [
+        "navigation-teams",
+        "navigation-primary",
+        "navigation-workflows",
+        "navigation-workspace",
+    ]
+    teams = _region_html(snapshot, "navigation-teams")
+    assert 'data-live-key="team:acme"' in teams and "selected" in teams
+    assert 'data-live-key="team:beta"' in teams
+    assert "Beta &lt;b&gt;" in teams
+    workflows = _region_html(snapshot, "navigation-workflows")
+    assert 'data-live-key="workflow:delivery"' in workflows
+    assert 'data-live-key="workflow:research"' in workflows
+    assert 'data-live-key="nav:workspaces"' in _region_html(snapshot, "navigation-workspace")
+
+
+def test_shared_navigation_snapshot_never_reports_an_unavailable_workflow_as_zero():
+    workflows = _region_html(_shell_snapshot(_shell_context()), "navigation-workflows")
+
+    research = workflows.split('data-live-key="workflow:research"')[1].split("</a>")[0]
+    assert 'data-workflow-state="unavailable"' in research
+    assert "Unavailable" in research
+    assert 'data-workflow-state="count"' not in research
+    assert ">0<" not in research
+
+
+def test_shared_navigation_snapshot_marks_the_active_destination_only():
+    context = _shell_context(active="workflow-board", active_workflow_id="delivery")
+    snapshot = _shell_snapshot(context)
+
+    workflows = _region_html(snapshot, "navigation-workflows")
+    delivery = workflows.split('data-live-key="workflow:delivery"')[1].split(">")[0]
+    research = workflows.split('data-live-key="workflow:research"')[1].split(">")[0]
+    assert "active" in delivery and "active" not in research
+    assert "nav-item active" not in _region_html(snapshot, "navigation-primary")
+
+
+def test_shared_navigation_snapshot_hides_absent_sections_and_changes_with_membership():
+    base = _shell_snapshot(_shell_context())
+    bare = _shell_snapshot(
+        _shell_context(workflow_nav_available=False, workflow_nav=[], workspaces_available=False, workspaces=[])
+    )
+
+    assert _region_html(bare, "navigation-workflows").strip() == ""
+    assert 'data-live-key="nav:workspaces"' not in _region_html(bare, "navigation-workspace")
+    assert live_etag(base) != live_etag(bare)

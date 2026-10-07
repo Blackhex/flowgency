@@ -122,3 +122,110 @@ test('second team sidebar stays isolated when it has no configured workflows', a
   await assertNoLayoutIssues(page);
   await assertNoConsoleErrors(page);
 });
+
+type RequestFixture = Parameters<typeof test.beforeEach>[0]['request'];
+type PageFixture = Parameters<typeof test.beforeEach>[0]['page'];
+
+async function applyLiveChange(request: RequestFixture, change: string): Promise<void> {
+  const response = await request.post('/__ui/live/change', { data: { case: change } });
+  expect(response.status()).toBe(204);
+}
+
+async function openLiveRoster(page: PageFixture): Promise<void> {
+  await page.clock.install({ time: 0 });
+  await page.goto('/newsletter/agents');
+  await page.clock.pauseAt(600_000);
+}
+
+// Drives the 2000 ms cadence deterministically until the assertion holds.
+async function refreshUntil(page: PageFixture, assertion: () => Promise<void>): Promise<void> {
+  await expect(async () => {
+    await page.clock.runFor(2000);
+    await assertion();
+  }).toPass({ timeout: 15_000, intervals: [100] });
+}
+
+const navigationSurface = (page: PageFixture) => page.locator('#sidebar');
+const workflowRow = (page: PageFixture, workflow: string) => page.locator(`#sidebar [data-live-key="workflow:${workflow}"]`);
+
+test('a remote membership change refreshes the shared navigation in place', async ({ page, request }) => {
+  await openLiveRoster(page);
+  await page.evaluate(() => (window as unknown as { toggleTheme: () => void }).toggleTheme());
+  const theme = await page.evaluate(() => ({
+    dark: document.documentElement.classList.contains('dark'),
+    label: document.getElementById('theme-label')!.textContent,
+  }));
+  const navigation = await navigationSurface(page).elementHandle();
+  const agentsLink = await page.locator('#sidebar a[href="/newsletter/agents"]').elementHandle();
+  await expect(navigationSurface(page)).not.toContainText('Research updated');
+  await expect(page.locator('#sidebar a[href="/newsletter/workspaces"]')).toHaveCount(0);
+
+  await applyLiveChange(request, 'navigation-membership');
+  await refreshUntil(page, () => expect(navigationSurface(page)).toContainText('Research updated', { timeout: 1500 }));
+
+  expect(await navigation!.evaluate((node) => node.isConnected)).toBe(true);
+  expect(await agentsLink!.evaluate((node) => node.isConnected)).toBe(true);
+  await expect(page.locator('#sidebar a[href="/newsletter/agents"]')).toHaveClass(/active/);
+  await expect(page.locator('#team-switcher option[value="research"]')).toHaveText('Research updated');
+  await expect(page.locator('#team-switcher')).toHaveValue('newsletter');
+  await expect(workflowRow(page, 'research-workflow')).toContainText('Research updated');
+  await expect(page.locator('#sidebar a[href="/newsletter/workspaces"]')).toHaveCount(1);
+  expect(await page.evaluate(() => ({
+    dark: document.documentElement.classList.contains('dark'),
+    label: document.getElementById('theme-label')!.textContent,
+  }))).toEqual(theme);
+  await expect(page.locator('[data-live-status]')).toBeHidden();
+  await assertNoConsoleErrors(page);
+});
+
+test('a remote change to a workflow count updates only that badge', async ({ page, request }) => {
+  await openLiveRoster(page);
+  const badge = workflowRow(page, 'delivery').locator('[data-workflow-state="count"]');
+  const before = Number(await badge.textContent());
+  const row = await workflowRow(page, 'delivery').elementHandle();
+
+  await applyLiveChange(request, 'navigation-workflow-count');
+  await refreshUntil(page, () => expect(badge).toHaveText(String(before + 1), { timeout: 1500 }));
+
+  expect(await row!.evaluate((node) => node.isConnected)).toBe(true);
+  await assertNoConsoleErrors(page);
+});
+
+test('a workflow whose storage disappears turns unavailable, never zero', async ({ page }) => {
+  await openLiveRoster(page);
+  await expect(workflowRow(page, 'research-workflow').locator('[data-workflow-state="count"]')).toHaveCount(1);
+
+  await rm(path.join(runtimeRoot, 'tickets', 'research'), { recursive: true, force: true });
+  await refreshUntil(page, () => expect(
+    workflowRow(page, 'research-workflow').locator('[data-workflow-state="unavailable"]'),
+  ).toHaveText('Unavailable', { timeout: 1500 }));
+
+  await expect(workflowRow(page, 'research-workflow').locator('[data-workflow-state="count"]')).toHaveCount(0);
+  await assertNoConsoleErrors(page);
+});
+
+test('a focused navigation link keeps focus and the open mobile menu through a refresh', async ({ page, request }, testInfo) => {
+  await openLiveRoster(page);
+  await openSidebarIfNeeded(page, testInfo.project.name);
+  const jobs = page.locator('#sidebar a[href="/newsletter/jobs"]');
+  await jobs.focus();
+  const focused = await jobs.elementHandle();
+
+  await applyLiveChange(request, 'navigation-membership');
+  await refreshUntil(page, () => expect(workflowRow(page, 'research-workflow')).toContainText('Research updated', { timeout: 1500 }));
+
+  expect(await focused!.evaluate((node) => node.isConnected)).toBe(true);
+  await expect(jobs).toBeFocused();
+  expect(await page.evaluate(() => (document.getElementById('sidebar') as HTMLElement).inert)).toBe(false);
+  if (testInfo.project.name.startsWith('mobile')) {
+    await expect(page.locator('#mobile-menu-button')).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.locator('#overlay')).toBeVisible();
+  }
+  // The new workspace link would shift the focused item, so it waits for the blur.
+  await expect(page.locator('#sidebar a[href="/newsletter/workspaces"]')).toHaveCount(0);
+
+  await jobs.evaluate((node) => (node as HTMLElement).blur());
+  await page.clock.runFor(50);
+  await expect(page.locator('#sidebar a[href="/newsletter/workspaces"]')).toHaveCount(1);
+  await assertNoConsoleErrors(page);
+});

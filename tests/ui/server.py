@@ -60,6 +60,8 @@ COMPLETION_FIXTURE_SCHEDULER_RESULTS = frozenset(
 )
 COMPLETION_FIXTURE_REVISIONS = frozenset({"current", "stale"})
 COMPLETION_FIXTURE_KEYS = frozenset({"scheduler_result", "limitations_acknowledged", "revision"})
+LIVE_CHANGE_PATH = "/__ui/live/change"
+LIVE_CHANGE_CASES = frozenset({"navigation-membership", "navigation-workflow-count"})
 STALE_REVISION = "0" * 64
 GIT_EVIDENCE_TICKET_ID = "fixture-git-evidence"
 GIT_EVIDENCE_REF = "refs/heads/main"
@@ -340,6 +342,50 @@ async def _complete_connected_setup(request: Request) -> Response:
     return JSONResponse({"ok": True, "completion": result["completion"]})
 
 
+def _live_change_case(payload: object) -> str:
+    """Validate the closed live-change schema; raise ``ValueError`` on anything else."""
+    if not isinstance(payload, dict) or set(payload) != {"case"}:
+        raise ValueError("Live change payload must be an object with only a case")
+    case = payload["case"]
+    if not isinstance(case, str) or case not in LIVE_CHANGE_CASES:
+        raise ValueError("Unsupported live change case")
+    return case
+
+
+def _apply_live_change(runtime: Path, case: str) -> None:
+    """Change fixture state through ConfigStore or the ticket provider; a reset restores it."""
+    if case == "navigation-membership":
+        store = ConfigStore(runtime / "config.yaml")
+
+        def patch(raw: dict) -> None:
+            raw["teams"]["research"]["name"] = "Research updated"
+            newsletter = raw["teams"]["newsletter"]
+            newsletter["workflows"]["research-workflow"]["name"] = "Research updated"
+            newsletter["workspaces"] = [{"name": "Reference", "type": "custom", "config": {}}]
+
+        store.patch(store.load().revision, patch)
+    elif case == "navigation-workflow-count":
+        delivery_root = runtime / "tickets" / "delivery"
+        provider = LocalTicketStorage(delivery_root, clock=lambda: datetime.fromisoformat(FIXED_NOW))
+        binding = StorageBinding(
+            integration="local",
+            config={"root": str(delivery_root)},
+            team_id="newsletter",
+            workflow_id="delivery",
+        )
+        ticket = _ticket_record(
+            binding,
+            ticket_id="fixture-live-count",
+            number=190,
+            title="Counted by the live navigation",
+            description="Added by the live-change fixture.",
+            state_id="backlog",
+        )
+        provider.create(ticket, _ticket_operation(ticket.id))
+    else:
+        raise ValueError(f"Unknown live change case: {case}")
+
+
 def _install_ui_test_runtime() -> None:
     global _REAL_COPILOT_INTEGRATION
     import flowgency.jobs.submission as submission_module
@@ -439,6 +485,19 @@ def _install_ui_test_runtime() -> None:
             chunk = min(remaining, 1024)
             _CURRENT_FAKE_PROCESS.output.put(b"x" * chunk)
             remaining -= chunk
+        return Response(status_code=204)
+
+    @app.post(LIVE_CHANGE_PATH, include_in_schema=False)
+    async def live_change(request: Request) -> Response:
+        try:
+            payload = await request.json()
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail="Live change payload must be valid JSON") from exc
+        try:
+            case = _live_change_case(payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _apply_live_change(Path(os.environ["FLOWGENCY_UI_RUNTIME"]), case)
         return Response(status_code=204)
 
     app.state.ui_reset_route_installed = True
