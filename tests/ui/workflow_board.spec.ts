@@ -992,6 +992,48 @@ test('missing selected ticket keeps its inspector and draft', async ({ page, req
   await expect(page.getByLabel('Acceptance criteria', { exact: true })).toHaveValue('Draft survives missing selection');
 });
 
+test('a ticket that vanishes and returns unchanged converges instead of sticking on a 304', async ({ page, request }) => {
+  const response = await request.get('/newsletter/workflows/delivery/snapshot?ticket=fixture-review');
+  expect(response.ok()).toBeTruthy();
+  const board = await response.json();
+  const unavailableBoard = JSON.parse(JSON.stringify(board));
+  unavailableBoard.selected_ticket = { ...unavailableBoard.selected_ticket, ticket: null, fields: [] };
+  unavailableBoard.name = 'Delivery while the ticket is missing';
+
+  await page.goto(WORKFLOW_BOARD_URL);
+  await stopPollTimer(page);
+  await forcePoll(page);
+  const acceptedEtag = await workflowHandleEtag(page);
+  expect(acceptedEtag).not.toBeNull();
+  await expect(page.getByRole('heading', { name: 'Delivery', exact: true })).toBeVisible();
+
+  await page.route('**/newsletter/workflows/delivery/snapshot?*', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: { ETag: 'W/"vanished-ticket"', 'Cache-Control': 'no-cache' },
+      body: JSON.stringify(unavailableBoard),
+    });
+  }, { times: 1 });
+  await forcePoll(page);
+  await expect(page.locator('#workflow-refresh-status')).toContainText('Ticket unavailable');
+  await expect(page.getByRole('heading', { name: 'Delivery while the ticket is missing' })).toBeVisible();
+  expect(await workflowHandleEtag(page)).toBeNull();
+
+  const conditional: (string | undefined)[] = [];
+  await page.route('**/newsletter/workflows/delivery/snapshot?*', async (route) => {
+    conditional.push(route.request().headers()['if-none-match']);
+    await route.fallback();
+  });
+  await forcePoll(page);
+
+  expect(conditional).toEqual([undefined]);
+  await expect(page.getByRole('heading', { name: 'Delivery', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Delivery while the ticket is missing' })).toHaveCount(0);
+  await expect(page.locator('#workflow-refresh-status')).toBeHidden();
+  expect(await workflowHandleEtag(page)).toBe(acceptedEtag);
+});
+
 test('healthy board can show and recover from polled workflow issues', async ({ page, request }) => {
   const response = await request.get('/newsletter/workflows/delivery/snapshot?ticket=fixture-review');
   expect(response.ok()).toBeTruthy();

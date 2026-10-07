@@ -106,7 +106,10 @@ document.addEventListener('visibilitychange', onVisibilityChange);
 //     It replaces the built-in format, region-snapshot and binding checks; binding() is then
 //     informational and the controller owns identity checks in apply().
 //   apply() may also return {accepted:false, unavailable:true}: the read reported the viewed
-//     target unavailable (status 'unavailable', no ETag retained).
+//     target unavailable (status 'unavailable'). Any apply() that ran without accepted:true
+//     (unavailable, incompatible, rejected, thrown) clears the retained ETag, because the view
+//     may have changed; an accepted deferred result keeps it, and so does a result that sets
+//     unchanged:true (the snapshot was rejected before the view was touched).
 //   settled()  called when a non-superseded read finishes while the document is visible, whatever
 //     its outcome, before the next read is scheduled.
 function register(adapter) {
@@ -251,10 +254,14 @@ function register(adapter) {
       try {
         result = adapter.apply(data) || {};
       } catch (error) {
+        etag = null;
         reportError(error);
         setStatus('stale');
         return 'failed';
       }
+      // apply() ran, so the view may no longer show the snapshot the retained ETag names,
+      // unless the adapter vouches that it rejected the snapshot before touching the view.
+      if (!result.accepted && !result.unchanged) etag = null;
       if (result.incompatible) {
         setStatus('incompatible');
         return 'incompatible';
@@ -539,8 +546,8 @@ class LiveRegionView {
   }
 
   apply(snapshot) {
-    const rejected = Object.freeze({ accepted: false, deferred: false });
-    const incompatible = Object.freeze({ accepted: false, deferred: false, incompatible: true });
+    const rejected = Object.freeze({ accepted: false, deferred: false, unchanged: true });
+    const incompatible = Object.freeze({ accepted: false, deferred: false, incompatible: true, unchanged: true });
     if (this.#disposed || !snapshot || !Array.isArray(snapshot.regions)) return rejected;
     if (snapshot.structure !== this.#initial.structure) return incompatible;
 

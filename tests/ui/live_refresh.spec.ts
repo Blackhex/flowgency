@@ -183,7 +183,12 @@ window.__mountRaw = () => {
     },
     apply: (data) => {
       window.__raw.applied.push(data);
-      return data.unavailable ? { accepted: false, deferred: false, unavailable: true } : { accepted: true, deferred: false };
+      if (data.unavailable) return { accepted: false, deferred: false, unavailable: true };
+      if (data.rejected) return { accepted: false, deferred: false };
+      if (data.untouched) return { accepted: false, deferred: false, unchanged: true };
+      if (data.applyIncompatible) return { accepted: false, deferred: false, incompatible: true };
+      if (data.throws) throw new Error('apply failed');
+      return { accepted: true, deferred: data.deferred === true };
     },
     status: (value) => window.__raw.statuses.push(value),
     settled: () => { window.__raw.settled += 1; },
@@ -1017,6 +1022,57 @@ test('an apply result that reports the target unavailable sets the unavailable s
   server.script.push({ body: { board: 'back' }, etag: '"raw-back"' });
   expect(await rawRefresh(page)).toBe('applied');
   expect(await page.evaluate(() => window.__raw.statuses)).toEqual(['unavailable', 'healthy']);
+});
+
+for (const [label, reply, outcome] of [
+  ['unavailable', { unavailable: true }, 'unavailable'],
+  ['not accepted', { rejected: true }, 'rejected'],
+  ['incompatible', { applyIncompatible: true }, 'incompatible'],
+  ['a throwing apply', { throws: true }, 'failed'],
+] as const) {
+  test(`an apply that ran and reports ${label} clears the retained ETag so the next read is a full 200`, async ({ page }) => {
+    const server = await openLive(page);
+    await page.evaluate(() => window.__mountRaw());
+    server.current = { board: 'one' } as unknown as LiveSnapshotShape;
+    const board = etagOf(server.current);
+
+    expect(await rawRefresh(page)).toBe('applied');
+    expect(await rawEtag(page)).toBe(board);
+
+    server.script.push({ body: reply, etag: '"raw-other"' });
+    expect(await rawRefresh(page)).toBe(outcome);
+    expect(await rawEtag(page)).toBeNull();
+
+    expect(await rawRefresh(page)).toBe('applied');
+    expect(server.requests.map((request) => request.ifNoneMatch)).toEqual([undefined, board, undefined]);
+    expect(await page.evaluate(() => window.__raw.applied)).toHaveLength(3);
+    expect(await rawEtag(page)).toBe(board);
+  });
+}
+
+test('a rejection that vouches the view was untouched keeps the retained ETag', async ({ page }) => {
+  const server = await openLive(page);
+  await page.evaluate(() => window.__mountRaw());
+  server.current = { board: 'one' } as unknown as LiveSnapshotShape;
+  const board = etagOf(server.current);
+
+  expect(await rawRefresh(page)).toBe('applied');
+  server.script.push({ body: { untouched: true }, etag: '"raw-untouched"' });
+  expect(await rawRefresh(page)).toBe('rejected');
+  expect(await rawEtag(page)).toBe(board);
+  expect(await rawRefresh(page)).toBe('not-modified');
+});
+
+test('an accepted deferred apply keeps its ETag so an unchanged snapshot stays a 304', async ({ page }) => {
+  const server = await openLive(page);
+  await page.evaluate(() => window.__mountRaw());
+  server.current = { board: 'one', deferred: true } as unknown as LiveSnapshotShape;
+  const board = etagOf(server.current);
+
+  expect(await rawRefresh(page)).toBe('deferred');
+  expect(await rawEtag(page)).toBe(board);
+  expect(await rawRefresh(page)).toBe('not-modified');
+  expect(server.requests.map((request) => request.ifNoneMatch)).toEqual([undefined, board]);
 });
 
 test('settled runs after every read that finishes while visible, not for superseded or hidden reads', async ({ page }) => {
