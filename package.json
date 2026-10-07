@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "build:css": "tailwindcss --config tailwind.config.cjs --input tools/tailwind.css --output flowgency/static/tailwind.css --minify",
+    "build:live": "esbuild tools/live-refresh.js --bundle --format=iife --target=es2020 --minify --legal-comments=external --outfile=flowgency/static/live-refresh.js && node -e \"require('node:fs').copyFileSync('node_modules/morphdom/LICENSE', 'flowgency/static/morphdom.LICENSE.txt')\"",
     "build:terminal": "esbuild tools/setup-terminal.js --bundle --format=iife --target=es2020 --minify --legal-comments=external --outfile=flowgency/static/setup-terminal.js",
     "test:ui": "playwright test",
     "test:ui:update": "playwright test --update-snapshots"
@@ -16,6 +17,7 @@
     "@xterm/xterm": "6.0.0",
     "esbuild": "0.28.2",
     "lucide": "0.468.0",
+    "morphdom": "2.7.8",
     "tailwindcss": "3.4.17",
     "yaml": "^2.8.1"
   }

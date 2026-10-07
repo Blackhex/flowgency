@@ -175,3 +175,79 @@ export async function assertFontFacesLoaded(page: Page): Promise<void> {
 }
 
 export const expectLayoutIntegrity = assertNoLayoutIssues;
+export type LiveStatusKind = 'healthy' | 'stale' | 'incompatible' | 'unavailable';
+
+export type LiveRefreshOutcome =
+  | 'applied' | 'deferred' | 'not-modified' | 'rejected' | 'incompatible' | 'unavailable'
+  | 'failed' | 'superseded' | 'discarded' | 'hidden' | 'paused' | 'disposed';
+
+export interface LiveApplyResult {
+  accepted: boolean;
+  deferred: boolean;
+  incompatible?: boolean;
+}
+
+export interface LiveBindingShape {
+  page: string;
+  team?: string | null;
+  entity?: string | null;
+  tab?: string | null;
+  query?: Record<string, string>;
+}
+
+export interface LiveSnapshotShape {
+  format: 1;
+  binding: LiveBindingShape;
+  structure: string;
+  revisions: Record<string, string>;
+  regions: { key: string; html: string }[];
+}
+
+export interface LiveAdapterShape {
+  key: string;
+  interval?: number;
+  timeout?: number;
+  binding: () => LiveBindingShape;
+  url: () => string;
+  headers?: () => Record<string, string>;
+  capture?: () => unknown;
+  isCurrent?: (captured: unknown) => boolean;
+  apply: (snapshot: LiveSnapshotShape) => LiveApplyResult;
+  status?: (value: LiveStatusKind) => void;
+  flushDeferred?: () => LiveApplyResult;
+  dispose?: () => void;
+}
+
+export interface LiveHandleShape {
+  readonly key: string;
+  readonly status: LiveStatusKind | null;
+  readonly etag: string | null;
+  refresh(): Promise<LiveRefreshOutcome>;
+  invalidate(): Promise<LiveRefreshOutcome>;
+  beginAction(): () => void;
+  flushDeferred(): LiveApplyResult;
+  dispose(): void;
+}
+
+export interface LiveRegionViewShape {
+  apply(snapshot: LiveSnapshotShape): LiveApplyResult;
+  setStatus(value: LiveStatusKind): void;
+  allowUpdate(current: Element, next: Element): boolean;
+  allowDiscard(node: Node): boolean;
+  flushDeferred(): LiveApplyResult;
+  dispose(): void;
+}
+
+declare global {
+  interface Window {
+    FlowgencyLive: {
+      readonly version: number;
+      register(adapter: LiveAdapterShape): LiveHandleShape;
+      readonly handles: ReadonlyMap<string, LiveHandleShape>;
+      LiveRegionView: new (
+        root: Element,
+        initial: { binding: LiveBindingShape; structure: string; snapshotUrl?: string },
+      ) => LiveRegionViewShape;
+    };
+  }
+}

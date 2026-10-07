@@ -333,6 +333,21 @@ def test_wheel_contains_connected_terminal_assets(built_wheel: Path):
             assert archive.read(f"flowgency/static/{name}") == source.read_bytes()
 
 
+def test_wheel_contains_live_refresh_bundle_and_retained_license(built_wheel: Path):
+    static = REPO_ROOT / "flowgency" / "static"
+    with ZipFile(built_wheel) as archive:
+        for name in ("live-refresh.js", "morphdom.LICENSE.txt"):
+            assert archive.read(f"flowgency/static/{name}") == (static / name).read_bytes()
+
+    license_text = (static / "morphdom.LICENSE.txt").read_text(encoding="utf-8")
+    assert license_text.startswith("The MIT License (MIT)")
+    assert "Patrick Steele-Idem" in license_text
+    installed = REPO_ROOT / "node_modules" / "morphdom" / "LICENSE"
+    if installed.is_file():
+        assert (static / "morphdom.LICENSE.txt").read_bytes() == installed.read_bytes()
+    assert (static / "live-refresh.js").stat().st_size > 0
+
+
 def test_git_evidence_modules_import_from_the_wheel_not_the_checkout(
     built_wheel: Path, tmp_path: Path
 ):
