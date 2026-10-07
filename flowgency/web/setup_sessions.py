@@ -450,7 +450,9 @@ class SetupSessionManager:
             return _pending_decision(attempt)
         if attempt.acknowledgement is None:
             return _pending_decision(attempt)
-        if attempt.session is not None and attempt.exit_capability_verified:
+        if attempt.session is not None and (
+            attempt.exit_capability_verified or attempt.session.eof_seen
+        ):
             return _decision_from_confirmed_exit(attempt)
         return _completed_fallback_decision(attempt)
 
@@ -460,6 +462,9 @@ class SetupSessionManager:
         expected = attempt.launch.token.encode("utf-8") if attempt is not None else b""
         matches = hmac.compare_digest(presented, expected)
         if attempt is None or not matches or attempt.cancelled or attempt.unexpected_failure:
+            raise SetupSessionConflict(_COMPLETION_REJECTED)
+        session = attempt.session
+        if session is not None and session.eof_seen and not session.finalized:
             raise SetupSessionConflict(_COMPLETION_REJECTED)
         return attempt
 
@@ -854,6 +859,9 @@ class SetupSessionManager:
             if self._session is not session or session.finalized:
                 return
             session.eof_seen = True
+            attempt = self._completion
+            if attempt is not None and attempt.session is session and attempt.acknowledgement is None:
+                self._end_attempt(session, failed=True)
         # Confirm the whole tree stopped before freeing the slot.
         try:
             evidence = await asyncio.to_thread(session.process.stop, session.lifecycle)
@@ -907,6 +915,9 @@ class SetupSessionManager:
             return await self._stop_session(session)
 
     async def _stop_session(self, session: _Session) -> ProcessStopEvidence:
+        async with self._state_lock:
+            if not self._confirmed_gone(session):
+                self._end_attempt(session, failed=False)
         if session.reader_task is not None:
             session.reader_task.cancel()
         if self._confirmed_gone(session):

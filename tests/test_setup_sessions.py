@@ -83,6 +83,29 @@ class _NonZeroExitProcess(FakeProcess):
         return None if self.running else 3
 
 
+class _GatedCleanupProcess(FakeProcess):
+    def __init__(self, exit_code: int = 0):
+        super().__init__()
+        self.stop_entered = threading.Event()
+        self.release_stop = threading.Event()
+        self._exit_code = exit_code
+
+    def read(self, size: int = 65536) -> bytes:
+        try:
+            return super().read(size)
+        except EOFError:
+            self.running = False
+            raise
+
+    def stop(self, lifecycle):
+        self.stop_entered.set()
+        assert self.release_stop.wait(5), "cleanup barrier was not released"
+        return super().stop(lifecycle)
+
+    def exit_code(self):
+        return None if self.running else self._exit_code
+
+
 def _completion_command(launch_id: str, revision: str = _REVISION, **overrides) -> SetupCompletionCommand:
     values = {
         "launch_id": launch_id,
@@ -454,6 +477,139 @@ def test_completion_natural_exit_without_acknowledgement_requires_attention(tmp_
                     prepared.token, _completion_command(prepared.launch_id), _REVISION
                 )
         finally:
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("acknowledge_first", [False, True])
+def test_completion_rejects_acknowledgement_after_eof_before_finalize(tmp_path: Path, acknowledge_first):
+    async def exercise():
+        fake = _GatedCleanupProcess()
+        manager = SetupSessionManager(process_factory=lambda launch: fake, sweep_interval=0)
+        reader = None
+        try:
+            prepared = await _connected_completion(manager, tmp_path)
+            command = _completion_command(prepared.launch_id)
+            if acknowledge_first:
+                await manager.acknowledge_completion(prepared.token, command, _REVISION)
+            acknowledgement = manager._completion.acknowledgement
+            reader = manager._session.reader_task
+            fake.output.put(None)
+            assert await asyncio.to_thread(fake.stop_entered.wait, 5)
+            assert manager.snapshot("owner").state == "running"
+            with pytest.raises(SetupSessionConflict):
+                await manager.acknowledge_completion(prepared.token, command, _REVISION)
+            assert manager._completion.acknowledgement is acknowledgement
+            assert manager.completion_decision("owner", _REVISION, True).redirect_allowed is False
+        finally:
+            fake.release_stop.set()
+            if reader is not None:
+                await reader
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("acknowledge_first", [False, True])
+def test_completion_rejects_acknowledgement_while_stop_is_in_flight(tmp_path: Path, acknowledge_first):
+    async def exercise():
+        fake = _GatedCleanupProcess()
+        manager = SetupSessionManager(process_factory=lambda launch: fake, sweep_interval=0)
+        stopping = None
+        try:
+            prepared = await _connected_completion(manager, tmp_path)
+            command = _completion_command(prepared.launch_id)
+            if acknowledge_first:
+                await manager.acknowledge_completion(prepared.token, command, _REVISION)
+            acknowledgement = manager._completion.acknowledgement
+            stopping = asyncio.create_task(manager.stop("owner"))
+            assert await asyncio.to_thread(fake.stop_entered.wait, 5)
+            assert manager.snapshot("owner").state == "running"
+            with pytest.raises(SetupSessionConflict):
+                await manager.acknowledge_completion(prepared.token, command, _REVISION)
+            assert manager._completion.acknowledgement is acknowledgement
+            decision = manager.completion_decision("owner", _REVISION, True)
+            assert decision.phase == "cancelled"
+            assert decision.redirect_allowed is False
+        finally:
+            fake.release_stop.set()
+            if stopping is not None:
+                await stopping
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("trigger", ["eof", "stop"])
+def test_completion_validation_in_flight_cannot_acknowledge_failure_cleanup(tmp_path: Path, trigger):
+    async def exercise():
+        fake = _GatedCleanupProcess()
+        manager = SetupSessionManager(process_factory=lambda launch: fake, sweep_interval=0)
+        validation_entered = threading.Event()
+        release_validation = threading.Event()
+        acknowledging = stopping = reader = None
+
+        def validate(config_path, revision):
+            validation_entered.set()
+            assert release_validation.wait(5), "validation barrier was not released"
+            return revision
+
+        try:
+            prepared = await _connected_completion(manager, tmp_path)
+            reader = manager._session.reader_task
+            acknowledging = asyncio.create_task(manager.acknowledge_validated(
+                prepared.token, _completion_command(prepared.launch_id), validate
+            ))
+            assert await asyncio.to_thread(validation_entered.wait, 5)
+            if trigger == "eof":
+                fake.output.put(None)
+            else:
+                stopping = asyncio.create_task(manager.stop("owner"))
+            assert await asyncio.to_thread(fake.stop_entered.wait, 5)
+            release_validation.set()
+            with pytest.raises(SetupSessionConflict):
+                await acknowledging
+            assert manager._completion.acknowledgement is None
+            assert manager.completion_decision("owner", _REVISION, True).redirect_allowed is False
+        finally:
+            release_validation.set()
+            fake.release_stop.set()
+            tasks = [task for task in (acknowledging, stopping, reader) if task is not None]
+            await asyncio.gather(*tasks, return_exceptions=True)
+            await manager.shutdown()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(("exit_code", "phase", "redirect_allowed"), [(0, "complete", True), (3, "attention", False)])
+def test_completion_navigation_waits_for_eof_cleanup_after_acknowledgement(
+    tmp_path: Path, exit_code, phase, redirect_allowed
+):
+    async def exercise():
+        fake = _GatedCleanupProcess(exit_code)
+        manager = SetupSessionManager(process_factory=lambda launch: fake, sweep_interval=0)
+        reader = None
+        try:
+            prepared = await _connected_completion(manager, tmp_path)
+            await manager.acknowledge_completion(
+                prepared.token, _completion_command(prepared.launch_id), _REVISION
+            )
+            reader = manager._session.reader_task
+            fake.output.put(None)
+            assert await asyncio.to_thread(fake.stop_entered.wait, 5)
+            decision = manager.completion_decision("owner", _REVISION, True)
+            assert decision.phase == "acknowledged"
+            assert decision.redirect_allowed is False
+            fake.release_stop.set()
+            await reader
+            decision = manager.completion_decision("owner", _REVISION, True)
+            assert decision.phase == phase
+            assert decision.redirect_allowed is redirect_allowed
+        finally:
+            fake.release_stop.set()
+            if reader is not None:
+                await reader
             await manager.shutdown()
 
     asyncio.run(exercise())
