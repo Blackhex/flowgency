@@ -47,11 +47,13 @@ def exclusive_lock(
     path: Path,
     *,
     wait: bool,
+    create_parent: bool = True,
     timeout: float | None = None,
     cancelled: Callable[[], bool] | None = None,
 ) -> Iterator[None]:
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    if create_parent:
+        path.parent.mkdir(parents=True, exist_ok=True)
     local_lock = _local_lock_for(path)
     deadline = None if timeout is None else time.monotonic() + timeout
     poll_interval = 0.05

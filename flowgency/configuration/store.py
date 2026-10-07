@@ -69,13 +69,17 @@ class ConfigStore:
         self.path = Path(path).expanduser().resolve()
         self.lock_path = self.path.with_suffix(f"{self.path.suffix}.lock")
 
-    def load(self, *, wait_for_lock: bool = True) -> ConfigSnapshot:
-        with exclusive_lock(self.lock_path, wait=wait_for_lock):
+    def load(
+        self, *, wait_for_lock: bool = True, create_lock_parent: bool = True
+    ) -> ConfigSnapshot:
+        with exclusive_lock(self.lock_path, wait=wait_for_lock, create_parent=create_lock_parent):
             payload = self.path.read_bytes()
         return self._snapshot(payload)
 
-    def inspect(self, *, wait_for_lock: bool = True) -> ConfigFileSnapshot:
-        with exclusive_lock(self.lock_path, wait=wait_for_lock):
+    def inspect(
+        self, *, wait_for_lock: bool = True, create_lock_parent: bool = True
+    ) -> ConfigFileSnapshot:
+        with exclusive_lock(self.lock_path, wait=wait_for_lock, create_parent=create_lock_parent):
             if not self.path.exists():
                 return ConfigFileSnapshot(
                     path=self.path,

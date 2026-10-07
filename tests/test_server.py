@@ -1954,6 +1954,59 @@ def test_completion_callback_reports_not_ready_configuration(completion_session)
     assert str(session.config_path) not in response.text
 
 
+@pytest.mark.parametrize("parent_exists", [False, True])
+def test_validate_current_completion_missing_config_creates_nothing(tmp_path, parent_exists):
+    from flowgency.web.setup_completion import SetupCompletionUnavailable, validate_current_completion
+
+    config_path = tmp_path / "missing" / "nested" / "config.yaml"
+    if parent_exists:
+        config_path.parent.mkdir(parents=True)
+    (tmp_path / "retained.txt").write_bytes(b"keep this unchanged")
+    before = _tree_bytes(tmp_path)
+
+    with pytest.raises(SetupCompletionUnavailable) as raised:
+        validate_current_completion(config_path, "a" * 64)
+
+    assert raised.value.code == "not-ready"
+    assert _tree_bytes(tmp_path) == before
+    assert not config_path.exists()
+    assert config_path.parent.is_dir() is parent_exists
+
+
+@pytest.mark.parametrize("read_method", ["load", "inspect"])
+def test_validate_current_completion_lost_config_parent_is_not_recreated(
+    tmp_path, raw_config, monkeypatch, read_method
+):
+    import hashlib
+    from flowgency.configuration import ConfigStore
+    from flowgency.web.setup_completion import SetupCompletionUnavailable, validate_current_completion
+
+    config_path = tmp_path / "canonical" / "config.yaml"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        yaml.safe_dump(_materialize_ready_config(tmp_path, raw_config), sort_keys=False),
+        encoding="utf-8",
+    )
+    revision = hashlib.sha256(config_path.read_bytes()).hexdigest()
+    read = getattr(ConfigStore, read_method)
+    after_removal = {}
+
+    def remove_parent(store, **kwargs):
+        store.path.unlink()
+        store.lock_path.unlink(missing_ok=True)
+        store.path.parent.rmdir()
+        after_removal.update(_tree_bytes(tmp_path))
+        return read(store, **kwargs)
+
+    monkeypatch.setattr(ConfigStore, read_method, remove_parent)
+    with pytest.raises(SetupCompletionUnavailable) as raised:
+        validate_current_completion(config_path, revision)
+
+    assert raised.value.code == "not-ready"
+    assert not config_path.parent.exists()
+    assert _tree_bytes(tmp_path) == after_removal
+
+
 def test_validate_current_completion_is_read_only_and_returns_rechecked_revision(
     tmp_path, raw_config
 ):

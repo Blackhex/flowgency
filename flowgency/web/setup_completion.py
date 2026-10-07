@@ -175,7 +175,9 @@ def validate_current_completion(config_path: Path, expected_revision: str) -> st
     """Re-check readiness without creating or repairing any source; return the revision."""
     store = ConfigStore(config_path)
     try:
-        snapshot = store.load()
+        if not store.path.is_file():
+            raise FileNotFoundError
+        snapshot = store.load(create_lock_parent=False)
     except _UNREADABLE_CONFIG:
         raise SetupCompletionUnavailable("not-ready") from None
     except Exception:
@@ -184,10 +186,10 @@ def validate_current_completion(config_path: Path, expected_revision: str) -> st
         raise SetupCompletionStale()
     try:
         _require_ready(store, snapshot)
-        current = store.inspect()
+        current = store.inspect(create_lock_parent=False)
     except SetupCompletionUnavailable:
         raise
-    except ValidationFailed:
+    except (FileNotFoundError, ValidationFailed):
         raise SetupCompletionUnavailable("not-ready") from None
     except Exception:
         raise SetupCompletionUnavailable("unavailable") from None
