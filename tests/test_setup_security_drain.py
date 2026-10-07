@@ -58,10 +58,16 @@ def test_discard_gives_up_on_a_stalled_client():
 
 
 def test_discard_is_skipped_once_the_body_was_fully_read():
+    received = 0
+
     async def receive():
-        raise AssertionError("receive() would wait for a disconnect")
+        nonlocal received
+        received += 1
+        return {"type": "http.request", "body": b"", "more_body": False}
 
     request = _request(receive)
     request.state.body_fully_read = True
 
     asyncio.run(discard_unread_body(request, max_bytes=4096))
+
+    assert received == 0

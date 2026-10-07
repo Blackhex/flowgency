@@ -138,8 +138,9 @@ async def discard_unread_body(
 
     Closing with unread request bytes can reset the connection and lose the
     rejection the client is waiting for. Call only after the rejection is decided.
-    Reads at most max_bytes for at most timeout seconds, and not at all once the
-    body was fully read (a further receive() would wait for a disconnect).
+    Stops once max_bytes is exceeded (possibly by one transport chunk), or after
+    timeout seconds. Reads nothing once the body was fully read (a further
+    receive() would wait for a disconnect).
     """
     if getattr(request.state, "body_fully_read", False):
         return
