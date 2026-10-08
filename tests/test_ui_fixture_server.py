@@ -1439,4 +1439,3 @@ def test_reset_keeps_the_workflow_library_and_durable_job_roots_in_place(monkeyp
         _reset(client)
 
         assert {root: root.stat().st_ino for root in roots} == identities
-
