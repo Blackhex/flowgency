@@ -23,6 +23,8 @@ from flowgency.memory.store import (
     _is_symlink_or_reparse,
 )
 from flowgency.web.dependencies import FlowgencyServices, get_services
+from flowgency.web.library_live import channel_detail_policy, channel_list_policy
+from flowgency.web.live import respond_live_or_html
 
 
 router = APIRouter()
@@ -74,6 +76,7 @@ def _channel_references(snapshot, channel_key: str) -> list[dict[str, str]]:
             ):
                 refs.append(
                     {
+                        "key": f"{team_key}/{agent_key}",
                         "label": f"{tcfg.name} / {display_name}",
                         "href": f"/{team_key}/agents/{agent_key}/memory",
                     }
@@ -86,6 +89,7 @@ def _channel_references(snapshot, channel_key: str) -> list[dict[str, str]]:
                 ):
                     refs.append(
                         {
+                            "key": f"{team_key}/{agent_key}/{routine.id}",
                             "label": (
                                 f"{tcfg.name} / {display_name} / "
                                 f"{routine.id}"
@@ -139,16 +143,18 @@ def _render_channel_list(
                 "reference_count": len(refs),
             }
         )
-    return _templates(request).TemplateResponse(
+    context = {
+        **_base_admin_context(request, snapshot),
+        "channels": rows,
+        "revision": snapshot.revision,
+        "warning": warning,
+        "issues": issues or [],
+    }
+    return respond_live_or_html(
         request,
-        "admin_memory_channels.html",
-        {
-            **_base_admin_context(request, snapshot),
-            "channels": rows,
-            "revision": snapshot.revision,
-            "warning": warning,
-            "issues": issues or [],
-        },
+        _templates(request),
+        context,
+        channel_list_policy(context),
         status_code=status_code,
     )
 
@@ -168,7 +174,11 @@ def _render_channel_detail(
     status_code: int = 200,
 ):
     resolved = _resolve_channel_memory(snapshot, services, channel_key)
-    memory_snapshot = services.memory_store.ensure(resolved)
+    # A live snapshot is a read: it never creates the channel directory or its lock.
+    if request.method == "GET" and request.query_params.get("__live") == "1":
+        memory_snapshot = services.memory_store.preview(resolved)
+    else:
+        memory_snapshot = services.memory_store.ensure(resolved)
     selected_name = (
         filename
         if filename in memory_snapshot.files
@@ -180,23 +190,25 @@ def _render_channel_detail(
         else memory_snapshot.files.get(selected_name, b"").decode("utf-8")
     )
     references = _channel_references(snapshot, channel_key)
-    return _templates(request).TemplateResponse(
+    context = {
+        **_base_admin_context(request, snapshot),
+        "channel_key": channel_key,
+        "channel": snapshot.config.memory.channels[channel_key],
+        "revision": snapshot.revision,
+        "memory_snapshot": memory_snapshot,
+        "references": references,
+        "warning": warning,
+        "issues": issues or [],
+        "content_warning": content_warning,
+        "memory_conflict": memory_conflict,
+        "selected_filename": selected_name,
+        "selected_content": selected_content,
+    }
+    return respond_live_or_html(
         request,
-        "admin_memory_channel.html",
-        {
-            **_base_admin_context(request, snapshot),
-            "channel_key": channel_key,
-            "channel": snapshot.config.memory.channels[channel_key],
-            "revision": snapshot.revision,
-            "memory_snapshot": memory_snapshot,
-            "references": references,
-            "warning": warning,
-            "issues": issues or [],
-            "content_warning": content_warning,
-            "memory_conflict": memory_conflict,
-            "selected_filename": selected_name,
-            "selected_content": selected_content,
-        },
+        _templates(request),
+        context,
+        channel_detail_policy(channel_key, context),
         status_code=status_code,
     )
 

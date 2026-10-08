@@ -1,12 +1,45 @@
 {% extends "base.html" %}
+
+{#- Live regions: the page and every snapshot render these macros from the same context. Memory content is
+    untrusted and never leaves its textarea: a snapshot carries only the file count and revisions. The metadata,
+    delete and content forms, their drafts and their loaded revisions stay outside every region; channel-status
+    holds the read-only markers the notice controller (agent-detail-notices.js) compares against them. -#}
+{% macro live_channel_header() -%}
+<div data-live-key="channel:{{ channel_key }}:header">
+  <a href="/admin/memory-channels" class="text-sm text-indigo-600 hover:text-indigo-800">← Memory Channels</a>
+  <h1 class="mt-2 text-2xl font-bold text-gray-900">{{ channel.display_name }}</h1>
+  <p class="mt-1 font-mono text-xs text-gray-500">{{ channel_key }}</p>
+</div>
+{%- endmacro %}
+
+{% macro live_channel_status() -%}
+<p data-live-key="channel:{{ channel_key }}:config" data-live-revision="{{ revision }}" data-live-scope="config" data-live-baseline-input="revision" data-live-changed="Channel configuration changed since this form loaded. Reload to see the latest.">Configuration revision {{ revision[:12] }}</p>
+<p data-live-key="channel:{{ channel_key }}:content" data-live-revision="{{ memory_snapshot.revision }}" data-live-scope="content" data-live-baseline-input="content_revision" data-live-changed="Channel memory changed since this editor loaded. Reload to see the latest.">Memory revision {{ memory_snapshot.revision[:12] }}</p>
+{%- endmacro %}
+
+{% macro live_channel_references() -%}
+{% if references %}
+<ul data-live-key="channel:{{ channel_key }}:references" class="mt-4 space-y-2 text-sm text-gray-600">
+  {% for reference in references %}
+  <li data-live-key="reference:{{ reference.key }}"><a href="{{ reference.href }}" class="text-indigo-600 hover:text-indigo-800">{{ reference.label }}</a></li>
+  {% endfor %}
+</ul>
+{% else %}
+<p data-live-key="channel:{{ channel_key }}:no-references" class="mt-4 text-sm text-gray-500">No config references currently target this channel.</p>
+{% endif %}
+{%- endmacro %}
+
+{% macro live_channel_files() -%}
+<div data-live-key="channel:{{ channel_key }}:files" class="flex items-center justify-between">
+  <h2 class="text-lg font-semibold text-gray-900">Markdown files</h2>
+  <span class="text-sm text-gray-500">{{ memory_snapshot.files | length }} file{{ 's' if memory_snapshot.files | length != 1 else '' }}</span>
+</div>
+{%- endmacro %}
+
 {% block title %}{{ channel.display_name }} — Memory Channels{% endblock %}
 {% block content %}
 <div class="max-w-6xl space-y-6">
-  <div>
-    <a href="/admin/memory-channels" class="text-sm text-indigo-600 hover:text-indigo-800">← Memory Channels</a>
-    <h1 class="mt-2 text-2xl font-bold text-gray-900">{{ channel.display_name }}</h1>
-    <p class="mt-1 font-mono text-xs text-gray-500">{{ channel_key }}</p>
-  </div>
+  <div data-live-region="channel-header">{{ live_channel_header() }}</div>
 
   {% if warning %}
   <div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{{ warning }}</div>
@@ -27,8 +60,11 @@
   <div class="grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
     <div class="space-y-6">
       <section class="rounded-xl border border-gray-200 bg-white p-5">
+        {#- Empty until a saved revision differs from the one these forms loaded. -#}
+        <div data-live-notices role="status" aria-live="polite"></div>
+        <div data-live-region="channel-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true">{{ live_channel_status() }}</div>
         <h2 class="text-lg font-semibold text-gray-900">Metadata</h2>
-        <form method="post" action="/admin/memory-channels/{{ channel_key }}" class="mt-4 space-y-4">
+        <form method="post" action="/admin/memory-channels/{{ channel_key }}" data-live-owned class="mt-4 space-y-4">
           <input type="hidden" name="revision" value="{{ revision }}">
           <div>
             <label for="display-name" class="block text-sm font-medium text-gray-700">Display name</label>
@@ -41,7 +77,7 @@
           </div>
           <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">Save metadata</button>
         </form>
-        <form method="post" action="/admin/memory-channels/{{ channel_key }}/delete" class="mt-4" onsubmit="return confirm('Delete this memory channel?')">
+        <form method="post" action="/admin/memory-channels/{{ channel_key }}/delete" data-live-owned data-confirm="Delete this memory channel?" class="mt-4">
           <input type="hidden" name="revision" value="{{ revision }}">
           <button type="submit" class="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700">Delete channel</button>
         </form>
@@ -49,24 +85,13 @@
 
       <section class="rounded-xl border border-gray-200 bg-white p-5">
         <h2 class="text-lg font-semibold text-gray-900">Declared references</h2>
-        {% if references %}
-        <ul class="mt-4 space-y-2 text-sm text-gray-600">
-          {% for reference in references %}
-          <li><a href="{{ reference.href }}" class="text-indigo-600 hover:text-indigo-800">{{ reference.label }}</a></li>
-          {% endfor %}
-        </ul>
-        {% else %}
-        <p class="mt-4 text-sm text-gray-500">No config references currently target this channel.</p>
-        {% endif %}
+        <div data-live-region="channel-references">{{ live_channel_references() }}</div>
       </section>
     </div>
 
     <section class="rounded-xl border border-gray-200 bg-white p-5">
-      <div class="flex items-center justify-between">
-        <h2 class="text-lg font-semibold text-gray-900">Markdown files</h2>
-        <span class="text-sm text-gray-500">{{ memory_snapshot.files | length }} file{{ 's' if memory_snapshot.files | length != 1 else '' }}</span>
-      </div>
-      <form method="post" action="/admin/memory-channels/{{ channel_key }}/content" class="mt-4 space-y-4">
+      <div data-live-region="channel-files">{{ live_channel_files() }}</div>
+      <form method="post" action="/admin/memory-channels/{{ channel_key }}/content" data-live-owned class="mt-4 space-y-4">
         <input type="hidden" name="content_revision" value="{{ memory_snapshot.revision }}">
         <div>
           <label for="filename" class="block text-sm font-medium text-gray-700">File</label>
@@ -91,3 +116,5 @@
   </div>
 </div>
 {% endblock %}
+
+{% block page_scripts %}<script src="/static/confirm-submit.js"></script><script src="/static/agent-detail-notices.js"></script>{% endblock %}

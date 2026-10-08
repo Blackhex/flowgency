@@ -1,12 +1,34 @@
 {% extends "base.html" %}
+
+{#- Live regions: the page and every snapshot render these macros from the same context. The editor form,
+    its draft and its loaded digest stay outside every region; skill-source is the read-only marker the
+    notice controller (agent-detail-notices.js) compares against the digest this editor loaded. -#}
+{% macro live_skill_header() -%}
+<div data-live-key="skill:{{ blueprint.key }}:{{ active_skill }}:header">
+  <a href="/admin/agent-library/blueprints/{{ blueprint.key }}" class="text-sm text-indigo-600 hover:text-indigo-800">← {{ blueprint.title }}</a>
+  <h1 class="mt-2 text-2xl font-bold text-gray-900">Skill source editor</h1>
+  <p class="mt-1 text-sm text-gray-500">Edit standard skill instructions and resource files for {{ active_skill }}.</p>
+</div>
+{%- endmacro %}
+
+{% macro live_skill_files() -%}
+<ul data-live-key="skill:{{ active_skill }}:files" class="mt-4 space-y-2 text-sm">
+  {% for file in skill_files %}
+  <li data-live-key="skill-file:{{ file.path }}">
+    <a href="/admin/agent-library/blueprints/{{ blueprint.key }}/skills/{{ active_skill }}?path={{ file.path|urlencode }}" class="{% if selected_file.path == file.path %}text-indigo-700 font-medium{% else %}text-gray-600 hover:text-indigo-700{% endif %}">{{ file.name }}</a>
+  </li>
+  {% endfor %}
+</ul>
+{%- endmacro %}
+
+{% macro live_skill_source() -%}
+<p data-live-key="skill:{{ blueprint.key }}:source" data-live-revision="{{ blueprint.snapshot.digest }}" data-live-scope="source" data-live-baseline-input="expected_digest" data-live-changed="Blueprint source changed since this editor loaded. Reload to see the latest.">Blueprint source digest {{ blueprint.snapshot.digest[:12] }}</p>
+{%- endmacro %}
+
 {% block title %}{{ blueprint.title }} Skills — Agent Library{% endblock %}
 {% block content %}
 <div class="max-w-6xl space-y-6">
-  <div>
-    <a href="/admin/agent-library/blueprints/{{ blueprint.key }}" class="text-sm text-indigo-600 hover:text-indigo-800">← {{ blueprint.title }}</a>
-    <h1 class="mt-2 text-2xl font-bold text-gray-900">Skill source editor</h1>
-    <p class="mt-1 text-sm text-gray-500">Edit standard skill instructions and resource files for {{ active_skill }}.</p>
-  </div>
+  <div data-live-region="skill-header">{{ live_skill_header() }}</div>
 
   {% if warning %}
   <div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{{ warning }}</div>
@@ -25,21 +47,18 @@
   <div class="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
     <section class="rounded-xl border border-gray-200 bg-white p-5">
       <h2 class="text-lg font-semibold text-gray-900">Files</h2>
-      <ul class="mt-4 space-y-2 text-sm">
-        {% for file in skill_files %}
-        <li>
-          <a href="/admin/agent-library/blueprints/{{ blueprint.key }}/skills/{{ active_skill }}?path={{ file.path|urlencode }}" class="{% if selected_file.path == file.path %}text-indigo-700 font-medium{% else %}text-gray-600 hover:text-indigo-700{% endif %}">{{ file.name }}</a>
-        </li>
-        {% endfor %}
-      </ul>
+      <div data-live-region="skill-files">{{ live_skill_files() }}</div>
     </section>
 
     <section class="rounded-xl border border-gray-200 bg-white p-5">
+      {#- Empty until the saved digest differs from the one this editor loaded. -#}
+      <div data-live-notices role="status" aria-live="polite"></div>
+      <div data-live-region="skill-source" class="sr-only" role="status" aria-live="polite" aria-atomic="true">{{ live_skill_source() }}</div>
       <div class="flex items-center justify-between">
         <h2 class="text-lg font-semibold text-gray-900">{{ selected_file.name }}</h2>
         <span class="font-mono text-xs text-gray-500">{{ selected_file.path }}</span>
       </div>
-      <form method="post" action="/admin/agent-library/blueprints/{{ blueprint.key }}/source" class="mt-4 space-y-4">
+      <form method="post" action="/admin/agent-library/blueprints/{{ blueprint.key }}/source" data-live-owned class="mt-4 space-y-4">
         <input type="hidden" name="path" value="{{ form_path }}">
         <input type="hidden" name="expected_digest" value="{{ blueprint.snapshot.digest }}">
         <textarea name="content" rows="20" class="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500">{{ form_content }}</textarea>
@@ -49,3 +68,5 @@
   </div>
 </div>
 {% endblock %}
+
+{% block page_scripts %}<script src="/static/agent-detail-notices.js"></script>{% endblock %}

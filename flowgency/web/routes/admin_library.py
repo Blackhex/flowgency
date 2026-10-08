@@ -19,6 +19,13 @@ from flowgency.fs.snapshot import AssetValidationError
 from flowgency.integrations import get_integration
 from flowgency.prompts.assets import PROMPT_SUFFIX, prompt_source_path
 from flowgency.web.dependencies import FlowgencyServices, get_services
+from flowgency.web.library_live import (
+    blueprint_detail_policy,
+    blueprint_prompts_policy,
+    blueprint_skill_policy,
+    library_list_policy,
+)
+from flowgency.web.live import respond_live_or_html
 
 
 router = APIRouter()
@@ -160,6 +167,9 @@ def _blueprint_root(services: FlowgencyServices, key: str) -> Path:
 
 
 def _load_blueprint(services: FlowgencyServices, key: str):
+    # The key names a directory, so it is validated before any read of the library.
+    if not _IDENTIFIER_PATTERN.fullmatch(key):
+        raise HTTPException(status_code=404, detail="Unknown blueprint")
     root = _blueprint_root(services, key)
     if not root.is_dir():
         raise HTTPException(status_code=404, detail="Unknown blueprint")
@@ -175,6 +185,7 @@ def _instance_users(snapshot, blueprint_key: str) -> list[dict[str, str]]:
             display_name = agent.identity.display_name or agent_key
             users.append(
                 {
+                    "key": f"{team_key}/{agent_key}",
                     "team": tcfg.name,
                     "agent": display_name,
                     "href": f"/{team_key}/agents/{agent_key}/blueprint",
@@ -389,6 +400,10 @@ def _selected_skill_file(
     return skill_files[0]
 
 
+def _is_live_read(request: Request) -> bool:
+    return request.method == "GET" and request.query_params.get("__live") == "1"
+
+
 def _render_library_list(
     request: Request,
     services: FlowgencyServices,
@@ -432,14 +447,16 @@ def _render_library_list(
                 "user_count": len(users),
             }
         )
-    return _templates(request).TemplateResponse(
+    context = {
+        **_base_admin_context(request, snapshot),
+        "blueprints": rows,
+        "warning": warning,
+    }
+    return respond_live_or_html(
         request,
-        "admin_agent_library.html",
-        {
-            **_base_admin_context(request, snapshot),
-            "blueprints": rows,
-            "warning": warning,
-        },
+        _templates(request),
+        context,
+        library_list_policy(context),
         status_code=status_code,
     )
 
@@ -459,28 +476,30 @@ def _render_blueprint_detail(
     inspection = _load_blueprint(services, key)
     agents_file = inspection.snapshot.file("AGENTS.md")
     users = _instance_users(snapshot, key)
-    return _templates(request).TemplateResponse(
+    context = {
+        **_base_admin_context(request, snapshot),
+        "blueprint": inspection,
+        "users": users,
+        "skill_resources": _skill_resources(inspection),
+        "compatibility_rows": _cache_status(services, inspection),
+        "warning": warning,
+        "issues": issues or [],
+        "form_path": form_path,
+        "form_content": (
+            form_content
+            if form_content is not None
+            else agents_file.content.decode("utf-8")
+        ),
+        "user_summary": (
+            f"Used by {len(users)} instance"
+            + ("s" if len(users) != 1 else "")
+        ),
+    }
+    return respond_live_or_html(
         request,
-        "admin_blueprint_detail.html",
-        {
-            **_base_admin_context(request, snapshot),
-            "blueprint": inspection,
-            "users": users,
-            "skill_resources": _skill_resources(inspection),
-            "compatibility_rows": _cache_status(services, inspection),
-            "warning": warning,
-            "issues": issues or [],
-            "form_path": form_path,
-            "form_content": (
-                form_content
-                if form_content is not None
-                else agents_file.content.decode("utf-8")
-            ),
-            "user_summary": (
-                f"Used by {len(users)} instance"
-                + ("s" if len(users) != 1 else "")
-            ),
-        },
+        _templates(request),
+        context,
+        blueprint_detail_policy(key, context),
         status_code=status_code,
     )
 
@@ -511,24 +530,33 @@ def _render_blueprint_skill(
     selected = _selected_skill_file(files, selected_path)
     if selected is None:
         raise HTTPException(status_code=404, detail="Unknown skill file")
-    return _templates(request).TemplateResponse(
+    # A snapshot of a file that is gone is unavailable, never another file of the skill.
+    if (
+        _is_live_read(request)
+        and selected_path
+        and selected_path not in {selected["path"], selected["name"]}
+    ):
+        raise HTTPException(status_code=404, detail="Unknown skill file")
+    context = {
+        **_base_admin_context(request, snapshot),
+        "blueprint": inspection,
+        "active_skill": active_skill,
+        "skill_files": files,
+        "selected_file": selected,
+        "warning": warning,
+        "issues": issues or [],
+        "form_path": selected["path"],
+        "form_content": (
+            form_content
+            if form_content is not None
+            else selected["content"]
+        ),
+    }
+    return respond_live_or_html(
         request,
-        "admin_blueprint_skill.html",
-        {
-            **_base_admin_context(request, snapshot),
-            "blueprint": inspection,
-            "active_skill": active_skill,
-            "skill_files": files,
-            "selected_file": selected,
-            "warning": warning,
-            "issues": issues or [],
-            "form_path": selected["path"],
-            "form_content": (
-                form_content
-                if form_content is not None
-                else selected["content"]
-            ),
-        },
+        _templates(request),
+        context,
+        blueprint_skill_policy(key, active_skill, selected["path"], context),
         status_code=status_code,
     )
 
@@ -550,6 +578,17 @@ def _render_blueprint_prompts(
     inspection = _load_blueprint(services, key)
     files = _prompt_files(inspection)
     selected = _selected_prompt_file(files, selected_path)
+    # A snapshot of a prompt that is gone is unavailable, never another prompt of the blueprint.
+    if (
+        _is_live_read(request)
+        and selected_path
+        and (
+            selected is None
+            or selected_path
+            not in {selected["path"], selected["name"], selected["slug"]}
+        )
+    ):
+        raise HTTPException(status_code=404, detail="Unknown prompt")
     default_create_content = (
         "---\n"
         "name: new-prompt\n"
@@ -558,29 +597,35 @@ def _render_blueprint_prompts(
         "---\n\n"
         "Write the prompt body here.\n"
     )
-    return _templates(request).TemplateResponse(
+    context = {
+        **_base_admin_context(request, snapshot),
+        "blueprint": inspection,
+        "prompt_files": files,
+        "selected_prompt": selected,
+        "warning": warning,
+        "issues": issues or [],
+        "form_path": (
+            selected["path"] if selected is not None else ""
+        ),
+        "form_content": (
+            form_content
+            if form_content is not None
+            else (
+                selected["content"] if selected is not None else ""
+            )
+        ),
+        "create_slug": create_slug,
+        "create_content": create_content or default_create_content,
+    }
+    return respond_live_or_html(
         request,
-        "admin_blueprint_prompts.html",
-        {
-            **_base_admin_context(request, snapshot),
-            "blueprint": inspection,
-            "prompt_files": files,
-            "selected_prompt": selected,
-            "warning": warning,
-            "issues": issues or [],
-            "form_path": (
-                selected["path"] if selected is not None else ""
-            ),
-            "form_content": (
-                form_content
-                if form_content is not None
-                else (
-                    selected["content"] if selected is not None else ""
-                )
-            ),
-            "create_slug": create_slug,
-            "create_content": create_content or default_create_content,
-        },
+        _templates(request),
+        context,
+        blueprint_prompts_policy(
+            key,
+            selected["path"] if selected is not None else None,
+            context,
+        ),
         status_code=status_code,
     )
 

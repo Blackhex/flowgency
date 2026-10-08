@@ -117,6 +117,14 @@ LIVE_CHANGE_CASES = frozenset(
         "admin-team-removed",
         "integration-registered",
         "integration-available-added",
+        "library-source-changes",
+        "library-blueprint-added",
+        "library-blueprint-removed",
+        "library-selected-files-removed",
+        "channel-memory-changes",
+        "channel-metadata-changed",
+        "channel-added",
+        "channel-removed",
     }
 )
 INBOX_CLOCK_ADVANCE = timedelta(minutes=30)
@@ -452,6 +460,8 @@ def _apply_live_change(runtime: Path, case: str) -> None:
         _WORKSPACE_LIVE_CHANGES[case](runtime)
     elif case in _ADMIN_LIVE_CHANGES:
         _ADMIN_LIVE_CHANGES[case](runtime)
+    elif case in _LIBRARY_LIVE_CHANGES:
+        _LIBRARY_LIVE_CHANGES[case](runtime)
     else:
         raise ValueError(f"Unknown live change case: {case}")
 
@@ -1030,6 +1040,142 @@ _ADMIN_LIVE_CHANGES = {
     "admin-team-removed": _admin_team_removed,
     "integration-registered": _integration_registered,
     "integration-available-added": _integration_available_added,
+}
+
+LIBRARY_ADDED_BLUEPRINT = "designer"
+LIBRARY_EDITED_TITLE = "Advisor Prime"
+LIBRARY_ADDED_SKILL_FILE = "notes.md"
+LIBRARY_ADDED_PROMPT = "weekly-brief"
+LIBRARY_REMOVED_SKILL_FILE = "checklist.md"
+LIBRARY_REMOVED_PROMPT = "release-window"
+CHANNEL_KEY = "brand-strategy"
+CHANNEL_ADDED = "launch-notes"
+CHANNEL_RENAMED = "Brand Strategy Council"
+CHANNEL_APPENDIX = "appendix.md"
+CHANNEL_EDITED_MEMORY = "# Brand Strategy\n\nRevised in the live channel case.\n"
+ADVISOR_CHECKLIST_TEXT = "- Verify content\n"
+
+
+def _advisor_source(runtime: Path) -> Path:
+    return runtime / "agent-library" / "advisor"
+
+
+def _advisor_skill_dir(runtime: Path) -> Path:
+    return _advisor_source(runtime) / ".agents" / "skills" / "daily-review"
+
+
+def _advisor_prompt_path(runtime: Path, name: str) -> Path:
+    return _advisor_source(runtime) / ".agents" / "prompts" / f"{name}.prompt.md"
+
+
+def _release_window_payload() -> bytes:
+    return _prompt_bytes(
+        LIBRARY_REMOVED_PROMPT,
+        "Shared release window check.",
+        "Verify the release window, rollout risk, and communication timing.\n",
+        argument_hint="Include the launch date and any blocked approvals.",
+    )
+
+
+def _library_source_changes(runtime: Path) -> None:
+    """Edit the advisor blueprint's AGENTS.md and add a skill file and a shared prompt."""
+    _write(
+        _advisor_source(runtime) / "AGENTS.md",
+        f"# {LIBRARY_EDITED_TITLE}\n\nDeterministic release-gate instructions, edited by the library case.\n",
+    )
+    _write(_advisor_skill_dir(runtime) / LIBRARY_ADDED_SKILL_FILE, "- Added by the library case\n")
+    _advisor_prompt_path(runtime, LIBRARY_ADDED_PROMPT).write_bytes(
+        _prompt_bytes(LIBRARY_ADDED_PROMPT, "Weekly brief.", "Summarize the week.\n")
+    )
+
+
+def _library_blueprint_added(runtime: Path) -> None:
+    _seed_blueprint(
+        runtime / "agent-library",
+        LIBRARY_ADDED_BLUEPRINT,
+        "Designer",
+        "design-review",
+        prompts=(("design-review", "Shared design review.", "Review the design draft.\n", None),),
+    )
+
+
+def _library_blueprint_removed(runtime: Path) -> None:
+    shutil.rmtree(runtime / "agent-library" / LIBRARY_ADDED_BLUEPRINT, ignore_errors=True)
+
+
+def _library_selected_files_removed(runtime: Path) -> None:
+    (_advisor_skill_dir(runtime) / LIBRARY_REMOVED_SKILL_FILE).unlink(missing_ok=True)
+    _advisor_prompt_path(runtime, LIBRARY_REMOVED_PROMPT).unlink(missing_ok=True)
+
+
+def _restore_library_sources(runtime: Path) -> None:
+    """Undo every library case: edited, added and removed blueprint files."""
+    _write(
+        _advisor_source(runtime) / "AGENTS.md",
+        "# Advisor\n\nDeterministic release-gate instructions.\n",
+    )
+    (_advisor_skill_dir(runtime) / LIBRARY_ADDED_SKILL_FILE).unlink(missing_ok=True)
+    _write(_advisor_skill_dir(runtime) / LIBRARY_REMOVED_SKILL_FILE, ADVISOR_CHECKLIST_TEXT)
+    _advisor_prompt_path(runtime, LIBRARY_ADDED_PROMPT).unlink(missing_ok=True)
+    _advisor_prompt_path(runtime, LIBRARY_REMOVED_PROMPT).write_bytes(_release_window_payload())
+    shutil.rmtree(runtime / "agent-library" / LIBRARY_ADDED_BLUEPRINT, ignore_errors=True)
+
+
+def _channel_memory(runtime: Path, channel_key: str, channels: dict):
+    store = MemoryStore(runtime / "memory-store")
+    resolved = resolve_memory_selector(
+        MemorySelector(scope="channel", channel=channel_key),
+        job_id="ui-preview",
+        team_key="newsletter",
+        agent_name="advisor",
+        routine_id=None,
+        channels=channels,
+        store_root=store.root,
+    )
+    return store, resolved
+
+
+def _channel_memory_changes(runtime: Path) -> None:
+    channels = ConfigStore(runtime / "config.yaml").load().config.memory.channels
+    store, resolved = _channel_memory(runtime, CHANNEL_KEY, channels)
+    current = store.read(resolved)
+    store.try_update(
+        resolved,
+        current.revision,
+        lambda snapshot: {
+            **snapshot.files,
+            "memory.md": CHANNEL_EDITED_MEMORY.encode("utf-8"),
+            CHANNEL_APPENDIX: b"# Appendix\n",
+        },
+    )
+
+
+def _channel_metadata_changed(runtime: Path) -> None:
+    _patch_runtime_config(
+        runtime, lambda raw: raw["memory"]["channels"][CHANNEL_KEY].update(display_name=CHANNEL_RENAMED)
+    )
+
+
+def _channel_added(runtime: Path) -> None:
+    _patch_runtime_config(
+        runtime,
+        lambda raw: raw["memory"]["channels"].update({CHANNEL_ADDED: {"display_name": "Launch Notes"}}),
+    )
+
+
+def _channel_removed(runtime: Path) -> None:
+    _patch_runtime_config(runtime, lambda raw: raw["memory"]["channels"].pop(CHANNEL_ADDED, None))
+
+
+_LIBRARY_LIVE_CHANGES = {
+    "library-source-changes": _library_source_changes,
+    "library-blueprint-added": _library_blueprint_added,
+    "library-blueprint-removed": _library_blueprint_removed,
+    "library-selected-files-removed": _library_selected_files_removed,
+    "channel-memory-changes": _channel_memory_changes,
+    "channel-metadata-changed": _channel_metadata_changed,
+    "channel-added": _channel_added,
+    "channel-removed": _channel_removed,
 }
 
 
@@ -2319,10 +2465,7 @@ def _restore_external_sources(runtime: Path) -> None:
         PromptStore(runtime / "prompts").path("newsletter", "advisor", "local-triage"),
         _local_triage_payload(),
     )
-    _write(
-        runtime / "agent-library" / "advisor" / "AGENTS.md",
-        "# Advisor\n\nDeterministic release-gate instructions.\n",
-    )
+    _restore_library_sources(runtime)
 
 
 def _seed_memory(runtime: Path, config: dict) -> None:
@@ -2339,6 +2482,12 @@ def _seed_memory(runtime: Path, config: dict) -> None:
     )
     store.ensure(channel)
     _write(channel.directory / "memory.md", "# Brand Strategy\n\nPrefer concise, evidence-led releases.\n")
+    # Files a live case added beside memory.md, and the memory of a channel it declared.
+    for extra in channel.directory.glob("*.md"):
+        if extra.name != "memory.md":
+            extra.unlink()
+    added = _channel_memory(runtime, CHANNEL_ADDED, {**config["memory"]["channels"], CHANNEL_ADDED: {}})[1]
+    shutil.rmtree(added.directory, ignore_errors=True)
 
 
 def _clear_readonly(function, path, _error) -> None:

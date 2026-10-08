@@ -413,6 +413,7 @@ def test_live_change_cases_all_have_a_dispatcher():
         *server._LOG_LIVE_CHANGES,
         *server._WORKSPACE_LIVE_CHANGES,
         *server._ADMIN_LIVE_CHANGES,
+        *server._LIBRARY_LIVE_CHANGES,
     }
     assert dispatched == set(server.LIVE_CHANGE_CASES)
 
@@ -903,3 +904,169 @@ def test_live_change_integration_cases_change_the_available_listing_and_reset_re
         assert not (source / "acme" / "gadget.py").exists()
         assert server.INTEGRATION_REGISTERED_MODULE not in (source / "integrations.yaml").read_text(encoding="utf-8")
     assert hashlib.sha256(product_config.read_bytes()).hexdigest() == product_before
+
+
+_ADVISOR_URL = "/admin/agent-library/blueprints/advisor"
+_SKILL_FILE = ".agents/skills/daily-review/SKILL.md"
+_CHECKLIST_FILE = ".agents/skills/daily-review/checklist.md"
+_RELEASE_WINDOW_FILE = ".agents/prompts/release-window.prompt.md"
+_BRAND_STRATEGY = "/admin/memory-channels/brand-strategy"
+_LIBRARY_CASE_SEQUENCES = (
+    ("library-source-changes",),
+    ("library-blueprint-added",),
+    ("library-blueprint-added", "library-blueprint-removed"),
+    ("library-selected-files-removed",),
+    ("channel-memory-changes",),
+    ("channel-metadata-changed",),
+    ("channel-added",),
+    ("channel-added", "channel-removed"),
+)
+
+
+def _library_tree(runtime) -> dict[str, bytes]:
+    root = runtime / "agent-library"
+    return {path.relative_to(root).as_posix(): path.read_bytes() for path in sorted(root.rglob("*")) if path.is_file()}
+
+
+def _channel_markdown(runtime, channel_key: str) -> dict[str, bytes]:
+    channels = {**ConfigStore(runtime / "config.yaml").load().config.memory.channels, server.CHANNEL_ADDED: {}}
+    directory = server._channel_memory(runtime, channel_key, channels)[1].directory
+    return {path.name: path.read_bytes() for path in sorted(directory.glob("*.md"))} if directory.exists() else {}
+
+
+def _library_state(runtime) -> dict:
+    return {
+        "library": _library_tree(runtime),
+        "brand-strategy": _channel_markdown(runtime, server.CHANNEL_KEY),
+        "launch-notes": _channel_markdown(runtime, server.CHANNEL_ADDED),
+        "config": ConfigStore(runtime / "config.yaml").load().revision,
+    }
+
+
+def test_every_library_case_belongs_to_a_reset_completeness_sequence():
+    assert {case for sequence in _LIBRARY_CASE_SEQUENCES for case in sequence} == set(server._LIBRARY_LIVE_CHANGES)
+
+
+@pytest.mark.parametrize("sequence", _LIBRARY_CASE_SEQUENCES, ids="+".join)
+def test_library_and_channel_cases_are_fully_undone_by_a_reset(monkeypatch, sequence):
+    with _live_fixture(monkeypatch) as (client, runtime):
+        before = _library_state(runtime)
+        assert before["launch-notes"] == {}
+
+        changed = False
+        for case in sequence:
+            _apply(client, case)
+            # Rendering a declared channel's page creates its memory directory, which a reset must also remove.
+            client.get(f"/admin/memory-channels/{server.CHANNEL_ADDED}")
+            changed = changed or _library_state(runtime) != before
+        assert changed
+
+        _reset(client)
+
+        assert _library_state(runtime) == before
+
+
+def test_live_change_library_source_changes_move_the_title_files_prompts_and_digest(monkeypatch):
+    with _live_fixture(monkeypatch) as (client, _runtime):
+        header = _region(client, _ADVISOR_URL, "blueprint-header")
+        files = _region(client, _ADVISOR_URL, "blueprint-files")
+        prompts = _region(client, f"{_ADVISOR_URL}/prompts?path={_RELEASE_WINDOW_FILE}", "prompts-list")
+        assert server.LIBRARY_EDITED_TITLE not in header
+        assert server.LIBRARY_ADDED_SKILL_FILE not in files
+        assert f"prompt:{server.LIBRARY_ADDED_PROMPT}" not in prompts
+
+        _apply(client, "library-source-changes")
+
+        assert server.LIBRARY_EDITED_TITLE in _region(client, _ADVISOR_URL, "blueprint-header")
+        assert _region(client, _ADVISOR_URL, "blueprint-header") != header
+        assert server.LIBRARY_ADDED_SKILL_FILE in _region(client, _ADVISOR_URL, "blueprint-files")
+        assert f"prompt:{server.LIBRARY_ADDED_PROMPT}" in _region(
+            client, f"{_ADVISOR_URL}/prompts?path={_RELEASE_WINDOW_FILE}", "prompts-list"
+        )
+
+        _reset(client)
+
+        assert _region(client, _ADVISOR_URL, "blueprint-header") == header
+        assert _region(client, _ADVISOR_URL, "blueprint-files") == files
+
+
+def test_live_change_library_blueprint_added_and_removed_change_the_list_and_the_second_page(monkeypatch):
+    with _live_fixture(monkeypatch) as (client, _runtime):
+        listing = "/admin/agent-library"
+        before = _region(client, listing, "library-blueprints")
+        added_url = f"/admin/agent-library/blueprints/{server.LIBRARY_ADDED_BLUEPRINT}"
+        assert client.get(f"{added_url}?__live=1").status_code == 404
+
+        _apply(client, "library-blueprint-added")
+
+        assert f"blueprint:{server.LIBRARY_ADDED_BLUEPRINT}" in _live_keys(_region(client, listing, "library-blueprints"))
+        assert client.get(f"{added_url}?__live=1").status_code == 200
+
+        _apply(client, "library-blueprint-removed")
+
+        assert _region(client, listing, "library-blueprints") == before
+        assert client.get(f"{added_url}?__live=1").status_code == 404
+
+
+def test_live_change_library_selected_files_removed_makes_the_loaded_selections_unavailable(monkeypatch):
+    with _live_fixture(monkeypatch) as (client, _runtime):
+        skill = f"{_ADVISOR_URL}/skills/daily-review?path={_CHECKLIST_FILE}&__live=1"
+        prompt = f"{_ADVISOR_URL}/prompts?path={_RELEASE_WINDOW_FILE}&__live=1"
+        assert client.get(skill).status_code == 200
+        assert client.get(prompt).status_code == 200
+
+        _apply(client, "library-selected-files-removed")
+
+        assert client.get(skill).status_code == 404
+        assert client.get(prompt).status_code == 404
+        assert client.get(f"{_ADVISOR_URL}/skills/daily-review?path={_SKILL_FILE}&__live=1").status_code == 200
+
+        _reset(client)
+
+        assert client.get(skill).status_code == 200
+        assert client.get(prompt).status_code == 200
+
+
+def test_live_change_channel_memory_changes_move_only_the_content_marker(monkeypatch):
+    with _live_fixture(monkeypatch) as (client, runtime):
+        status = _region(client, _BRAND_STRATEGY, "channel-status")
+        files = _region(client, _BRAND_STRATEGY, "channel-files")
+        config = ConfigStore(runtime / "config.yaml").load().revision
+        assert "1 file" in files
+
+        _apply(client, "channel-memory-changes")
+
+        changed = _region(client, _BRAND_STRATEGY, "channel-status")
+        assert changed != status
+        assert f'data-live-revision="{config}"' in changed
+        assert "2 files" in _region(client, _BRAND_STRATEGY, "channel-files")
+
+
+def test_live_change_channel_metadata_changed_renames_the_channel_and_moves_the_config_marker(monkeypatch):
+    with _live_fixture(monkeypatch) as (client, runtime):
+        header = _region(client, _BRAND_STRATEGY, "channel-header")
+        before = ConfigStore(runtime / "config.yaml").load().revision
+
+        _apply(client, "channel-metadata-changed")
+
+        assert server.CHANNEL_RENAMED in _region(client, _BRAND_STRATEGY, "channel-header")
+        assert _region(client, _BRAND_STRATEGY, "channel-header") != header
+        assert f'data-live-revision="{before}"' not in _region(client, _BRAND_STRATEGY, "channel-status")
+
+
+def test_live_change_channel_added_and_removed_change_the_list_and_the_second_page(monkeypatch):
+    with _live_fixture(monkeypatch) as (client, _runtime):
+        listing = "/admin/memory-channels"
+        detail = f"{listing}/{server.CHANNEL_ADDED}?__live=1"
+        assert client.get(detail).status_code == 404
+
+        _apply(client, "channel-added")
+
+        assert f"channel:{server.CHANNEL_ADDED}" in _live_keys(_region(client, listing, "channels-table"))
+        assert client.get(detail).status_code == 200
+
+        _apply(client, "channel-removed")
+
+        assert f"channel:{server.CHANNEL_ADDED}" not in _live_keys(_region(client, listing, "channels-table"))
+        assert client.get(detail).status_code == 404
+
