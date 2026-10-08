@@ -92,6 +92,7 @@ from flowgency.web.logs import describe_log_file, log_belongs_to_agent, with_log
 from flowgency.web.log_preview import read_log_preview
 from flowgency.web.setup_security import SetupAccessDenied, SetupBrowserAccess
 from flowgency.web.setup_sessions import SetupSessionManager
+from flowgency.web.live_cache import LiveSnapshotCacheMiddleware
 from flowgency.web.live import (
     LiveBinding,
     LivePagePolicy,
@@ -411,6 +412,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Flowgency Dashboard", lifespan=lifespan)
+app.add_middleware(LiveSnapshotCacheMiddleware)
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 app.state.templates = templates
