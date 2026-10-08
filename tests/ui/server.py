@@ -23,6 +23,7 @@ from fastapi import HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
 from flowgency.configuration.models import MemorySelector
+from flowgency.configuration.patches import register_agent_prompt, unregister_agent_prompt
 from flowgency.configuration.store import ConfigStore
 from flowgency.fs.atomic import atomic_write_bytes
 from flowgency.fs.locks import exclusive_lock
@@ -91,6 +92,9 @@ LIVE_CHANGE_CASES = frozenset(
         "agent-active-job",
         "agent-routines",
         "agent-catalog-digest",
+        "agent-prompt-added",
+        "agent-prompt-removed",
+        "agent-second-prompt-source",
         "agent-log-membership",
         "agent-memory-revision",
         "agent-report-history",
@@ -661,6 +665,40 @@ def _agent_catalog_digest(runtime: Path) -> None:
     )
 
 
+SECOND_PROMPT_NAME = "local-followup"
+SECOND_PROMPT_EDITED_BODY = "Follow up on the edited blockers; an external editor changed this source.\n"
+
+
+def _second_prompt_payload(body: str = "Follow up on the open release blockers.\n") -> bytes:
+    return _prompt_bytes(SECOND_PROMPT_NAME, "Private follow-up.", body)
+
+
+def _agent_prompt_added(runtime: Path) -> None:
+    PromptStore(runtime / "prompts").create("newsletter", "advisor", SECOND_PROMPT_NAME, _second_prompt_payload())
+    store = ConfigStore(runtime / "config.yaml")
+    register_agent_prompt(store, store.load().revision, "newsletter", "advisor", SECOND_PROMPT_NAME)
+
+
+def _agent_prompt_removed(runtime: Path) -> None:
+    prompts = PromptStore(runtime / "prompts")
+    current = prompts.read("newsletter", "advisor", "local-triage")
+    store = ConfigStore(runtime / "config.yaml")
+    unregister_agent_prompt(store, store.load().revision, "newsletter", "advisor", "local-triage")
+    prompts.delete("newsletter", "advisor", "local-triage", expected_digest=current.document.digest)
+
+
+def _agent_second_prompt_source(runtime: Path) -> None:
+    store = PromptStore(runtime / "prompts")
+    current = store.read("newsletter", "advisor", SECOND_PROMPT_NAME)
+    store.update(
+        "newsletter",
+        "advisor",
+        SECOND_PROMPT_NAME,
+        expected_digest=current.document.digest,
+        payload=_second_prompt_payload(SECOND_PROMPT_EDITED_BODY),
+    )
+
+
 def _agent_log_membership(runtime: Path) -> None:
     _write_log(
         runtime / "teams" / "newsletter" / "logs" / "2026-07-16" / "advisor-live-refresh.out",
@@ -735,6 +773,9 @@ _AGENT_LIVE_CHANGES = {
     "agent-active-job": _agent_active_job,
     "agent-routines": _agent_routines,
     "agent-catalog-digest": _agent_catalog_digest,
+    "agent-prompt-added": _agent_prompt_added,
+    "agent-prompt-removed": _agent_prompt_removed,
+    "agent-second-prompt-source": _agent_second_prompt_source,
     "agent-log-membership": _agent_log_membership,
     "agent-memory-revision": _agent_memory_revision,
     "agent-report-history": _agent_report_history,
@@ -2563,6 +2604,7 @@ def _restore_external_sources(runtime: Path) -> None:
         PromptStore(runtime / "prompts").path("newsletter", "advisor", "local-triage"),
         _local_triage_payload(),
     )
+    PromptStore(runtime / "prompts").path("newsletter", "advisor", SECOND_PROMPT_NAME).unlink(missing_ok=True)
     # The agent-permissions case grants a path it creates; no reset may leave it behind.
     shutil.rmtree(runtime / "reference-material", ignore_errors=True)
     _restore_library_sources(runtime)

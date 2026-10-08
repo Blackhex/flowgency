@@ -490,6 +490,33 @@ def _reset(client) -> None:
     assert client.post(server.UI_RESET_PATH).status_code == 204
 
 
+def _digest_of(html: str, name: str) -> str:
+    return re.search(rf'data-live-key="prompt:{re.escape(name)}".*?Digest: ([0-9a-f]{{64}})', html, re.S).group(1)
+
+
+def test_live_change_agent_prompt_cases_change_one_prompt_at_a_time_and_reset_restores_them(monkeypatch):
+    prompts = "/newsletter/agents/advisor/prompts"
+    with _live_fixture(monkeypatch) as (client, runtime):
+        before = _region(client, prompts, "agent-prompts-edit")
+        assert 'data-live-key="prompt:local-triage"' in before
+        assert f'data-live-key="prompt:{server.SECOND_PROMPT_NAME}"' not in before
+
+        _apply(client, "agent-prompt-added")
+        added = _region(client, prompts, "agent-prompts-edit")
+        assert f'data-live-key="prompt:{server.SECOND_PROMPT_NAME}"' in added
+        _apply(client, "agent-second-prompt-source")
+        changed = _region(client, prompts, "agent-prompts-edit")
+        assert server.SECOND_PROMPT_EDITED_BODY.strip() in changed
+        assert _digest_of(added, "local-triage") == _digest_of(changed, "local-triage")
+        assert _digest_of(added, server.SECOND_PROMPT_NAME) != _digest_of(changed, server.SECOND_PROMPT_NAME)
+
+        _apply(client, "agent-prompt-removed")
+        assert 'data-live-key="prompt:local-triage"' not in _region(client, prompts, "agent-prompts-edit")
+
+        _reset(client)
+        assert _region(client, prompts, "agent-prompts-edit") == before
+
+
 def _region(client, path: str, key: str) -> str:
     separator = "&" if "?" in path else "?"
     response = client.get(f"{path}{separator}__live=1")
@@ -1352,6 +1379,7 @@ def test_live_change_endpoint_rejects_an_oversized_body_without_changing_state(m
 
 
 _LIVE_CASE_PREREQUISITES = {
+    "agent-second-prompt-source": ("agent-prompt-added",),
     "log-appended": ("log-tall",),
     "log-truncated": ("log-tall",),
     "log-oversized": ("log-tall",),

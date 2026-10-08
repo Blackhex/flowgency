@@ -424,6 +424,36 @@ test.describe('agent roster live refresh', () => {
     await move.getByRole('button', { name: 'Move' }).click();
     await expect(page.getByText('config.yaml changed; reload before previewing move')).toBeVisible();
   });
+
+  for (const dirty of [false, true]) {
+    test(`a removed ${dirty ? 'edited' : 'untouched'} roster row stays inert-labelled, reports its removal once and leaves its siblings live`, async ({ page, request }) => {
+      await page.goto('/newsletter/agents');
+      const row = page.locator('[data-live-key="agent:researcher"]');
+      const move = row.locator('form[action$="/researcher/move"]');
+      const loadedRevision = await move.locator('input[name="revision"]').inputValue();
+      const target = move.locator('input[name="target_team"]');
+      if (dirty) await target.fill('research');
+      await row.evaluate((node) => { (node as unknown as { __kept: boolean }).__kept = true; });
+
+      await changeLiveFixture(request, 'inbox-agent-removed');
+      await changeLiveFixture(request, 'agent-identity');
+
+      await expect(page.locator('[data-live-key="agent:advisor"]')).toContainText('Principal Strategist');
+      await expect(row).toHaveAttribute('data-live-removed', '');
+      const notice = row.locator('[data-live-removed-notice]');
+      await expect(notice).toHaveCount(1);
+      await expect(notice).toHaveAttribute('role', 'status');
+      await expect(notice).toHaveAttribute('aria-live', 'polite');
+      await expect(notice).toContainText('removed elsewhere');
+      expect(await row.evaluate((node) => (node as unknown as { __kept?: boolean }).__kept)).toBe(true);
+      await expect(page.locator('[data-live-key="agent:researcher"]')).toHaveCount(1);
+      await expect(move.locator('input[name="revision"]')).toHaveValue(loadedRevision);
+      if (dirty) await expect(target).toHaveValue('research');
+      await expect(move).toHaveAttribute('action', /\/researcher\/move$/);
+      await expectQuietPolls(page, [row]);
+      await expect(notice).toHaveCount(1);
+    });
+  }
 });
 
 
@@ -596,6 +626,60 @@ test.describe('agent detail live refresh', () => {
     expect((await request.post('/__ui/reset')).status()).toBe(204);
     await expectNoNotice(page);
   });
+
+  test('a source change to one prompt is announced for that prompt only and its sibling keeps its own digest', async ({ page, request }) => {
+    await changeLiveFixture(request, 'agent-prompt-added');
+    await page.goto('/newsletter/agents/advisor/prompts');
+    await expectNoNotice(page);
+    const triage = page.locator('[data-live-key="prompt:local-triage"]');
+    const followup = page.locator('[data-live-key="prompt:local-followup"]');
+    const triageDigest = triage.locator('form[action$="/save"] input[name="digest"]');
+    const followupDigest = followup.locator('form[action$="/save"] input[name="digest"]');
+    const loadedTriage = await triageDigest.inputValue();
+    const loadedFollowup = await followupDigest.inputValue();
+    const draft = '---\nname: local-triage\ndescription: Private local triage.\n---\n\nLocal working draft\n';
+    await triage.locator('textarea[name="source"]').fill(draft);
+
+    await changeLiveFixture(request, 'agent-second-prompt-source');
+
+    await expectOnlyNotice(page, 'Prompt local-followup changed since this form loaded. Reload to see the latest.');
+    await expect(followup.locator('p', { hasText: 'Digest:' })).not.toContainText(loadedFollowup);
+    await expect(triage.locator('p', { hasText: 'Digest:' })).toContainText(loadedTriage);
+    await expect(triageDigest).toHaveValue(loadedTriage);
+    await expect(followupDigest).toHaveValue(loadedFollowup);
+    await expect(triage.locator('textarea[name="source"]')).toHaveValue(draft);
+    await expectQuietPolls(page, [notices(page)]);
+  });
+
+  for (const dirty of [false, true]) {
+    test(`a removed ${dirty ? 'edited' : 'untouched'} prompt card stays labelled as removed and keeps its own baseline`, async ({ page, request }) => {
+      await page.goto('/newsletter/agents/advisor/prompts');
+      const card = page.locator('[data-live-key="prompt:local-triage"]');
+      const digest = card.locator('form[action$="/save"] input[name="digest"]');
+      const loadedDigest = await digest.inputValue();
+      const source = card.locator('textarea[name="source"]');
+      const draft = '---\nname: local-triage\ndescription: Private local triage.\n---\n\nLocal working draft\n';
+      if (dirty) await source.fill(draft);
+      const loadedSource = await source.inputValue();
+      await card.evaluate((node) => { (node as unknown as { __kept: boolean }).__kept = true; });
+
+      await changeLiveFixture(request, 'agent-prompt-removed');
+
+      await expect(card).toHaveAttribute('data-live-removed', '');
+      const notice = card.locator('[data-live-removed-notice]');
+      await expect(notice).toHaveCount(1);
+      await expect(notice).toHaveAttribute('role', 'status');
+      await expect(notice).toHaveAttribute('aria-live', 'polite');
+      await expect(notice).toContainText('removed elsewhere');
+      await expect(page.locator('[data-live-key="prompt:local-triage"]')).toHaveCount(1);
+      expect(await card.evaluate((node) => (node as unknown as { __kept?: boolean }).__kept)).toBe(true);
+      await expect(source).toHaveValue(dirty ? draft : loadedSource);
+      await expect(digest).toHaveValue(loadedDigest);
+      await expectQuietPolls(page, [card]);
+      await expect(notice).toHaveCount(1);
+      await expect(notices(page).locator('[data-live-notice-scope]')).toHaveCount(1);
+    });
+  }
 
   test('a changed active-job set is announced and the visible default layout is untouched', async ({ page, request }) => {
     await page.goto('/newsletter/agents/advisor/blueprint');
