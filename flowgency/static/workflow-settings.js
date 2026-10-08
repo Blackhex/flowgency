@@ -166,6 +166,9 @@
       checkButton.disabled = true;
     }
     setHealth({ status: 'pending', label: 'Checking…', detail: '', issues: [] });
+    // A storage check is a local action: passive live reads pause until it settles.
+    const liveHandle = window.FlowgencyLive && window.FlowgencyLive.handles.get('page');
+    const finishLiveAction = liveHandle ? liveHandle.beginAction() : () => {};
     try {
       const response = await fetch(initial.checkUrl, {
         method: 'POST',
@@ -194,6 +197,7 @@
         issues: [],
       });
     } finally {
+      finishLiveAction();
       if (activeRequest && activeRequest.version === requestVersion) {
         activeRequest = null;
         if (checkButton instanceof HTMLButtonElement) {

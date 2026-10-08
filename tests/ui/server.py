@@ -37,7 +37,8 @@ from flowgency.memory import MemoryStore, resolve_memory_selector
 from flowgency.prompts import PromptStore
 from flowgency.tickets.models import ActiveTicketRun, StorageBinding, TicketEvent, TicketOperation, TicketRecord, TicketRef
 from flowgency.tickets.storages.local import LocalTicketStorage
-from flowgency.workflows.models import ArtifactRef
+from flowgency.workflows.library import WorkflowLibrary
+from flowgency.workflows.models import ArtifactRef, WorkflowDefinition
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -125,6 +126,12 @@ LIVE_CHANGE_CASES = frozenset(
         "channel-metadata-changed",
         "channel-added",
         "channel-removed",
+        "workflow-source-changes",
+        "workflow-blueprint-added",
+        "workflow-blueprint-removed",
+        "workflow-settings-changed",
+        "workflow-added",
+        "workflow-removed",
     }
 )
 INBOX_CLOCK_ADVANCE = timedelta(minutes=30)
@@ -462,6 +469,8 @@ def _apply_live_change(runtime: Path, case: str) -> None:
         _ADMIN_LIVE_CHANGES[case](runtime)
     elif case in _LIBRARY_LIVE_CHANGES:
         _LIBRARY_LIVE_CHANGES[case](runtime)
+    elif case in _WORKFLOW_LIVE_CHANGES:
+        _WORKFLOW_LIVE_CHANGES[case](runtime)
     else:
         raise ValueError(f"Unknown live change case: {case}")
 
@@ -1176,6 +1185,86 @@ _LIBRARY_LIVE_CHANGES = {
     "channel-metadata-changed": _channel_metadata_changed,
     "channel-added": _channel_added,
     "channel-removed": _channel_removed,
+}
+
+WORKFLOW_ADDED_BLUEPRINT = "triage"
+WORKFLOW_ADDED_BLUEPRINT_NAME = "Triage"
+WORKFLOW_ADDED_ID = "triage-board"
+WORKFLOW_ADDED_NAME = "Triage Board"
+WORKFLOW_EDITED_NAME = "Delivery Prime"
+WORKFLOW_EDITED_DESCRIPTION = "Deliver verified work, edited by the workflow case."
+WORKFLOW_RENAMED = "Delivery Board Prime"
+
+
+def _workflow_library(runtime: Path) -> WorkflowLibrary:
+    return WorkflowLibrary(runtime / "workflow-library")
+
+
+def _workflow_source_changes(runtime: Path) -> None:
+    """Edit the delivery blueprint's name and description through the library's guarded write."""
+    library = _workflow_library(runtime)
+    current = library.inspect("delivery")
+    library.write_candidate(
+        "delivery",
+        current.digest,
+        current.definition.model_copy(
+            update={"name": WORKFLOW_EDITED_NAME, "description": WORKFLOW_EDITED_DESCRIPTION}
+        ),
+    )
+
+
+def _workflow_blueprint_added(runtime: Path) -> None:
+    definition = {
+        **_research_definition(),
+        "id": WORKFLOW_ADDED_BLUEPRINT,
+        "name": WORKFLOW_ADDED_BLUEPRINT_NAME,
+    }
+    _workflow_library(runtime).create_candidate(
+        WORKFLOW_ADDED_BLUEPRINT, WorkflowDefinition.model_validate(definition)
+    )
+
+
+def _workflow_blueprint_removed(runtime: Path) -> None:
+    shutil.rmtree(runtime / "workflow-library" / WORKFLOW_ADDED_BLUEPRINT, ignore_errors=True)
+
+
+def _workflow_settings_changed(runtime: Path) -> None:
+    _patch_runtime_config(
+        runtime,
+        lambda raw: raw["teams"]["newsletter"]["workflows"]["delivery"].update(name=WORKFLOW_RENAMED),
+    )
+
+
+def _workflow_added(runtime: Path) -> None:
+    """Register a second delivery-based workflow; its storage root is configured, never created."""
+    _patch_runtime_config(
+        runtime,
+        lambda raw: raw["teams"]["newsletter"]["workflows"].update(
+            {
+                WORKFLOW_ADDED_ID: {
+                    "name": WORKFLOW_ADDED_NAME,
+                    "blueprint": "delivery",
+                    "integration": "local",
+                    "integration_config": {"root": str((runtime / "tickets" / WORKFLOW_ADDED_ID).resolve())},
+                }
+            }
+        ),
+    )
+
+
+def _workflow_removed(runtime: Path) -> None:
+    _patch_runtime_config(
+        runtime, lambda raw: raw["teams"]["newsletter"]["workflows"].pop(WORKFLOW_ADDED_ID, None)
+    )
+
+
+_WORKFLOW_LIVE_CHANGES = {
+    "workflow-source-changes": _workflow_source_changes,
+    "workflow-blueprint-added": _workflow_blueprint_added,
+    "workflow-blueprint-removed": _workflow_blueprint_removed,
+    "workflow-settings-changed": _workflow_settings_changed,
+    "workflow-added": _workflow_added,
+    "workflow-removed": _workflow_removed,
 }
 
 

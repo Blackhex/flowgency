@@ -1,9 +1,28 @@
 {% extends "base.html" %}
+
+{#- Live region: the page and every snapshot render this macro from the same context. The editor, its draft and
+    its loaded baselines stay outside every region and are advanced only by the editor controller after its own
+    save; this region holds the read-only markers the notice controller (agent-detail-notices.js) compares against
+    those baselines. The source marker is omitted while the source is not readable. -#}
+{% macro live_workflow_blueprint_source() -%}
+{% if live_source_digest %}
+<p data-live-key="workflow-blueprint:{{ live_blueprint_key }}:source" data-live-revision="{{ live_source_digest }}" data-live-scope="source" data-live-baseline-input="expected_digest" data-live-changed="Workflow source changed since this editor loaded. Reload to see the latest.">Workflow source digest {{ live_source_digest[:12] }}</p>
+{% endif %}
+<p data-live-key="workflow-blueprint:{{ live_blueprint_key }}:config" data-live-revision="{{ live_config_revision }}" data-live-scope="config" data-live-baseline-input="expected_revision" data-live-changed="Configuration changed since this editor loaded. Reload to see the latest.">Configuration revision {{ live_config_revision[:12] }}</p>
+{%- endmacro %}
+
 {% block title %}Workflow blueprint editor — {{ flowgency_title }}{% endblock %}
 {% block content_container_class %}w-full max-w-none px-4 md:px-6 2xl:px-8 py-4 md:py-5{% endblock %}
 {% block content %}
 <style>@import url('/static/workflow-editor.css');</style>
-<div data-workflow-editor-root>
+{#- Empty until a saved revision differs from the baseline this editor loaded. -#}
+<div data-live-notices role="status" aria-live="polite"></div>
+<div data-live-region="workflow-blueprint-source" class="sr-only" role="status" aria-live="polite" aria-atomic="true">{{ live_workflow_blueprint_source() }}</div>
+<div data-workflow-editor-baseline hidden>
+  <input type="hidden" name="expected_revision" value="{{ editor_state.expected_revision }}">
+  {% if not create_mode %}<input type="hidden" name="expected_digest" value="{{ editor_state.expected_digest or '' }}">{% endif %}
+</div>
+<div data-workflow-editor-root data-live-owned>
   <form class="workflow-editor-shell" data-editor-form data-preview-url="{% if create_mode %}/admin/workflow-library/blueprints/new/preview{% else %}/admin/workflow-library/blueprints/{{ editor.id }}/preview{% endif %}" data-save-url="{% if create_mode %}/admin/workflow-library/blueprints/new{% else %}/admin/workflow-library/blueprints/{{ editor.id }}{% endif %}">
     <input type="hidden" name="payload" data-editor-payload>
 
@@ -50,4 +69,5 @@
 {% block page_scripts %}
 <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
 <script src="/static/workflow-editor.js"></script>
+<script src="/static/agent-detail-notices.js"></script>
 {% endblock %}

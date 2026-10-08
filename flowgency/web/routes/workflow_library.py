@@ -7,7 +7,7 @@ from typing import Any, Mapping
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr, ValidationError
 from starlette.datastructures import FormData
 import yaml
@@ -15,6 +15,13 @@ import yaml
 from flowgency.configuration import ValidationFailed
 from flowgency.configuration.store import ConfigConflictError
 from flowgency.web.dependencies import FlowgencyServices, get_services
+from flowgency.web.live import respond_live_or_html
+from flowgency.web.workflow_admin_live import (
+    is_live_read,
+    workflow_blueprint_new_policy,
+    workflow_blueprint_policy,
+    workflow_library_policy,
+)
 from flowgency.workflows.forms import editor_payload, new_editor_snapshot, parse_editor_draft
 from flowgency.workflows.library import WorkflowSnapshot
 from flowgency.workflows.models import ContractError
@@ -252,7 +259,7 @@ def _render_unavailable_editor(
     blueprint_id: str,
     *,
     status_code: int = 409,
-) -> HTMLResponse:
+) -> Response:
     unavailable = {
         "schema_version": 1,
         "id": blueprint_id,
@@ -301,26 +308,47 @@ def _editor_state(
     }
 
 
+def _editor_context(
+    request: Request,
+    snapshot,
+    *,
+    editor_state: dict[str, Any],
+    current_digest: str,
+) -> dict[str, Any]:
+    create_mode = editor_state["create_mode"]
+    return {
+        **_base_admin_context(request, snapshot),
+        "editor": editor_state["draft"],
+        "editor_state": editor_state,
+        "issues": editor_state["issues"],
+        "warning": editor_state["warning"],
+        "workflow_count": editor_state["workflow_count"],
+        "create_mode": create_mode,
+        "live_blueprint_key": "new" if create_mode else str(request.path_params["blueprint_id"]),
+        # The saved revisions, read-only; the editor's loaded baselines stay in editor_state.
+        "live_config_revision": snapshot.revision,
+        "live_source_digest": current_digest,
+    }
+
+
 def _render_editor(
     request: Request,
     snapshot,
     *,
     editor_state: dict[str, Any],
     status_code: int = 200,
-) -> HTMLResponse:
-    return _templates(request).TemplateResponse(
-        request,
-        "workflow_blueprint.html",
-        {
-            **_base_admin_context(request, snapshot),
-            "editor": editor_state["draft"],
-            "editor_state": editor_state,
-            "issues": editor_state["issues"],
-            "warning": editor_state["warning"],
-            "workflow_count": editor_state["workflow_count"],
-            "create_mode": editor_state["create_mode"],
-        },
-        status_code=status_code,
+    current_digest: str = "",
+) -> Response:
+    context = _editor_context(
+        request, snapshot, editor_state=editor_state, current_digest=current_digest
+    )
+    policy = (
+        workflow_blueprint_new_policy(context)
+        if editor_state["create_mode"]
+        else workflow_blueprint_policy(context["live_blueprint_key"], context)
+    )
+    return respond_live_or_html(
+        request, _templates(request), context, policy, status_code=status_code
     )
 
 
@@ -345,7 +373,7 @@ def _request_issue_response(
 def workflow_library_page(
     request: Request,
     services: FlowgencyServices = Depends(get_services),
-) -> HTMLResponse:
+) -> Response:
     snapshot = services.config_store.load()
     configuration = _require_workflow_configuration(services)
     rows = []
@@ -363,6 +391,7 @@ def workflow_library_page(
                 "workflow_count": len(references),
                 "references": [
                     {
+                        "key": f"{binding.team_id}:{binding.workflow_id}",
                         "team": snapshot.config.teams[binding.team_id].name,
                         "workflow": snapshot.config.teams[binding.team_id].workflows[
                             binding.workflow_id
@@ -372,13 +401,12 @@ def workflow_library_page(
                 ],
             }
         )
-    return _templates(request).TemplateResponse(
-        request,
-        "workflow_library.html",
-        {
-            **_base_admin_context(request, snapshot),
-            "blueprints": rows,
-        },
+    context = {
+        **_base_admin_context(request, snapshot),
+        "blueprints": rows,
+    }
+    return respond_live_or_html(
+        request, _templates(request), context, workflow_library_policy(context)
     )
 
 
@@ -387,14 +415,19 @@ def workflow_blueprint_page(
     request: Request,
     blueprint_id: str,
     services: FlowgencyServices = Depends(get_services),
-) -> HTMLResponse:
+) -> Response:
     if blueprint_id == "new":
         return new_workflow_blueprint_page(request, services)
     snapshot = services.config_store.load()
     configuration = _require_workflow_configuration(services)
     try:
         source = _inspect_snapshot(configuration, snapshot, blueprint_id)
-    except (ContractError, ValidationError, ValueError, yaml.YAMLError, OSError):
+    except ContractError as error:
+        # A snapshot of a blueprint that is gone is unavailable, never another blueprint.
+        if is_live_read(request) and error.code in {"missing-blueprint", "unsafe-blueprint"}:
+            raise HTTPException(status_code=404, detail="Unknown workflow blueprint") from error
+        return _render_unavailable_editor(request, snapshot, blueprint_id)
+    except (ValidationError, ValueError, yaml.YAMLError, OSError):
         return _render_unavailable_editor(request, snapshot, blueprint_id)
     payload = editor_payload(source)
     references = configuration.bindings_using(snapshot, blueprint_id)
@@ -409,6 +442,7 @@ def workflow_blueprint_page(
             draft_version=0,
             references=len(references),
         ),
+        current_digest=source.digest,
     )
 
 
@@ -416,7 +450,7 @@ def workflow_blueprint_page(
 def new_workflow_blueprint_page(
     request: Request,
     services: FlowgencyServices = Depends(get_services),
-) -> HTMLResponse:
+) -> Response:
     snapshot = services.config_store.load()
     source = _new_snapshot()
     payload = editor_payload(source)

@@ -1,17 +1,30 @@
 {% extends "base.html" %}
+
+{#- Live regions: the page and every snapshot render these macros from the same context. The settings form, its
+    selected catalogs, draft and loaded revision stay outside every region and belong to workflow-settings.js;
+    the title follows the saved workflow, and the source region holds the read-only configuration marker the
+    notice controller (agent-detail-notices.js) compares against the revision this form loaded. -#}
+{% macro live_workflow_settings_header() -%}
+{% set header_key = ('workflow-create:' ~ team) if settings_mode == 'create' else ('workflow-settings:' ~ team ~ ':' ~ workflow_settings_id) %}
+{% if workflow_settings_back_href %}
+<a data-live-key="{{ header_key }}:back" href="{{ workflow_settings_back_href }}" aria-label="Back to board" class="inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100">
+  <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+</a>
+{% endif %}
+<h1 data-live-key="{{ header_key }}:title" class="text-2xl font-semibold text-gray-900 dark:text-gray-100">{{ workflow_settings_title }}</h1>
+{%- endmacro %}
+
+{% macro live_workflow_settings_source() -%}
+{% set source_key = ('workflow-create:' ~ team) if settings_mode == 'create' else ('workflow-settings:' ~ team ~ ':' ~ workflow_settings_id) %}
+<p data-live-key="{{ source_key }}:config" data-live-revision="{{ live_config_revision }}" data-live-scope="config" data-live-baseline-input="expected_revision" data-live-changed="Configuration changed since this form loaded. Reload to see the latest.">Configuration revision {{ live_config_revision[:12] }}</p>
+{%- endmacro %}
+
 {% block title %}{{ workflow_settings_title }} - {{ flowgency_title }}{% endblock %}
 {% block content_container_class %}px-0 py-0{% endblock %}
 {% block content %}
 <section class="mx-auto max-w-4xl px-4 py-4 md:px-6 md:py-6" data-workflow-settings-root>
   <div class="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 pb-3 dark:border-gray-700">
-    <div class="flex items-center gap-3">
-      {% if workflow_settings_back_href %}
-      <a href="{{ workflow_settings_back_href }}" aria-label="Back to board" class="inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100">
-        <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
-      </a>
-      {% endif %}
-      <h1 class="text-2xl font-semibold text-gray-900 dark:text-gray-100">{{ workflow_settings_title }}</h1>
-    </div>
+    <div data-live-region="workflow-settings-header" class="flex items-center gap-3">{{ live_workflow_settings_header() }}</div>
     <div class="flex flex-wrap items-center justify-end gap-2">
       <span class="text-sm text-gray-600 dark:text-gray-300" data-workflow-settings-status aria-live="polite">Saved</span>
       <button type="button" class="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800" data-workflow-settings-revert title="Revert to saved values" aria-label="Revert" disabled>
@@ -24,6 +37,10 @@
       </button>
     </div>
   </div>
+
+  {#- Empty until the saved configuration revision differs from the one this form loaded. -#}
+  <div data-live-notices role="status" aria-live="polite"></div>
+  <div data-live-region="workflow-settings-source" class="sr-only" role="status" aria-live="polite" aria-atomic="true">{{ live_workflow_settings_source() }}</div>
 
   {% if workflow_settings_warning or workflow_settings_issues %}
   <div class="mb-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-200" role="alert">
@@ -38,7 +55,7 @@
   </div>
   {% endif %}
 
-  <form id="workflow-settings-form" method="post" action="{{ workflow_settings_save_action }}" class="space-y-8">
+  <form id="workflow-settings-form" method="post" action="{{ workflow_settings_save_action }}" data-live-owned class="space-y-8">
     <input type="hidden" name="expected_revision" value="{{ workflow_settings_form.expected_revision }}">
 
     <section class="border-b border-gray-200 pb-6 dark:border-gray-700">
@@ -109,4 +126,5 @@
 {% block page_scripts %}
 <script src="/static/lucide.min.js"></script>
 <script src="/static/workflow-settings.js"></script>
+<script src="/static/agent-detail-notices.js"></script>
 {% endblock %}

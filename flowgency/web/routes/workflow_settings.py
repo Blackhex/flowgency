@@ -12,7 +12,9 @@ from flowgency.configuration import ValidationFailed
 from flowgency.configuration.store import ConfigConflictError
 from flowgency.tickets.models import StorageBinding
 from flowgency.web.dependencies import FlowgencyServices, get_services
+from flowgency.web.live import respond_live_or_html
 from flowgency.web.team_navigation import build_team_context
+from flowgency.web.workflow_admin_live import workflow_create_policy, workflow_settings_policy
 from flowgency.web.workflow_context import user_context
 from flowgency.workflows.configuration import require_compatible
 from flowgency.workflows.forms import WorkflowSettingsForm
@@ -156,7 +158,7 @@ def _form_context(
     warning: str | None = None,
     health: dict[str, Any] | None = None,
     status_code: int = 200,
-) -> HTMLResponse:
+) -> Response:
     context = build_team_context(
         snapshot,
         team_id,
@@ -188,13 +190,17 @@ def _form_context(
             ),
             "workflow_settings_blueprint_href": f"/admin/workflow-library/blueprints/{form.blueprint}",
             "workflow_settings_initial_health": health or _idle_health_payload(),
+            # The saved revision, read-only; the form keeps the revision it loaded.
+            "live_config_revision": snapshot.revision,
         }
     )
-    return _templates(request).TemplateResponse(
-        request,
-        "workflow_settings.html",
-        context,
-        status_code=status_code,
+    policy = (
+        workflow_create_policy(team_id, context)
+        if create_mode
+        else workflow_settings_policy(team_id, workflow_id, context)
+    )
+    return respond_live_or_html(
+        request, _templates(request), context, policy, status_code=status_code
     )
 
 
@@ -276,7 +282,7 @@ async def workflow_create_page(
     request: Request,
     team: str,
     services: FlowgencyServices = Depends(get_services),
-) -> HTMLResponse:
+) -> Response:
     snapshot = services.config_store.load()
     _require_team(snapshot, team)
     form = _draft_form(
@@ -386,7 +392,7 @@ async def workflow_settings_page(
     team: str,
     workflow: str,
     services: FlowgencyServices = Depends(get_services),
-) -> HTMLResponse:
+) -> Response:
     snapshot = services.config_store.load()
     _require_team(snapshot, team)
     if workflow not in snapshot.config.teams[team].workflows:

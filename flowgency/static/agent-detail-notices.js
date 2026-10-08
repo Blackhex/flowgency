@@ -54,6 +54,8 @@
 
   // Record the loaded revisions before the first refresh can replace a marker.
   changedScopes();
+  // A controller that advanced its own baselines after saving announces it, so no stale notice lingers.
+  document.addEventListener('flowgency:live-baseline', render);
   new MutationObserver(function (records) {
     for (var i = 0; i < records.length; i++) {
       if (!host.contains(records[i].target)) return render();

@@ -335,6 +335,21 @@
     return payload;
   }
 
+  // Passive live reads pause while a preview or save is in flight and resume once its baselines have settled.
+  function beginLiveAction() {
+    const handle = window.FlowgencyLive && window.FlowgencyLive.handles.get('page');
+    return handle ? handle.beginAction() : () => {};
+  }
+
+  // The loaded baselines the read-only source and configuration markers are compared against.
+  function settleLiveBaselines() {
+    for (const name of ['expected_revision', 'expected_digest']) {
+      const input = document.querySelector('[data-workflow-editor-baseline] input[name="' + name + '"]');
+      if (input && typeof initialState[name] === 'string') input.value = initialState[name];
+    }
+    document.dispatchEvent(new Event('flowgency:live-baseline'));
+  }
+
   async function submit(url) {
     const response = await fetch(url, {
       method: 'POST',
@@ -368,6 +383,7 @@
     draft = clone(nextDraft || redirectedState.draft);
     initialState.expected_revision = redirectedState.expected_revision;
     initialState.expected_digest = redirectedState.expected_digest;
+    settleLiveBaselines();
     draftVersion = Number(redirectedState.draft_version || draftVersion);
     if (typeof redirectedState.workflow_count === 'number') initialState.workflow_count = redirectedState.workflow_count;
     initialNode.textContent = JSON.stringify({
@@ -445,7 +461,13 @@
     const requestId = ++previewRequestId;
     const commitToken = previewCommitToken;
     const draftSnapshot = clone(draft);
-    const result = await submit(previewUrl);
+    const finishLiveAction = beginLiveAction();
+    let result;
+    try {
+      result = await submit(previewUrl);
+    } finally {
+      finishLiveAction();
+    }
     if (result.redirected) return;
     if (commitToken !== previewCommitToken) return;
     if (requestId < latestPreviewRequestId) return;
@@ -460,6 +482,15 @@
   }
 
   async function saveDraft() {
+    const finishLiveAction = beginLiveAction();
+    try {
+      await submitDraft();
+    } finally {
+      finishLiveAction();
+    }
+  }
+
+  async function submitDraft() {
     if (!saveUrl) return;
     clearTimeout(previewTimer);
     setStatus('Saving…', true);

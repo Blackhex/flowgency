@@ -414,6 +414,7 @@ def test_live_change_cases_all_have_a_dispatcher():
         *server._WORKSPACE_LIVE_CHANGES,
         *server._ADMIN_LIVE_CHANGES,
         *server._LIBRARY_LIVE_CHANGES,
+        *server._WORKFLOW_LIVE_CHANGES,
     }
     assert dispatched == set(server.LIVE_CHANGE_CASES)
 
@@ -1068,4 +1069,137 @@ def test_live_change_channel_added_and_removed_change_the_list_and_the_second_pa
 
         assert f"channel:{server.CHANNEL_ADDED}" not in _live_keys(_region(client, listing, "channels-table"))
         assert client.get(detail).status_code == 404
+
+
+_WORKFLOW_LIBRARY = "/admin/workflow-library"
+_DELIVERY_BLUEPRINT = f"{_WORKFLOW_LIBRARY}/blueprints/delivery"
+_ADDED_BLUEPRINT = f"{_WORKFLOW_LIBRARY}/blueprints/{server.WORKFLOW_ADDED_BLUEPRINT}"
+_DELIVERY_SETTINGS = "/newsletter/workflows/delivery/settings"
+_ADDED_SETTINGS = f"/newsletter/workflows/{server.WORKFLOW_ADDED_ID}/settings"
+_WORKFLOW_CASE_SEQUENCES = (
+    ("workflow-source-changes",),
+    ("workflow-blueprint-added",),
+    ("workflow-blueprint-added", "workflow-blueprint-removed"),
+    ("workflow-settings-changed",),
+    ("workflow-added",),
+    ("workflow-added", "workflow-removed"),
+)
+
+
+def _tree(root) -> dict[str, bytes]:
+    return {path.relative_to(root).as_posix(): path.read_bytes() for path in sorted(root.rglob("*")) if path.is_file()}
+
+
+def _directories(root) -> list[str]:
+    return [path.relative_to(root).as_posix() for path in sorted(root.rglob("*")) if path.is_dir()]
+
+
+def _workflow_state(runtime) -> dict:
+    # Seeded ticket bodies carry generated identifiers, so the ticket roots are compared by layout.
+    return {
+        "library": _tree(runtime / "workflow-library"),
+        "ticket-files": sorted(_tree(runtime / "tickets")),
+        "ticket-directories": _directories(runtime / "tickets"),
+        "config": ConfigStore(runtime / "config.yaml").load().revision,
+    }
+
+
+def test_every_workflow_case_belongs_to_a_reset_completeness_sequence():
+    assert {case for sequence in _WORKFLOW_CASE_SEQUENCES for case in sequence} == set(server._WORKFLOW_LIVE_CHANGES)
+
+
+@pytest.mark.parametrize("sequence", _WORKFLOW_CASE_SEQUENCES, ids="+".join)
+def test_workflow_cases_are_fully_undone_by_a_reset(monkeypatch, sequence):
+    with _live_fixture(monkeypatch) as (client, runtime):
+        _reset(client)
+        before = _workflow_state(runtime)
+
+        changed = False
+        for case in sequence:
+            _apply(client, case)
+            for path in (_WORKFLOW_LIBRARY, _DELIVERY_BLUEPRINT, _DELIVERY_SETTINGS, "/newsletter/workflows/new"):
+                client.get(f"{path}?__live=1")
+            changed = changed or _workflow_state(runtime) != before
+        assert changed
+
+        _reset(client)
+
+        assert _workflow_state(runtime) == before
+
+
+def test_live_change_workflow_source_changes_move_the_card_title_and_the_source_marker(monkeypatch):
+    with _live_fixture(monkeypatch) as (client, runtime):
+        cards = _region(client, _WORKFLOW_LIBRARY, "workflow-library-blueprints")
+        marker = _region(client, _DELIVERY_BLUEPRINT, "workflow-blueprint-source")
+        assert server.WORKFLOW_EDITED_NAME not in cards
+
+        _apply(client, "workflow-source-changes")
+
+        assert server.WORKFLOW_EDITED_NAME in _region(client, _WORKFLOW_LIBRARY, "workflow-library-blueprints")
+        assert _region(client, _DELIVERY_BLUEPRINT, "workflow-blueprint-source") != marker
+        assert server.WORKFLOW_EDITED_DESCRIPTION in (runtime / "workflow-library" / "delivery" / "workflow.yaml").read_text(encoding="utf-8")
+
+        _reset(client)
+
+        assert _region(client, _WORKFLOW_LIBRARY, "workflow-library-blueprints") == cards
+        assert _region(client, _DELIVERY_BLUEPRINT, "workflow-blueprint-source") == marker
+
+
+def test_live_change_workflow_blueprint_added_and_removed_change_the_list_and_the_second_page(monkeypatch):
+    with _live_fixture(monkeypatch) as (client, _runtime):
+        before = _region(client, _WORKFLOW_LIBRARY, "workflow-library-blueprints")
+        assert client.get(f"{_ADDED_BLUEPRINT}?__live=1").status_code == 404
+
+        _apply(client, "workflow-blueprint-added")
+
+        assert f"workflow-blueprint:{server.WORKFLOW_ADDED_BLUEPRINT}" in _live_keys(
+            _region(client, _WORKFLOW_LIBRARY, "workflow-library-blueprints")
+        )
+        assert client.get(f"{_ADDED_BLUEPRINT}?__live=1").status_code == 200
+
+        _apply(client, "workflow-blueprint-removed")
+
+        assert _region(client, _WORKFLOW_LIBRARY, "workflow-library-blueprints") == before
+        assert client.get(f"{_ADDED_BLUEPRINT}?__live=1").status_code == 404
+
+
+def test_live_change_workflow_settings_changed_renames_the_title_and_moves_the_config_marker(monkeypatch):
+    with _live_fixture(monkeypatch) as (client, _runtime):
+        header = _region(client, _DELIVERY_SETTINGS, "workflow-settings-header")
+        marker = _region(client, _DELIVERY_SETTINGS, "workflow-settings-source")
+
+        _apply(client, "workflow-settings-changed")
+
+        changed = _region(client, _DELIVERY_SETTINGS, "workflow-settings-header")
+        assert f"{server.WORKFLOW_RENAMED} settings" in changed
+        assert changed != header
+        assert _region(client, _DELIVERY_SETTINGS, "workflow-settings-source") != marker
+
+        _reset(client)
+
+        assert _region(client, _DELIVERY_SETTINGS, "workflow-settings-header") == header
+        assert _region(client, _DELIVERY_SETTINGS, "workflow-settings-source") == marker
+
+
+def test_live_change_workflow_added_and_removed_change_the_references_and_the_second_page(monkeypatch):
+    with _live_fixture(monkeypatch) as (client, runtime):
+        before = _region(client, _WORKFLOW_LIBRARY, "workflow-library-blueprints")
+        assert client.get(f"{_ADDED_SETTINGS}?__live=1").status_code == 404
+
+        _apply(client, "workflow-added")
+
+        references = _region(client, _WORKFLOW_LIBRARY, "workflow-library-blueprints")
+        assert f"workflow-reference:delivery:newsletter:{server.WORKFLOW_ADDED_ID}" in _live_keys(references)
+        assert server.WORKFLOW_ADDED_NAME in references
+        assert client.get(f"{_ADDED_SETTINGS}?__live=1").status_code == 200
+
+        _apply(client, "workflow-removed")
+
+        assert _region(client, _WORKFLOW_LIBRARY, "workflow-library-blueprints") == before
+        assert client.get(f"{_ADDED_SETTINGS}?__live=1").status_code == 404
+
+        _apply(client, "workflow-added")
+        _reset(client)
+
+        assert not (runtime / "tickets" / server.WORKFLOW_ADDED_ID).exists()
 
