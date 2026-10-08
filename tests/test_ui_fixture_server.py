@@ -4,6 +4,7 @@ import contextlib
 import json
 import re
 import threading
+from pathlib import Path
 from urllib.parse import urlencode
 
 import pytest
@@ -1202,4 +1203,212 @@ def test_live_change_workflow_added_and_removed_change_the_references_and_the_se
         _reset(client)
 
         assert not (runtime / "tickets" / server.WORKFLOW_ADDED_ID).exists()
+
+
+# ── Coverage matrix: every inventory row answers its policy and changes its declared region ──
+
+_COVERAGE = json.loads((Path(__file__).parent / "ui" / "live_coverage.json").read_text(encoding="utf-8"))
+_LIVE_INITIAL = re.compile(r'<script type="application/json" id="live-initial">(.*?)</script>', re.S)
+_GIT_EVIDENCE_INDEX = Path("fixture-index") / "git-evidence.json"
+
+
+def _coverage_url(runtime, url: str) -> str:
+    if url == "{tail-log-view}":
+        return _log_view_path(runtime)
+    if url == "{git-evidence-diff}":
+        index = json.loads((runtime / _GIT_EVIDENCE_INDEX).read_text(encoding="utf-8"))
+        return f"{index['ticket_href']}/artifacts/{index['current']['artifact_id']}/diff?source=ticket"
+    return url
+
+
+def _snapshot_get(client, url: str, **kwargs):
+    separator = "&" if "?" in url else "?"
+    return client.get(url if "__live=1" in url else f"{url}{separator}__live=1", **kwargs)
+
+
+def _live_regions(client, url: str) -> dict[str, str]:
+    response = _snapshot_get(client, url)
+    assert response.status_code == 200, f"{url} answered {response.status_code}"
+    return {region["key"]: region["html"] for region in response.json()["regions"]}
+
+
+def _check_live_entry(client, runtime, entry: dict) -> list[str]:
+    """Return every way this inventory row disagrees with the running app."""
+    problems: list[str] = []
+    navigation = set(_COVERAGE["navigation"][entry["shell"]])
+    declared = set(entry["regions"])
+    change = entry.get("change")
+    kind = entry["kind"]
+
+    def snapshot() -> tuple[object, str | None]:
+        url = _coverage_url(runtime, entry["url"]) if entry.get("url") else None
+        if kind in {"workflow-snapshot", "lifecycle"}:
+            body = client.get(entry["snapshot"])
+            return (body.json() if body.status_code == 200 else body.status_code), url
+        if url is not None:
+            page = client.get(url)
+            if page.status_code != 200:
+                return page.status_code, url
+            initial = _LIVE_INITIAL.search(page.text)
+            if initial is None:
+                problems.append("page has no live registration")
+                return {}, url
+            registration = json.loads(initial.group(1))
+            if registration["format"] != 1 or not registration["url"].endswith("__live=1"):
+                problems.append(f"unexpected registration {registration}")
+            for key in sorted(declared | navigation):
+                if f'data-live-region="{key}"' not in page.text:
+                    problems.append(f"no root for region {key}")
+            return _live_regions(client, registration["url"]), registration["url"]
+        return _live_regions(client, entry["snapshot"]), entry["snapshot"]
+
+    for setup_case in (change or {}).get("setup", []):
+        _apply(client, setup_case)
+
+    before, snapshot_url = snapshot()
+    if not isinstance(before, dict):
+        return [f"snapshot unavailable: {before}"]
+
+    if kind == "lifecycle":
+        return problems if "state" in before else [*problems, "status payload has no state"]
+    if kind == "workflow-snapshot":
+        missing = declared - set(before)
+        if missing:
+            problems.append(f"snapshot misses {sorted(missing)}")
+        if entry["shell"] == "team":
+            shell = {region["key"] for region in before["shell"]["regions"]}
+            if shell != navigation:
+                problems.append(f"shell regions {sorted(shell)}")
+    else:
+        keys = set(before)
+        if keys - navigation != declared:
+            problems.append(f"regions {sorted(keys - navigation)} != declared {sorted(declared)}")
+        if keys & navigation != navigation:
+            problems.append(f"navigation regions {sorted(keys & navigation)} != {sorted(navigation)}")
+        response = _snapshot_get(client, snapshot_url)
+        revalidated = _snapshot_get(client, snapshot_url, headers={"If-None-Match": response.headers["etag"]})
+        if revalidated.status_code != 304:
+            problems.append(f"conditional read answered {revalidated.status_code}")
+
+    assert change["case"] in server.LIVE_CHANGE_CASES
+    _apply(client, change["case"])
+    after, _url = snapshot()
+    if not isinstance(after, dict):
+        return [*problems, f"snapshot lost after {change['case']}: {after}"]
+    if before.get(change["region"]) == after.get(change["region"]):
+        problems.append(f"region {change['region']} did not change after {change['case']}")
+    return problems
+
+
+def test_every_live_inventory_row_answers_its_policy_and_changes_its_declared_region(monkeypatch):
+    live = [entry for entry in _COVERAGE["entries"] if entry["kind"] in {"snapshot", "shell-only", "workflow-snapshot", "lifecycle"}]
+    failures: dict[str, list[str]] = {}
+    with _admin_fixture(monkeypatch) as (client, runtime):
+        for entry in live:
+            _reset_to(client, entry.get("fixture", "default"))
+            problems = _check_live_entry(client, runtime, entry)
+            if problems:
+                failures[entry["id"]] = problems
+        _reset(client)
+    assert failures == {}
+
+
+def _reset_to(client, fixture: str) -> None:
+    response = client.post(server.UI_RESET_PATH, json={"fixture": fixture})
+    assert response.status_code == 204, fixture
+
+
+def test_every_non_poll_inventory_row_keeps_its_classification(monkeypatch):
+    rows = [entry for entry in _COVERAGE["entries"] if entry["kind"] in {"redirect", "retired", "standalone"} and entry.get("sample")]
+    rows.append(next(entry for entry in _COVERAGE["entries"] if entry["id"] == "setup-complete"))
+    failures: dict[str, str] = {}
+    with _admin_fixture(monkeypatch) as (client, _runtime):
+        for entry in rows:
+            sample = entry.get("sample") or entry["url"]
+            response = client.get(sample, follow_redirects=False)
+            expected = entry.get("status", 200)
+            if response.status_code != expected:
+                failures[entry["id"]] = f"answered {response.status_code}, classified {expected}"
+            elif response.status_code == 200 and "live-initial" in response.text:
+                failures[entry["id"]] = "a non-poll page registered for live refresh"
+            elif "json" in response.headers.get("content-type", "") and "regions" in response.text and response.status_code == 200:
+                failures[entry["id"]] = "a non-poll route answered with a snapshot"
+    assert failures == {}
+
+
+# ── Fixture and reset safety ─────────────────────────────────────────────────
+
+
+def test_live_change_endpoint_rejects_an_oversized_body_without_changing_state(monkeypatch):
+    with _live_fixture(monkeypatch) as (client, runtime):
+        before = ConfigStore(runtime / "config.yaml").load().revision
+        padded = json.dumps({"case": "navigation-membership", "padding": "x" * (server.LIVE_CHANGE_MAX_BODY_BYTES + 1)})
+
+        response = client.post(server.LIVE_CHANGE_PATH, content=padded, headers={"content-type": "application/json"})
+
+        assert response.status_code == 413
+        assert ConfigStore(runtime / "config.yaml").load().revision == before
+        assert client.post(server.LIVE_CHANGE_PATH, json={"case": "navigation-membership"}).status_code == 204
+
+
+_LIVE_CASE_PREREQUISITES = {
+    "log-appended": ("log-tall",),
+    "log-truncated": ("log-tall",),
+    "log-oversized": ("log-tall",),
+    "log-removed": ("log-tall",),
+}
+
+
+def _runtime_fingerprint(runtime) -> dict[str, str]:
+    import hashlib
+
+    fingerprint = {}
+    for path in sorted(runtime.rglob("*")):
+        relative = path.relative_to(runtime).as_posix()
+        if relative == "server.pid" or relative.startswith("__pycache__"):
+            continue
+        # The memory store creates empty bookkeeping directories on its first write and keeps them.
+        if path.is_dir() and relative.startswith("memory-store/."):
+            continue
+        # The seeder stamps tickets with fresh times, so only their membership is stable.
+        stable = path.is_file() and not relative.startswith("tickets/")
+        fingerprint[relative] = hashlib.sha256(path.read_bytes()).hexdigest() if stable else "node"
+    return fingerprint
+
+
+@pytest.mark.parametrize("fixture", ["default", server.WORKSPACES_FIXTURE])
+def test_every_live_change_case_is_undone_by_a_reset_to_the_pristine_runtime(monkeypatch, fixture):
+    workspace_cases = {case for case in server.LIVE_CHANGE_CASES if case.startswith("workspace")}
+    cases = sorted(workspace_cases if fixture == server.WORKSPACES_FIXTURE else set(server.LIVE_CHANGE_CASES) - workspace_cases)
+    drifted: list[str] = []
+    with _admin_fixture(monkeypatch) as (client, runtime):
+        _reset_to(client, fixture)
+        pristine = _runtime_fingerprint(runtime)
+        for case in cases:
+            for prerequisite in _LIVE_CASE_PREREQUISITES.get(case, ()):
+                _apply(client, prerequisite)
+            _apply(client, case)
+            _reset_to(client, fixture)
+            if _runtime_fingerprint(runtime) != pristine:
+                drifted.append(case)
+    assert drifted == []
+
+
+def test_reset_keeps_the_workflow_library_and_durable_job_roots_in_place(monkeypatch):
+    with _live_fixture(monkeypatch) as (client, runtime):
+        roots = [
+            runtime / "workflow-library",
+            runtime / "memory-store" / ".jobs" / "newsletter",
+            runtime / "memory-store" / ".jobs" / "research",
+            runtime / "tickets" / "delivery",
+        ]
+        _reset(client)
+        identities = {root: root.stat().st_ino for root in roots}
+        assert all(root.is_dir() for root in roots)
+
+        _apply(client, "workflow-blueprint-added")
+        _apply(client, "job-added")
+        _reset(client)
+
+        assert {root: root.stat().st_ino for root in roots} == identities
 

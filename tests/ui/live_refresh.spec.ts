@@ -1,9 +1,20 @@
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 
-import { expect, test, type ElementHandle, type Page, type Route } from '@playwright/test';
+import {
+  expect,
+  test,
+  type APIRequestContext,
+  type BrowserContext,
+  type ElementHandle,
+  type Page,
+  type Route,
+} from '@playwright/test';
 
 import {
   assertNoConsoleErrors,
+  assertOnlyExpectedConflictConsoleError,
   installBasePageSetup,
   type LiveApplyResult,
   type LiveBindingShape,
@@ -1254,4 +1265,465 @@ test('an incompatible snapshot asks for a reload instead of mutating the page', 
     shell.getByRole('button', { name: 'Refresh page' }).click(),
   ]);
   await expect(page.locator('[data-live-status]')).toBeHidden();
+});
+
+
+// ── App-wide coverage matrix and cross-page behaviour ───────────────────────
+// The inventory lives in live_coverage.json, which tests/test_live_refresh.py and
+// tests/test_ui_fixture_server.py check against the app's routes and policies.
+
+type CoverageEntry = {
+  id: string;
+  kind: string;
+  route: string;
+  url: string | null;
+  snapshot?: string;
+  handle?: string;
+  fixture?: string;
+  shell: 'team' | 'admin' | 'none';
+  regions: string[];
+  covered_by?: string;
+  change?: { case: string; region: string; setup?: string[] };
+};
+
+const COVERAGE = JSON.parse(readFileSync(path.join(__dirname, 'live_coverage.json'), 'utf8')) as {
+  navigation: Record<string, string[]>;
+  entries: CoverageEntry[];
+};
+const REGION_ENTRIES = COVERAGE.entries.filter((entry) => ['snapshot', 'shell-only'].includes(entry.kind));
+const WORKFLOW_ENTRIES = COVERAGE.entries.filter((entry) => entry.kind === 'workflow-snapshot');
+const NON_BROWSER_ENTRIES = COVERAGE.entries.filter((entry) => entry.kind === 'lifecycle' || entry.covered_by);
+const TAIL_LOG = 'advisor-live-tail.out';
+const GIT_EVIDENCE_INDEX = path.join(__dirname, '.runtime', 'current', 'fixture-index', 'git-evidence.json');
+const RESET_TIMEOUT_MS = 120_000;
+
+async function resetFixture(request: APIRequestContext, fixture = 'default'): Promise<void> {
+  expect((await request.post('/__ui/reset', { data: { fixture }, timeout: RESET_TIMEOUT_MS })).status()).toBe(204);
+}
+
+async function applyChange(request: APIRequestContext, name: string): Promise<void> {
+  expect((await request.post('/__ui/live/change', { data: { case: name } })).status()).toBe(204);
+}
+
+const liveRegion = (page: Page, key: string) => page.locator(`[data-live-region="${key}"]`);
+const handleKeys = (page: Page) => page.evaluate(() => Array.from(window.FlowgencyLive.handles.keys()));
+const handleStatus = (page: Page, key = 'page') => page.evaluate((name) => window.FlowgencyLive.handles.get(name)!.status, key);
+const refreshHandle = (page: Page, key = 'page') => page.evaluate((name) => window.FlowgencyLive.handles.get(name)!.refresh(), key);
+const themeOf = (project: string): 'dark' | 'light' => (project.endsWith('dark') ? 'dark' : 'light');
+
+async function extraPage(context: BrowserContext, project: string): Promise<Page> {
+  const extra = await context.newPage();
+  await installBasePageSetup(extra, themeOf(project));
+  return extra;
+}
+
+async function coverageUrl(request: APIRequestContext, entry: CoverageEntry): Promise<string> {
+  if (entry.url === '{tail-log-view}') {
+    const listing = await (await request.get('/newsletter/logs')).text();
+    const link = new RegExp(`href="(/newsletter/logs/view\\?[^"]*${TAIL_LOG}[^"]*)"`).exec(listing);
+    if (!link) throw new Error('the tail log is not listed');
+    return link[1].replace(/&amp;/g, '&');
+  }
+  if (entry.url === '{git-evidence-diff}') {
+    const index = JSON.parse(readFileSync(GIT_EVIDENCE_INDEX, 'utf8'));
+    return `${index.ticket_href}/artifacts/${index.current.artifact_id}/diff?source=ticket`;
+  }
+  return entry.url!;
+}
+
+// The move review page only ever exists as the result of a POST, so reach it the way a user does.
+async function openCoverageEntry(page: Page, request: APIRequestContext, entry: CoverageEntry): Promise<void> {
+  for (const setup of entry.change?.setup ?? []) await applyChange(request, setup);
+  if (entry.id === 'agent-move') {
+    await page.goto('/newsletter/agents');
+    const form = page.locator('form[action$="/advisor/move"]');
+    await form.locator('input[name="target_team"]').fill('research');
+    await form.getByRole('button', { name: 'Move' }).click();
+    await expect(page).toHaveURL('/newsletter/agents/advisor/move');
+    return;
+  }
+  await page.goto(await coverageUrl(request, entry));
+}
+
+test.describe('coverage matrix', () => {
+  test.beforeEach(async ({ request }) => {
+    await resetFixture(request);
+  });
+
+  // Extra pages must be gone before the fixture is reset underneath them.
+  test.afterEach(async ({ context, request }) => {
+    for (const open of context.pages()) await open.close();
+    await resetFixture(request);
+  });
+
+  for (const entry of REGION_ENTRIES) {
+    test(`${entry.id} registers its regions and changes ${entry.change!.region} after ${entry.change!.case}`, async ({ page, request }) => {
+      test.setTimeout(entry.fixture === 'git-evidence' ? 300_000 : 60_000);
+      if (entry.fixture) await resetFixture(request, entry.fixture);
+      await openCoverageEntry(page, request, entry);
+
+      await expect.poll(() => handleKeys(page)).toEqual(['page']);
+      const roots = await page.evaluate(
+        () => Array.from(document.querySelectorAll('[data-live-region]'), (node) => node.getAttribute('data-live-region')),
+      );
+      expect(new Set(roots)).toEqual(new Set([...entry.regions, ...COVERAGE.navigation[entry.shell]]));
+
+      const changing = liveRegion(page, entry.change!.region);
+      const before = await changing.innerHTML();
+      await applyChange(request, entry.change!.case);
+      await refreshHandle(page);
+
+      await expect.poll(() => changing.innerHTML()).not.toBe(before);
+      await expect.poll(() => handleStatus(page)).toBe('healthy');
+      await assertNoConsoleErrors(page);
+    });
+  }
+
+  for (const entry of WORKFLOW_ENTRIES) {
+    test(`${entry.id} changes ${entry.change!.region} after ${entry.change!.case} through the workflow transport`, async ({ page, request }) => {
+      await page.goto(entry.url!);
+      await expect.poll(() => handleKeys(page)).toEqual(['workflow']);
+      const read = () => page.evaluate(
+        async (url) => (await fetch(url, { cache: 'no-store' })).json() as Promise<Record<string, unknown>>,
+        entry.snapshot!,
+      );
+      const before = await read();
+      for (const key of entry.regions) expect(before).toHaveProperty(key);
+
+      await applyChange(request, entry.change!.case);
+      await refreshHandle(page, 'workflow');
+
+      const after = await read();
+      expect(after[entry.change!.region]).not.toEqual(before[entry.change!.region]);
+      await expect.poll(() => handleStatus(page, 'workflow')).toBe('healthy');
+      if (entry.id === 'workflow-board') {
+        await expect(page.locator('[data-ticket-id="fixture-live-count"]')).toHaveCount(1);
+      }
+      await assertNoConsoleErrors(page);
+    });
+  }
+
+  test('rows without a region adapter name the suite that exercises them', async () => {
+    expect(NON_BROWSER_ENTRIES.map((entry) => entry.id)).toEqual(['setup', 'setup-session']);
+    for (const entry of NON_BROWSER_ENTRIES) {
+      const source = readFileSync(path.join(__dirname, '..', '..', entry.covered_by!), 'utf8');
+      expect(source).toContain(entry.id === 'setup' ? entry.handle! : '/setup/session');
+    }
+  });
+});
+
+test.describe('cross-page behaviour', () => {
+  test.beforeEach(async ({ request }) => {
+    await resetFixture(request);
+  });
+
+  test.afterEach(async ({ context, request }) => {
+    for (const open of context.pages()) await open.close();
+    await resetFixture(request);
+  });
+
+  test('one remote change updates two open pages without reloading either', async ({ page, context, request }, testInfo) => {
+    const second = await extraPage(context, testInfo.project.name);
+    const navigations: string[] = [];
+    for (const open of [page, second]) {
+      open.on('framenavigated', (frame) => { if (frame === open.mainFrame()) navigations.push(frame.url()); });
+    }
+    await page.goto('/newsletter/');
+    await second.goto('/newsletter/jobs');
+    await expect.poll(() => handleKeys(second)).toEqual(['page']);
+    navigations.length = 0;
+    const advisor = page.locator('[data-live-key="agent:advisor"]');
+    const queue = await liveRegion(second, 'jobs-list').innerHTML();
+
+    await applyChange(request, 'inbox-routine-pending');
+    await expect(advisor).toHaveAttribute('data-health-kind', 'overdue');
+    await expect.poll(() => liveRegion(second, 'jobs-list').innerHTML()).not.toBe(queue);
+
+    await applyChange(request, 'inbox-job-completes');
+    await expect(advisor).toHaveAttribute('data-health-kind', 'healthy');
+    await expect(liveRegion(page, 'fleet')).toContainText('healthy');
+    await expect(liveRegion(second, 'jobs-list')).toContainText(/\bComplete\b/);
+    expect(navigations).toEqual([]);
+    await assertNoConsoleErrors(page);
+    await assertNoConsoleErrors(second);
+  });
+
+  test('hiding the document pauses reads and showing it catches up immediately', async ({ page, request }) => {
+    // Playwright's Chromium never reports a hidden tab, so the browser's own visibilitychange is dispatched instead.
+    const reads: string[] = [];
+    page.on('request', (seen) => { if (seen.url().includes('__live=1')) reads.push(seen.url()); });
+    await page.goto('/newsletter/jobs');
+    await expect.poll(() => reads.length).toBeGreaterThan(0);
+    const listing = liveRegion(page, 'jobs-list');
+    const before = await listing.innerHTML();
+
+    await setVisibility(page, 'hidden');
+    await page.waitForTimeout(300);
+    const paused = reads.length;
+    await applyChange(request, 'job-added');
+    await page.waitForTimeout(4500);
+    expect(reads.length).toBe(paused);
+    expect(await listing.innerHTML()).toBe(before);
+
+    await setVisibility(page, 'visible');
+    await expect.poll(() => reads.length, { timeout: 1500 }).toBeGreaterThan(paused);
+    await expect.poll(() => listing.innerHTML()).not.toBe(before);
+    await assertNoConsoleErrors(page);
+  });
+
+  test('a delayed older reply is superseded by a newer read and never overwrites it', async ({ page, request }) => {
+    await page.goto('/newsletter/');
+    await expect.poll(() => handleStatus(page)).toBe('healthy');
+    const gate = deferred();
+    let held = 0;
+    await page.route(/\/newsletter\/\?__live=1$/, async (route) => {
+      held += 1;
+      if (held > 1) return route.continue();
+      const stale = await route.fetch();
+      await gate.promise;
+      try { await route.fulfill({ response: stale }); } catch { /* superseded: the page already aborted it */ }
+    });
+    const advisor = page.locator('[data-live-key="agent:advisor"]');
+    const unchanged = await advisor.getAttribute('data-health-kind');
+    const first = page.evaluate(() => window.FlowgencyLive.handles.get('page')!.refresh());
+    await expect.poll(() => held).toBe(1);
+
+    await applyChange(request, 'inbox-routine-pending');
+    const newer = await refreshHandle(page);
+    gate.release();
+
+    expect(await first).toBe('superseded');
+    expect(newer).toBe('applied');
+    await expect(advisor).toHaveAttribute('data-health-kind', 'overdue');
+    expect(unchanged).not.toBe('overdue');
+    await page.waitForTimeout(500);
+    await expect(advisor).toHaveAttribute('data-health-kind', 'overdue');
+  });
+
+  test('a reply whose body finishes after the document hides is discarded and applied on return', async ({ page, request }) => {
+    await page.addInitScript(() => {
+      const original = Response.prototype.text;
+      Response.prototype.text = async function () {
+        const body = await original.call(this);
+        const gate = (window as unknown as { __bodyGate?: Promise<void> }).__bodyGate;
+        if (gate) await gate;
+        return body;
+      };
+    });
+    await page.goto('/newsletter/');
+    await expect.poll(() => handleStatus(page)).toBe('healthy');
+    const advisor = page.locator('[data-live-key="agent:advisor"]');
+    const unchanged = await advisor.getAttribute('data-health-kind');
+    await page.evaluate(() => {
+      const holder = window as unknown as { __bodyGate: Promise<void>; __releaseBody: () => void };
+      holder.__bodyGate = new Promise<void>((resolve) => { holder.__releaseBody = resolve; });
+    });
+    await applyChange(request, 'inbox-routine-pending');
+    const reply = page.waitForResponse((response) => response.url().endsWith('/newsletter/?__live=1'));
+    const pending = page.evaluate(() => window.FlowgencyLive.handles.get('page')!.refresh());
+    await reply;
+
+    await setVisibility(page, 'hidden');
+    await page.evaluate(() => {
+      const holder = window as unknown as { __bodyGate: Promise<void> | null; __releaseBody: () => void };
+      holder.__releaseBody();
+      holder.__bodyGate = null;
+    });
+    expect(['discarded', 'hidden', 'paused']).toContain(await pending);
+    await expect(advisor).toHaveAttribute('data-health-kind', unchanged!);
+
+    await setVisibility(page, 'visible');
+    await expect(advisor).toHaveAttribute('data-health-kind', 'overdue');
+  });
+
+  test('a page removed from under the reader reports unavailable and keeps its last good content', async ({ page, request }) => {
+    const errors: string[] = [];
+    page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+    await applyChange(request, 'log-tall');
+    await page.goto(await coverageUrl(request, { url: '{tail-log-view}' } as CoverageEntry));
+    await expect.poll(() => handleStatus(page)).toBe('healthy');
+    const content = liveRegion(page, 'log-content');
+    const kept = await content.innerHTML();
+
+    await applyChange(request, 'log-removed');
+    await refreshHandle(page);
+
+    await expect.poll(() => handleStatus(page)).toBe('unavailable');
+    await expect(page.locator('[data-live-status]')).toBeVisible();
+    expect(await content.innerHTML()).toBe(kept);
+    // The browser reports the missing resource itself; nothing else may be logged.
+    expect(errors.length).toBeGreaterThan(0);
+    for (const text of errors) expect(text).toMatch(/Failed to load resource: .* 404/);
+  });
+
+  test('a save made after a remote change is rejected by its loaded revision and keeps the draft', async ({ page, request }) => {
+    await page.goto('/newsletter/agents/advisor/runtime');
+    const timeout = page.locator('input[name="timeout"]');
+    const revision = page.locator('input[name="revision"]').first();
+    const loaded = await revision.inputValue();
+    await timeout.fill('1801');
+
+    await applyChange(request, 'agent-team-runtime');
+    await refreshHandle(page);
+    await expect(timeout).toHaveValue('1801');
+    await expect(revision).toHaveValue(loaded);
+
+    const save = page.waitForResponse((response) => response.url().includes('/advisor/runtime') && response.request().method() === 'POST');
+    await page.getByRole('button', { name: 'Save runtime', exact: true }).click();
+    expect((await save).status()).toBe(409);
+    await expect(page.getByText('config.yaml changed; reload before saving', { exact: true })).toBeVisible();
+    await expect(timeout).toHaveValue('1801');
+    await assertOnlyExpectedConflictConsoleError(page);
+  });
+
+  test('a relative-time-only change updates labels in place and nothing else', async ({ page, request }) => {
+    await page.goto('/newsletter/');
+    await expect.poll(() => handleStatus(page)).toBe('healthy');
+    const keys = ['fleet', 'workflows', 'work-queue', 'attention', 'activity'];
+    const snapshotOf = async () => Object.fromEntries(
+      await Promise.all(keys.map(async (key) => [key, await liveRegion(page, key).innerHTML()])),
+    ) as Record<string, string>;
+    const before = await snapshotOf();
+    const item = await liveRegion(page, 'activity').locator('[data-live-key]').first().elementHandle();
+
+    await applyChange(request, 'inbox-clock-advances');
+    await refreshHandle(page);
+
+    await expect.poll(async () => (await snapshotOf()).activity).not.toBe(before.activity);
+    const after = await snapshotOf();
+    for (const key of keys.filter((name) => name !== 'activity')) expect(after[key]).toBe(before[key]);
+    expect(await item!.evaluate((node) => node.isConnected)).toBe(true);
+  });
+
+  test('an executable fragment is rejected before it touches the page or the ETag', async ({ page }) => {
+    await page.goto('/newsletter/');
+    await expect.poll(() => handleStatus(page)).toBe('healthy');
+    const accepted = await page.evaluate(() => window.FlowgencyLive.handles.get('page')!.etag);
+    const fleet = liveRegion(page, 'fleet');
+    const before = await fleet.innerHTML();
+
+    await page.route(/\/newsletter\/\?__live=1$/, async (route) => {
+      const { 'if-none-match': _conditional, ...headers } = route.request().headers();
+      const response = await route.fetch({ headers });
+      const body = await response.json() as LiveSnapshotShape;
+      body.regions = body.regions.map((entry) => (
+        entry.key === 'fleet' ? { ...entry, html: '<img src="x" onerror="window.__pwned = true">' } : entry
+      ));
+      await route.fulfill({ response, json: body, headers: { ...response.headers(), etag: '"poisoned"' } });
+    });
+    await refreshHandle(page);
+
+    expect(await fleet.innerHTML()).toBe(before);
+    expect(await page.evaluate(() => window.__pwned)).toBeUndefined();
+    expect(await handleStatus(page)).not.toBe('healthy');
+    expect(await page.evaluate(() => window.FlowgencyLive.handles.get('page')!.etag)).toBe(accepted);
+  });
+
+  test('setup credentials never appear in an Inbox snapshot, for the owner or anyone else', async ({ page, context, request }) => {
+    await resetFixture(request, 'connected-setup');
+    const meta = await (await request.get('/__ui/setup/meta')).json();
+    await page.goto('/setup', { waitUntil: 'domcontentloaded' });
+    await page.getByLabel('Flowgency data root', { exact: true }).fill(meta.data_root as string);
+    await page.getByRole('button', { name: 'Continue in GitHub Copilot' }).click();
+    await expect(page).toHaveURL(/\/setup\/session$/);
+    expect((await request.post('/__ui/setup/ready')).status()).toBe(204);
+    expect((await request.post('/__ui/setup/session/complete', { data: { scheduler_result: 'confirmed' } })).status()).toBe(200);
+    await expect(page).toHaveURL(/\/newsletter\/$/);
+
+    const credential = (await context.cookies()).find((cookie) => cookie.name === 'flowgency_setup')!.value;
+    const token = await page.locator('#setup-stop-form input[name="setup_csrf"]').inputValue();
+    expect(credential).not.toBe('');
+    expect(token).not.toBe('');
+
+    const owner = await page.evaluate(() => fetch('/newsletter/?__live=1', { cache: 'no-store' }).then((reply) => reply.text()));
+    expect(owner).toContain('/setup/session?view=inspection');
+    for (const secret of [credential, token, 'setup_csrf']) expect(owner).not.toContain(secret);
+
+    const visitor = await request.get('/newsletter/?__live=1');
+    const text = await visitor.text();
+    const regions = Object.fromEntries((JSON.parse(text) as LiveSnapshotShape).regions.map((entry) => [entry.key, entry.html]));
+    expect(regions['setup-session'].trim()).toBe('');
+    for (const secret of [credential, token, 'setup_csrf', '/setup/session']) expect(text).not.toContain(secret);
+    expect(await (await request.get('/newsletter/')).text()).not.toContain(token);
+  });
+
+  test('live reports release their observers and a navigation leaves no request behind', async ({ page, request }) => {
+    await page.addInitScript(() => {
+      const holder = window as unknown as { __observers: Set<object> };
+      holder.__observers = new Set();
+      const Native = window.ResizeObserver;
+      window.ResizeObserver = class extends Native {
+        constructor(callback: ResizeObserverCallback) {
+          super(callback);
+          holder.__observers.add(this);
+        }
+        disconnect() {
+          holder.__observers.delete(this);
+          super.disconnect();
+        }
+      };
+    });
+    const activityReads: string[] = [];
+    page.on('request', (seen) => { if (seen.url().includes('/advisor/activity?__live=1')) activityReads.push(seen.url()); });
+    const observers = () => page.evaluate(() => (window as unknown as { __observers: Set<object> }).__observers.size);
+
+    await page.goto('/newsletter/agents/advisor/activity');
+    await expect.poll(() => handleStatus(page)).toBe('healthy');
+    const baseline = await observers();
+
+    await applyChange(request, 'agent-report-history');
+    await refreshHandle(page);
+    await expect.poll(observers).toBeGreaterThan(baseline);
+
+    await resetFixture(request);
+    await refreshHandle(page);
+    await expect.poll(observers).toBe(baseline);
+
+    await page.goto('/newsletter/');
+    await expect.poll(() => handleKeys(page)).toEqual(['page']);
+    const settled = activityReads.length;
+    await page.waitForTimeout(4500);
+    expect(activityReads.length).toBe(settled);
+    expect(await handleKeys(page)).toEqual(['page']);
+    await assertNoConsoleErrors(page);
+  });
+
+  test('a focused native select keeps its node, focus, value and events while the roster updates', async ({ page, request }, testInfo) => {
+    test.skip(testInfo.project.name.startsWith('mobile'), 'the browser-managed popup is a desktop interaction');
+    await page.goto('/newsletter/agents');
+    const select = page.locator('form[action$="/advisor/move"] select[name="memory_mode"]');
+    const node = await select.elementHandle();
+    await page.evaluate(() => {
+      const target = document.querySelector('form[action$="/advisor/move"] select[name="memory_mode"]')!;
+      const events: string[] = [];
+      (window as unknown as { __selectEvents: string[] }).__selectEvents = events;
+      for (const name of ['blur', 'focusout', 'change']) target.addEventListener(name, () => events.push(name));
+    });
+    // A real click opens the popup in a headed browser; headless Chromium cannot expose that open state, so the
+    // assertions below are node identity, focus, value and the absence of blur/change during the refresh.
+    await select.click();
+    const value = await select.inputValue();
+    const summary = await liveRegion(page, 'roster-summary').innerHTML();
+
+    await applyChange(request, 'inbox-agent-added');
+    await refreshHandle(page);
+    await expect.poll(() => liveRegion(page, 'roster-summary').innerHTML()).not.toBe(summary);
+    // The new row is a structural change beside the held row, so it waits for the release.
+    await expect(liveRegion(page, 'roster-rows')).not.toContainText(/scribe/i);
+
+    expect(await node!.evaluate((element) => element.isConnected && element === document.activeElement)).toBe(true);
+    expect(await select.inputValue()).toBe(value);
+    expect(await page.evaluate(() => (window as unknown as { __selectEvents: string[] }).__selectEvents)).toEqual([]);
+
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('Enter');
+    expect(await select.inputValue()).not.toBe(value);
+    expect(await page.evaluate(() => (window as unknown as { __selectEvents: string[] }).__selectEvents)).toEqual(['change']);
+
+    await select.blur();
+    await refreshHandle(page);
+    // The chosen value is a draft, so the row stays protected and the new row keeps waiting.
+    expect(await node!.evaluate((element) => element.isConnected)).toBe(true);
+    await expect(liveRegion(page, 'roster-rows')).not.toContainText(/scribe/i);
+  });
 });

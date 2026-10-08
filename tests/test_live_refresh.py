@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import ast
+import json
+from collections.abc import Iterator
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -932,3 +936,124 @@ def test_inbox_snapshot_digest_follows_the_rendered_work_queue():
     assert live_etag(queued_snapshot) != idle
     strip = next(region.html for region in queued_snapshot.regions if region.key == "work-queue")
     assert 'data-live-key="job:job-1"' in strip and "1 running" in strip and "1 queued" in strip
+
+
+# ── Coverage inventory: every live GET route and policy is classified ────────
+
+ROOT = Path(__file__).resolve().parents[1]
+COVERAGE_PATH = ROOT / "tests" / "ui" / "live_coverage.json"
+LIVE_KINDS = frozenset({"snapshot", "shell-only", "workflow-snapshot", "lifecycle"})
+NON_POLL_KINDS = frozenset(
+    {"redirect", "retired", "download", "transport", "stream", "static", "framework", "standalone"}
+)
+# Routes that exist only on the fixture server or the browser-test harness.
+HARNESS_PREFIXES = ("/__ui/", "/__live_test__")
+
+
+def load_coverage() -> dict[str, Any]:
+    return json.loads(COVERAGE_PATH.read_text(encoding="utf-8"))
+
+
+def app_get_routes(app: FastAPI) -> set[str]:
+    """Every GET route template, descending into included routers whatever their wrapping."""
+
+    def walk(routes: Any, prefix: str = "") -> Iterator[tuple[str, Any]]:
+        for route in routes:
+            original = getattr(route, "original_router", None)
+            if original is not None:
+                yield from walk(original.routes, prefix + (route.include_context.prefix or ""))
+            elif hasattr(route, "path"):
+                yield prefix + route.path, route
+
+    return {
+        path
+        for path, route in walk(app.router.routes)
+        if "GET" in (getattr(route, "methods", None) or ())
+        and not path.startswith(HARNESS_PREFIXES)
+    }
+
+
+def route_drift(declared: set[str], actual: set[str]) -> tuple[set[str], set[str]]:
+    """Return (routes missing from the inventory, inventory routes the app no longer serves)."""
+    return actual - declared, declared - actual
+
+
+def policy_functions() -> tuple[set[str], set[str]]:
+    """Return (functions constructing a LivePagePolicy, those plus functions returning one)."""
+    constructing: set[str] = set()
+    returning: set[str] = set()
+    for path in sorted((ROOT / "flowgency").rglob("*.py")):
+        relative = path.relative_to(ROOT).as_posix()
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if any(
+                isinstance(call, ast.Call) and getattr(call.func, "id", None) == "LivePagePolicy"
+                for call in ast.walk(node)
+            ):
+                constructing.add(f"{relative}::{node.name}")
+            if isinstance(node.returns, ast.Name) and node.returns.id == "LivePagePolicy":
+                returning.add(f"{relative}::{node.name}")
+    return constructing, constructing | returning
+
+
+def test_coverage_inventory_is_well_formed():
+    coverage = load_coverage()
+    entries = coverage["entries"]
+    ids = [entry["id"] for entry in entries]
+    assert len(ids) == len(set(ids))
+    assert set(coverage["navigation"]) == {"team", "admin", "none"}
+    for entry in entries:
+        assert entry["kind"] in LIVE_KINDS | NON_POLL_KINDS, entry["id"]
+        if entry["kind"] in NON_POLL_KINDS and entry["kind"] not in {"stream", "standalone"}:
+            assert "regions" not in entry, entry["id"]
+        if entry["kind"] in LIVE_KINDS:
+            navigation = set(coverage["navigation"][entry["shell"]])
+            change = entry.get("change")
+            if change is not None:
+                assert change["region"] in {*entry["regions"], *navigation}, entry["id"]
+            else:
+                assert entry["kind"] == "lifecycle" and entry["covered_by"], entry["id"]
+        if entry["kind"] in {"snapshot", "shell-only"}:
+            assert entry["policy"] and entry["change"]["case"], entry["id"]
+        if entry["kind"] in {"retired", "redirect"}:
+            assert entry["sample"] and entry["status"], entry["id"]
+        if entry["kind"] == "transport":
+            assert entry["serves"] in ids, entry["id"]
+
+
+def test_every_app_get_route_is_classified_in_the_coverage_inventory():
+    from flowgency.app import app
+
+    declared = {entry["route"] for entry in load_coverage()["entries"]}
+    unclassified, stale = route_drift(declared, app_get_routes(app))
+
+    assert unclassified == set(), "GET routes missing from tests/ui/live_coverage.json"
+    assert stale == set(), "inventory routes the app no longer serves"
+
+
+def test_route_drift_reports_both_directions():
+    assert route_drift({"/a", "/b"}, {"/a", "/c"}) == ({"/c"}, {"/b"})
+    assert route_drift({"/a"}, {"/a"}) == (set(), set())
+
+
+def test_dropping_or_inventing_an_inventory_row_is_reported_against_the_real_routes():
+    from flowgency.app import app
+
+    entries = load_coverage()["entries"]
+    actual = app_get_routes(app)
+    without_jobs = {entry["route"] for entry in entries if entry["id"] != "jobs"}
+    with_phantom = {entry["route"] for entry in entries} | {"/{team}/phantom"}
+
+    assert route_drift(without_jobs, actual) == ({"/{team}/jobs"}, set())
+    assert route_drift(with_phantom, actual) == (set(), {"/{team}/phantom"})
+
+
+def test_every_live_policy_function_is_classified_and_every_listed_policy_exists():
+    coverage = load_coverage()
+    sites = set(coverage["policy_sites"])
+    row_policies = {entry["policy"] for entry in coverage["entries"] if entry.get("policy")}
+    constructing, every_policy_function = policy_functions()
+
+    assert constructing == sites, "LivePagePolicy construction sites changed"
+    assert every_policy_function == row_policies | sites, "policy builders and inventory rows diverge"

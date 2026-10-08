@@ -1,0 +1,301 @@
+{
+  "policy_sites": [
+    "flowgency/app.py::_inbox_policy",
+    "flowgency/app.py::_logs_list_policy",
+    "flowgency/app.py::_log_view_policy",
+    "flowgency/app.py::_workspaces_list_policy",
+    "flowgency/app.py::_workspace_file_policy",
+    "flowgency/web/admin_live.py::_policy",
+    "flowgency/web/library_live.py::_policy",
+    "flowgency/web/routes/agent_detail.py::agent_detail_policy",
+    "flowgency/web/routes/agents.py::roster_policy",
+    "flowgency/web/routes/agents.py::move_policy",
+    "flowgency/web/routes/git_evidence.py::_git_evidence_policy",
+    "flowgency/web/routes/jobs.py::_jobs_list_policy",
+    "flowgency/web/routes/jobs.py::_job_detail_policy",
+    "flowgency/web/workflow_admin_live.py::_policy",
+    "flowgency/web/workflow_shell.py::workflow_shell_snapshot"
+  ],
+  "navigation": {
+    "team": ["navigation-teams", "navigation-primary", "navigation-workflows", "navigation-workspace"],
+    "admin": ["navigation-teams"],
+    "none": []
+  },
+  "entries": [
+    {
+      "id": "inbox", "inventory": "/{team}/", "route": "/{team}/", "url": "/newsletter/",
+      "kind": "snapshot", "shell": "team", "policy": "flowgency/app.py::_inbox_policy",
+      "regions": ["setup-session", "fleet", "workflows", "work-queue", "attention", "activity"],
+      "change": { "case": "inbox-routine-pending", "region": "fleet" }
+    },
+    {
+      "id": "agents", "inventory": "/{team}/agents", "route": "/{team}/agents", "url": "/newsletter/agents",
+      "kind": "snapshot", "shell": "team", "policy": "flowgency/web/routes/agents.py::roster_policy",
+      "regions": ["roster-summary", "roster-rows", "roster-empty"],
+      "change": { "case": "inbox-agent-added", "region": "roster-rows" }
+    },
+    {
+      "id": "agent-profile", "inventory": "Agent profile", "route": "/{team}/agents/{agent}/profile", "url": "/newsletter/agents/advisor/profile",
+      "kind": "snapshot", "shell": "team", "policy": "flowgency/web/routes/agent_detail.py::agent_detail_policy",
+      "regions": ["agent-header", "agent-status"],
+      "change": { "case": "agent-identity", "region": "agent-header" }
+    },
+    {
+      "id": "agent-blueprint", "inventory": "Agent blueprint", "route": "/{team}/agents/{agent}/blueprint", "url": "/newsletter/agents/advisor/blueprint",
+      "kind": "snapshot", "shell": "team", "policy": "flowgency/web/routes/agent_detail.py::agent_detail_policy",
+      "regions": ["agent-header", "agent-status", "agent-blueprint"],
+      "change": { "case": "agent-catalog-digest", "region": "agent-blueprint" }
+    },
+    {
+      "id": "agent-runtime", "inventory": "Agent runtime", "route": "/{team}/agents/{agent}/runtime", "url": "/newsletter/agents/advisor/runtime",
+      "kind": "snapshot", "shell": "team", "policy": "flowgency/web/routes/agent_detail.py::agent_detail_policy",
+      "regions": ["agent-header", "agent-status", "agent-runtime-summary"],
+      "change": { "case": "agent-team-runtime", "region": "agent-runtime-summary" }
+    },
+    {
+      "id": "agent-prompts", "inventory": "Agent prompts", "route": "/{team}/agents/{agent}/prompts", "url": "/newsletter/agents/advisor/prompts",
+      "kind": "snapshot", "shell": "team", "policy": "flowgency/web/routes/agent_detail.py::agent_detail_policy",
+      "regions": ["agent-header", "agent-status", "agent-prompts-catalog", "agent-prompts-edit"],
+      "change": { "case": "agent-catalog-digest", "region": "agent-prompts-edit" }
+    },
+    {
+      "id": "agent-memory", "inventory": "Agent memory", "route": "/{team}/agents/{agent}/memory", "url": "/newsletter/agents/advisor/memory",
+      "kind": "snapshot", "shell": "team", "policy": "flowgency/web/routes/agent_detail.py::agent_detail_policy",
+      "regions": ["agent-header", "agent-status", "agent-memory-status"],
+      "change": { "case": "agent-memory-revision", "region": "agent-memory-status" }
+    },
+    {
+      "id": "agent-activity", "inventory": "Agent activity", "route": "/{team}/agents/{agent}/activity", "url": "/newsletter/agents/advisor/activity",
+      "kind": "snapshot", "shell": "team", "policy": "flowgency/web/routes/agent_detail.py::agent_detail_policy",
+      "regions": ["agent-header", "agent-status", "agent-activity-count", "agent-activity-entries"],
+      "change": { "case": "agent-report-history", "region": "agent-activity-entries" }
+    },
+    {
+      "id": "agent-logs", "inventory": "Agent logs", "route": "/{team}/agents/{agent}/logs", "url": "/newsletter/agents/advisor/logs",
+      "kind": "snapshot", "shell": "team", "policy": "flowgency/web/routes/agent_detail.py::agent_detail_policy",
+      "regions": ["agent-header", "agent-status", "agent-logs-count", "agent-logs-list"],
+      "change": { "case": "agent-log-membership", "region": "agent-logs-list" }
+    },
+    {
+      "id": "agent-permissions", "inventory": "Agent permissions", "route": "/{team}/agents/{agent}/permissions", "url": "/newsletter/agents/advisor/permissions",
+      "kind": "snapshot", "shell": "team", "policy": "flowgency/web/routes/agent_detail.py::agent_detail_policy",
+      "regions": ["agent-header", "agent-status", "agent-permissions-saved"],
+      "change": { "case": "agent-permissions", "region": "agent-permissions-saved" }
+    },
+    {
+      "id": "agent-routines", "inventory": "Agent routines", "route": "/{team}/agents/{agent}/routines", "url": "/newsletter/agents/advisor/routines",
+      "kind": "snapshot", "shell": "team", "policy": "flowgency/web/routes/agent_detail.py::agent_detail_policy",
+      "regions": ["agent-header", "agent-status", "agent-routines-saved"],
+      "change": { "case": "agent-routines", "region": "agent-routines-saved" }
+    },
+    {
+      "id": "agent-move", "inventory": "Agent move confirmation", "route": "/{team}/agents/{agent}/move", "url": null,
+      "snapshot": "/newsletter/agents/advisor/move?__live=1",
+      "kind": "shell-only", "shell": "team", "policy": "flowgency/web/routes/agents.py::move_policy",
+      "regions": [],
+      "change": { "case": "navigation-membership", "region": "navigation-workflows" }
+    },
+    {
+      "id": "jobs", "inventory": "/{team}/jobs", "route": "/{team}/jobs", "url": "/newsletter/jobs",
+      "kind": "snapshot", "shell": "team", "policy": "flowgency/web/routes/jobs.py::_jobs_list_policy",
+      "regions": ["jobs-count", "jobs-queue", "jobs-list"],
+      "change": { "case": "job-added", "region": "jobs-list" }
+    },
+    {
+      "id": "job-detail", "inventory": "/{team}/jobs/{job_id}", "route": "/{team}/jobs/{job_id}", "url": "/newsletter/jobs/job-waiting",
+      "kind": "snapshot", "shell": "team", "policy": "flowgency/web/routes/jobs.py::_job_detail_policy",
+      "regions": ["job-header", "job-status", "job-meta", "job-notices", "job-diagnostics", "job-actions", "job-resume", "job-changes", "job-git-evidence", "job-artifacts", "job-logs", "job-publication", "job-summary"],
+      "change": { "case": "job-finishes", "region": "job-status" }
+    },
+    {
+      "id": "logs", "inventory": "/{team}/logs", "route": "/{team}/logs", "url": "/newsletter/logs",
+      "kind": "snapshot", "shell": "team", "policy": "flowgency/app.py::_logs_list_policy",
+      "regions": ["logs-list"],
+      "change": { "case": "log-listing-membership", "region": "logs-list" }
+    },
+    {
+      "id": "log-view", "inventory": "/{team}/logs/view", "route": "/{team}/logs/view", "url": "{tail-log-view}",
+      "kind": "snapshot", "shell": "team", "policy": "flowgency/app.py::_log_view_policy",
+      "regions": ["log-status", "log-content"],
+      "change": { "case": "log-appended", "region": "log-content", "setup": ["log-tall"] }
+    },
+    {
+      "id": "workspaces", "inventory": "/{team}/workspaces", "route": "/{team}/workspaces", "url": "/newsletter/workspaces", "fixture": "workspaces",
+      "kind": "snapshot", "shell": "team", "policy": "flowgency/app.py::_workspaces_list_policy",
+      "regions": ["workspaces-status", "workspaces-list"],
+      "change": { "case": "workspace-added", "region": "workspaces-list" }
+    },
+    {
+      "id": "workspace-file", "inventory": "/{team}/workspaces/{idx}/file", "route": "/{team}/workspaces/{idx}/file", "url": "/newsletter/workspaces/0/file", "fixture": "workspaces",
+      "kind": "snapshot", "shell": "team", "policy": "flowgency/app.py::_workspace_file_policy",
+      "regions": ["workspace-metadata"],
+      "change": { "case": "workspace-file-changes", "region": "workspace-metadata" }
+    },
+    {
+      "id": "workflow-board", "inventory": "/{team}/workflows/{workflow}", "route": "/{team}/workflows/{workflow}", "url": "/newsletter/workflows/delivery",
+      "snapshot": "/newsletter/workflows/delivery/snapshot", "handle": "workflow",
+      "kind": "workflow-snapshot", "shell": "team", "policy": "flowgency/web/workflow_shell.py::workflow_shell_snapshot",
+      "regions": ["columns", "selected_ticket", "issues"],
+      "change": { "case": "navigation-workflow-count", "region": "columns" }
+    },
+    {
+      "id": "workflow-ticket", "inventory": "Expanded workflow ticket", "route": "/{team}/workflows/{workflow}/tickets/{ticket}", "url": "/newsletter/workflows/delivery/tickets/fixture-review",
+      "snapshot": "/newsletter/workflows/delivery/tickets/fixture-review/snapshot", "handle": "workflow",
+      "kind": "workflow-snapshot", "shell": "none",
+      "regions": ["name", "ticket", "history", "issues"],
+      "change": { "case": "workflow-settings-changed", "region": "name" }
+    },
+    {
+      "id": "workflow-new", "inventory": "Workflow new", "route": "/{team}/workflows/new", "url": "/newsletter/workflows/new",
+      "kind": "snapshot", "shell": "team", "policy": "flowgency/web/workflow_admin_live.py::workflow_create_policy",
+      "regions": ["workflow-settings-header", "workflow-settings-source"],
+      "change": { "case": "workflow-settings-changed", "region": "workflow-settings-source" }
+    },
+    {
+      "id": "workflow-settings", "inventory": "Workflow settings", "route": "/{team}/workflows/{workflow}/settings", "url": "/newsletter/workflows/delivery/settings",
+      "kind": "snapshot", "shell": "team", "policy": "flowgency/web/workflow_admin_live.py::workflow_settings_policy",
+      "regions": ["workflow-settings-header", "workflow-settings-source"],
+      "change": { "case": "workflow-settings-changed", "region": "workflow-settings-header" }
+    },
+    {
+      "id": "workflow-library", "inventory": "/admin/workflow-library", "route": "/admin/workflow-library", "url": "/admin/workflow-library",
+      "kind": "snapshot", "shell": "admin", "policy": "flowgency/web/workflow_admin_live.py::workflow_library_policy",
+      "regions": ["workflow-library-blueprints"],
+      "change": { "case": "workflow-blueprint-added", "region": "workflow-library-blueprints" }
+    },
+    {
+      "id": "workflow-blueprint-new", "inventory": "Workflow-library blueprint new", "route": "/admin/workflow-library/blueprints/new", "url": "/admin/workflow-library/blueprints/new",
+      "kind": "snapshot", "shell": "admin", "policy": "flowgency/web/workflow_admin_live.py::workflow_blueprint_new_policy",
+      "regions": ["workflow-blueprint-source"],
+      "change": { "case": "workflow-settings-changed", "region": "workflow-blueprint-source" }
+    },
+    {
+      "id": "workflow-blueprint", "inventory": "Workflow-library blueprint detail", "route": "/admin/workflow-library/blueprints/{blueprint_id}", "url": "/admin/workflow-library/blueprints/delivery",
+      "kind": "snapshot", "shell": "admin", "policy": "flowgency/web/workflow_admin_live.py::workflow_blueprint_policy",
+      "regions": ["workflow-blueprint-source"],
+      "change": { "case": "workflow-source-changes", "region": "workflow-blueprint-source" }
+    },
+    {
+      "id": "admin-settings", "inventory": "/admin/", "route": "/admin/", "url": "/admin/",
+      "kind": "snapshot", "shell": "admin", "policy": "flowgency/web/admin_live.py::settings_policy",
+      "regions": ["settings-status"],
+      "change": { "case": "admin-settings-changed", "region": "settings-status" }
+    },
+    {
+      "id": "admin-integrations", "inventory": "/admin/integrations", "route": "/admin/integrations", "url": "/admin/integrations",
+      "kind": "snapshot", "shell": "admin", "policy": "flowgency/web/admin_live.py::integrations_policy",
+      "regions": ["integrations-status", "integrations-installed", "integrations-available"],
+      "change": { "case": "integration-available-added", "region": "integrations-available" }
+    },
+    {
+      "id": "admin-dispatch", "inventory": "/admin/dispatch", "route": "/admin/dispatch", "url": "/admin/dispatch",
+      "kind": "snapshot", "shell": "admin", "policy": "flowgency/web/admin_live.py::dispatch_policy",
+      "regions": ["dispatch-status", "dispatch-action", "dispatch-teams"],
+      "change": { "case": "admin-dispatch-changed", "region": "dispatch-teams" }
+    },
+    {
+      "id": "admin-teams", "inventory": "/admin/teams", "route": "/admin/teams", "url": "/admin/teams",
+      "kind": "snapshot", "shell": "admin", "policy": "flowgency/web/admin_live.py::teams_policy",
+      "regions": ["teams-status", "teams-list"],
+      "change": { "case": "admin-team-created", "region": "teams-list" }
+    },
+    {
+      "id": "admin-team-new", "inventory": "Admin team new", "route": "/admin/teams/new", "url": "/admin/teams/new",
+      "kind": "snapshot", "shell": "admin", "policy": "flowgency/web/admin_live.py::team_new_policy",
+      "regions": ["team-new-status"],
+      "change": { "case": "admin-team-created", "region": "team-new-status" }
+    },
+    {
+      "id": "admin-team-edit", "inventory": "Admin team edit", "route": "/admin/teams/{team}/edit", "url": "/admin/teams/newsletter/edit",
+      "kind": "snapshot", "shell": "admin", "policy": "flowgency/web/admin_live.py::team_edit_policy",
+      "regions": ["team-edit-status", "team-edit-agents"],
+      "change": { "case": "admin-team-changed", "region": "team-edit-agents" }
+    },
+    {
+      "id": "library", "inventory": "/admin/agent-library", "route": "/admin/agent-library", "url": "/admin/agent-library",
+      "kind": "snapshot", "shell": "admin", "policy": "flowgency/web/library_live.py::library_list_policy",
+      "regions": ["library-blueprints"],
+      "change": { "case": "library-blueprint-added", "region": "library-blueprints" }
+    },
+    {
+      "id": "library-blueprint", "inventory": "Agent-library blueprint detail", "route": "/admin/agent-library/blueprints/{key}", "url": "/admin/agent-library/blueprints/advisor",
+      "kind": "snapshot", "shell": "admin", "policy": "flowgency/web/library_live.py::blueprint_detail_policy",
+      "regions": ["blueprint-header", "blueprint-files", "blueprint-users", "blueprint-runtimes"],
+      "change": { "case": "library-source-changes", "region": "blueprint-files" }
+    },
+    {
+      "id": "library-skills", "inventory": "Agent-library skills list", "route": "/admin/agent-library/blueprints/{key}/skills", "url": "/admin/agent-library/blueprints/advisor/skills",
+      "kind": "snapshot", "shell": "admin", "policy": "flowgency/web/library_live.py::blueprint_skill_policy",
+      "regions": ["skill-header", "skill-files", "skill-source"],
+      "change": { "case": "library-source-changes", "region": "skill-files" }
+    },
+    {
+      "id": "library-skill", "inventory": "Agent-library skill detail", "route": "/admin/agent-library/blueprints/{key}/skills/{skill}", "url": "/admin/agent-library/blueprints/advisor/skills/daily-review",
+      "kind": "snapshot", "shell": "admin", "policy": "flowgency/web/library_live.py::blueprint_skill_policy",
+      "regions": ["skill-header", "skill-files", "skill-source"],
+      "change": { "case": "library-source-changes", "region": "skill-files" }
+    },
+    {
+      "id": "library-prompts", "inventory": "Agent-library prompts", "route": "/admin/agent-library/blueprints/{key}/prompts", "url": "/admin/agent-library/blueprints/advisor/prompts",
+      "kind": "snapshot", "shell": "admin", "policy": "flowgency/web/library_live.py::blueprint_prompts_policy",
+      "regions": ["prompts-header", "prompts-list"],
+      "change": { "case": "library-source-changes", "region": "prompts-list" }
+    },
+    {
+      "id": "channels", "inventory": "/admin/memory-channels", "route": "/admin/memory-channels", "url": "/admin/memory-channels",
+      "kind": "snapshot", "shell": "admin", "policy": "flowgency/web/library_live.py::channel_list_policy",
+      "regions": ["channels-status", "channels-table"],
+      "change": { "case": "channel-added", "region": "channels-table" }
+    },
+    {
+      "id": "channel", "inventory": "Memory channel detail", "route": "/admin/memory-channels/{channel_key}", "url": "/admin/memory-channels/brand-strategy",
+      "kind": "snapshot", "shell": "admin", "policy": "flowgency/web/library_live.py::channel_detail_policy",
+      "regions": ["channel-header", "channel-status", "channel-references", "channel-files"],
+      "change": { "case": "channel-memory-changes", "region": "channel-files" }
+    },
+    {
+      "id": "git-evidence", "inventory": "Git evidence retained-artifact viewer", "route": "/{team}/workflows/{workflow}/tickets/{ticket}/artifacts/{artifact_id}/diff", "url": "{git-evidence-diff}", "fixture": "git-evidence",
+      "kind": "shell-only", "shell": "team", "policy": "flowgency/web/routes/git_evidence.py::_git_evidence_policy",
+      "regions": ["git-evidence-back"],
+      "change": { "case": "navigation-membership", "region": "navigation-workflows" }
+    },
+    {
+      "id": "setup", "inventory": "/setup", "route": "/setup", "url": null,
+      "snapshot": "/setup/status", "handle": "setup-status",
+      "kind": "lifecycle", "shell": "none",
+      "regions": ["status-message"], "covered_by": "tests/ui/setup.spec.ts"
+    },
+    {
+      "id": "setup-session", "inventory": "/setup/session", "route": "/setup/session", "url": null,
+      "kind": "stream", "shell": "none",
+      "regions": [], "covered_by": "tests/ui/setup.spec.ts",
+      "note": "owner-only terminal view; the WebSocket stream has no polling guarantee"
+    },
+    {
+      "id": "setup-complete", "inventory": "/setup/complete/{team}", "route": "/setup/complete/{team}", "url": "/setup/complete/newsletter",
+      "kind": "standalone", "shell": "none",
+      "regions": [], "note": "standalone static document; nothing changes after render"
+    },
+    { "id": "redirect-root", "route": "/", "kind": "redirect", "sample": "/", "status": 303 },
+    { "id": "redirect-agent", "route": "/{team}/agents/{agent}", "kind": "redirect", "sample": "/newsletter/agents/advisor", "status": 303 },
+    { "id": "redirect-admin-agent", "route": "/admin/teams/{team}/agents/{agent}", "kind": "redirect", "sample": "/admin/teams/newsletter/agents/advisor", "status": 303 },
+    { "id": "retired-decisions", "route": "/{team}/decisions", "kind": "retired", "sample": "/newsletter/decisions", "status": 410 },
+    { "id": "retired-decision", "route": "/{team}/decisions/{slug}", "kind": "retired", "sample": "/newsletter/decisions/x", "status": 410 },
+    { "id": "retired-observations", "route": "/{team}/observations", "kind": "retired", "sample": "/newsletter/observations", "status": 410 },
+    { "id": "retired-observation", "route": "/{team}/observations/{slug}", "kind": "retired", "sample": "/newsletter/observations/x", "status": 410 },
+    { "id": "retired-proposals", "route": "/{team}/proposals", "kind": "retired", "sample": "/newsletter/proposals", "status": 410 },
+    { "id": "retired-proposal", "route": "/{team}/proposals/{slug}", "kind": "retired", "sample": "/newsletter/proposals/x", "status": 410 },
+    { "id": "download-artifact", "route": "/{team}/workflows/{workflow}/artifacts/{artifact}", "kind": "download" },
+    { "id": "download-git-patch", "route": "/{team}/workflows/{workflow}/tickets/{ticket}/artifacts/{artifact_id}/patch", "kind": "download" },
+    { "id": "transport-board", "route": "/{team}/workflows/{workflow}/snapshot", "kind": "transport", "serves": "workflow-board" },
+    { "id": "transport-ticket", "route": "/{team}/workflows/{workflow}/tickets/{ticket}/snapshot", "kind": "transport", "serves": "workflow-ticket" },
+    { "id": "transport-setup-status", "route": "/setup/status", "kind": "transport", "serves": "setup" },
+    { "id": "stream-setup-state", "route": "/setup/session/state", "kind": "stream", "serves": "setup-session" },
+    { "id": "static-manifest", "route": "/manifest.json", "kind": "static" },
+    { "id": "static-service-worker", "route": "/sw.js", "kind": "static" },
+    { "id": "framework-docs", "route": "/docs", "kind": "framework" },
+    { "id": "framework-docs-redirect", "route": "/docs/oauth2-redirect", "kind": "framework" },
+    { "id": "framework-openapi", "route": "/openapi.json", "kind": "framework" },
+    { "id": "framework-redoc", "route": "/redoc", "kind": "framework" }
+  ]
+}

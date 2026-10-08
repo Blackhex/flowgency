@@ -72,6 +72,8 @@ COMPLETION_FIXTURE_SCHEDULER_RESULTS = frozenset(
 COMPLETION_FIXTURE_REVISIONS = frozenset({"current", "stale"})
 COMPLETION_FIXTURE_KEYS = frozenset({"scheduler_result", "limitations_acknowledged", "revision"})
 LIVE_CHANGE_PATH = "/__ui/live/change"
+# A case name is the only accepted field; anything near this size is not a fixture command.
+LIVE_CHANGE_MAX_BODY_BYTES = 256
 LIVE_CHANGE_CASES = frozenset(
     {
         "navigation-membership",
@@ -1400,9 +1402,16 @@ def _install_ui_test_runtime() -> None:
 
     @app.post(LIVE_CHANGE_PATH, include_in_schema=False)
     async def live_change(request: Request) -> Response:
+        chunks: list[bytes] = []
+        size = 0
+        async for chunk in request.stream():
+            size += len(chunk)
+            if size > LIVE_CHANGE_MAX_BODY_BYTES:
+                raise HTTPException(status_code=413, detail="Live change payload is too large")
+            chunks.append(chunk)
         try:
-            payload = await request.json()
-        except json.JSONDecodeError as exc:
+            payload = json.loads(b"".join(chunks))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise HTTPException(status_code=400, detail="Live change payload must be valid JSON") from exc
         try:
             case = _live_change_case(payload)
@@ -2554,6 +2563,8 @@ def _restore_external_sources(runtime: Path) -> None:
         PromptStore(runtime / "prompts").path("newsletter", "advisor", "local-triage"),
         _local_triage_payload(),
     )
+    # The agent-permissions case grants a path it creates; no reset may leave it behind.
+    shutil.rmtree(runtime / "reference-material", ignore_errors=True)
     _restore_library_sources(runtime)
 
 
