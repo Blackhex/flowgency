@@ -47,6 +47,58 @@ def page_regions(html: str) -> dict[str, str]:
     return extractor.regions
 
 
+class _ElementExtractor(HTMLParser):
+    """Outer HTML of the first `tag` whose attrs satisfy `predicate`, by matching-tag depth."""
+
+    def __init__(self, html: str, tag: str, predicate) -> None:
+        super().__init__(convert_charrefs=False)
+        self._html = html
+        self._line_starts = [0] + [match.end() for match in re.finditer("\n", html)]
+        self._tag = tag
+        self._predicate = predicate
+        self._open: tuple[int, int] | None = None  # (depth, start)
+        self.span: tuple[int, int] | None = None
+
+    def _offset(self) -> int:
+        line, column = self.getpos()
+        return self._line_starts[line - 1] + column
+
+    def handle_starttag(self, tag, attrs):
+        if self.span is not None or tag != self._tag:
+            return
+        if self._open is None:
+            if self._predicate(dict(attrs)):
+                self._open = (1, self._offset())
+        else:
+            depth, start = self._open
+            self._open = (depth + 1, start)
+
+    def handle_endtag(self, tag):
+        if self._open is None or tag != self._tag:
+            return
+        depth, start = self._open
+        if depth == 1:
+            self.span = (start, self._offset() + len(f"</{tag}>"))
+            self._open = None
+        else:
+            self._open = (depth - 1, start)
+
+
+def find_element(html: str, tag: str, predicate) -> str | None:
+    """Outer HTML of the first `tag` element whose attributes satisfy `predicate`.
+
+    Identity-based alternative to substring/position slicing: matches by real
+    attributes (e.g. data-live-key) and tracks nested same-tag depth to find the
+    correct closing tag, rather than assuming fixed class ordering or offsets.
+    """
+    extractor = _ElementExtractor(html, tag, predicate)
+    extractor.feed(html)
+    if extractor.span is None:
+        return None
+    start, end = extractor.span
+    return html[start:end]
+
+
 def squash(markup: str) -> str:
     return re.sub(r">\s+<", "><", re.sub(r"\s+", " ", markup)).strip()
 

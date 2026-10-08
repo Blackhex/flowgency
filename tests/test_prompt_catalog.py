@@ -7,6 +7,7 @@ import yaml
 from flowgency.blueprints import BlueprintLibrary
 from flowgency.configuration import ConfigStore
 from flowgency.prompts import PromptStore, validate_prompt_catalogs
+from tests._live_helpers import find_element
 
 
 VALID_PROMPT = "---\nname: diff-review\ndescription: Review the change set.\n---\n\nReview it.\n"
@@ -145,12 +146,10 @@ def test_roster_renders_when_one_agent_has_a_broken_catalog(monkeypatch, tmp_pat
     assert "Terminate the YAML frontmatter before the prompt body." in response.text
     assert "auditor" in response.text
     # Per-agent notice must render outside the hidden saved-prompt panel — order-independent.
-    html = response.text
-    reviewer_label = 'font-mono">reviewer</div>'
-    label_pos = html.index(reviewer_label)
-    card_start = html.rindex('<div class="bg-white rounded-xl', 0, label_pos)
-    next_card = html.find('<div class="bg-white rounded-xl', card_start + 1)
-    reviewer_card = html[card_start:] if next_card == -1 else html[card_start:next_card]
+    reviewer_card = find_element(
+        response.text, "div", lambda attrs: attrs.get("data-live-key") == "agent:reviewer"
+    )
+    assert reviewer_card is not None
     assert "Prompt catalog unavailable" in reviewer_card
     assert reviewer_card.index("Prompt catalog unavailable") < reviewer_card.index("data-saved-panel")
 
@@ -219,10 +218,16 @@ def test_roster_surfaces_library_level_warning_for_malformed_blueprint(monkeypat
 
     # The warning banner (mb-6 div) must carry the message, not just the per-agent row.
     assert response.status_code == 200
-    html = response.text
-    # "border-amber-200 bg-amber-50 p-4" is the page-level banner; per-agent uses p-3.
-    banner_start = html.index("border-amber-200 bg-amber-50 p-4")
-    assert "Prompt markdown frontmatter is incomplete" in html[banner_start : banner_start + 200]
+    # The page-owned banner shares its class list with base.html's hidden passive-refresh
+    # status shell (data-live-status); exclude that one instead of matching any occurrence.
+    banner = find_element(
+        response.text,
+        "div",
+        lambda attrs: "border-amber-200 bg-amber-50 p-4" in (attrs.get("class") or "")
+        and "data-live-status" not in attrs,
+    )
+    assert banner is not None
+    assert "Prompt markdown frontmatter is incomplete" in banner
 
 
 def test_roster_reports_malformed_blueprint_not_referenced_by_any_agent(monkeypatch, tmp_path):
