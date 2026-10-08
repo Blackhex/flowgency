@@ -50,6 +50,12 @@ async function setupStatus(page: Page): Promise<Record<string, any>> {
   return page.evaluate(() => fetch('/setup/status', { cache: 'no-store' }).then((response) => response.json()));
 }
 
+async function expectPoliteStatus(page: Page): Promise<void> {
+  const message = page.locator('#status-message');
+  await expect(message).toHaveAttribute('role', 'status');
+  await expect(message).toHaveAttribute('aria-live', 'polite');
+}
+
 async function waitForStatusPolls(page: Page, count: number): Promise<void> {
   for (let poll = 0; poll < count; poll += 1) {
     await page.waitForResponse((response) => new URL(response.url()).pathname === '/setup/status');
@@ -253,6 +259,7 @@ test('a failing status poll keeps the terminal during pending and during complet
   // reports "Retrying" without losing the terminal or leaving the page.
   await page.route('**/setup/status', (route) => route.fulfill({ status: 200, contentType: 'text/plain', body: 'not json' }));
   await expect(page.locator('#status-message')).toContainText('Retrying');
+  await expectPoliteStatus(page);
   expect(await terminal.evaluate((node) => node.isConnected)).toBe(true);
   await expect(page).toHaveURL(/\/setup\/session$/);
   expect(navigations).toEqual([]);
@@ -260,6 +267,7 @@ test('a failing status poll keeps the terminal during pending and during complet
   // (b) unrouting lets the next poll succeed and the message recover.
   await page.unroute('**/setup/status');
   await expect(page.locator('#status-message')).toContainText('Waiting for setup to report completion.');
+  await expectPoliteStatus(page);
   expect(await terminal.evaluate((node) => node.isConnected)).toBe(true);
 
   // Fail the poll that would carry the redirect: completing now must not
@@ -606,6 +614,7 @@ test('setup waits for its workflow definition before opening the dashboard', asy
   const missing = await request.post('/__ui/setup/ready?definition=missing');
   expect(missing.status()).toBe(204);
   await expect(page.locator('#status-message')).toContainText('cannot use blueprint');
+  await expectPoliteStatus(page);
   await expect(page).toHaveURL(/\/setup\/session$/);
   const incomplete = await (await request.get('/setup/status')).json();
   expect(incomplete.state).toBe('incomplete');

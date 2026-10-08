@@ -2607,6 +2607,43 @@ def test_session_view_keeps_inspection_intent_and_launch_identity(completion_ses
     assert session.token not in waiting.text + inspection.text
 
 
+def _status_message_tags(page: str) -> list[str]:
+    return re.findall(r'<p id="status-message"[^>]*>', page)
+
+
+def test_the_connected_setup_status_message_announces_politely(completion_session, raw_config):
+    session = completion_session
+    assert session.post(session.command(session.write_ready_config(raw_config))).status_code == 200
+
+    tags = _status_message_tags(session.client.get("/setup/session").text)
+
+    assert len(tags) == 1
+    assert 'role="status"' in tags[0] and 'aria-live="polite"' in tags[0]
+
+
+def test_the_non_connected_setup_status_message_announces_politely(tmp_path, monkeypatch):
+    _configure_missing_config(tmp_path, monkeypatch)
+    data_root = tmp_path / "Flowgency"
+    data_root.mkdir()
+    integration = _LaunchIntegration()
+    monkeypatch.setattr(
+        "flowgency.web.routes.admin_teams.launchable_integrations",
+        lambda integrations, root: (integration,),
+    )
+    with _local_client() as client:
+        csrf = _setup_csrf(client)
+        response = client.post(
+            "/setup/launch",
+            data={"data_root": str(data_root.resolve()), "integration": "copilot", "setup_csrf": csrf},
+            headers={"Origin": _LOCAL_BASE_URL},
+        )
+
+    assert "Waiting for setup to complete" in response.text
+    tags = _status_message_tags(response.text)
+    assert len(tags) == 1
+    assert 'role="status"' in tags[0] and 'aria-live="polite"' in tags[0]
+
+
 def test_session_view_loads_the_shared_coordinator_before_its_status_controller(
     completion_session,
 ):

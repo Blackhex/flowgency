@@ -78,7 +78,7 @@
           <p class="text-sm text-amber-900">Interactive setup can use this computer's server-user access to files and tools.</p>
         </div>
 
-        <p id="status-message" class="text-sm text-gray-500" aria-live="polite" data-setup-view="{{ 'inspection' if inspection_view else 'waiting' }}" data-launch-id="{{ completion_launch_id }}">
+        <p id="status-message" class="text-sm text-gray-500" role="status" aria-live="polite" data-setup-view="{{ 'inspection' if inspection_view else 'waiting' }}" data-launch-id="{{ completion_launch_id }}">
           {% if status_message %}
           {{ status_message }}
           {% else %}
@@ -125,7 +125,7 @@
 
         <div class="rounded-xl border border-flowgency-200 bg-flowgency-50 p-4 space-y-2">
           <div class="text-sm font-semibold text-flowgency-900">Waiting for setup to complete…</div>
-          <p id="status-message" class="text-sm text-flowgency-900" data-setup-view="{{ 'inspection' if inspection_view else 'waiting' }}" data-launch-id="{{ completion_launch_id }}">
+          <p id="status-message" class="text-sm text-flowgency-900" role="status" aria-live="polite" data-setup-view="{{ 'inspection' if inspection_view else 'waiting' }}" data-launch-id="{{ completion_launch_id }}">
             {% if status_message %}
             {{ status_message }}
             {% else %}
