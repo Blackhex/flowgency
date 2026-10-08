@@ -54,6 +54,7 @@ interface Model {
   formClass: string;
   detailsOpen: boolean;
   wrapHeld: boolean;
+  statusValue: string;
   logLines: number;
   keys: string[];
 }
@@ -71,6 +72,7 @@ function region(overrides: Partial<Model> = {}): string {
     formClass: 'original',
     detailsOpen: false,
     wrapHeld: false,
+    statusValue: 'remote',
     logLines: 20,
     keys: ALL_KEYS,
     ...overrides,
@@ -98,10 +100,14 @@ function region(overrides: Partial<Model> = {}): string {
       + '<button type="submit" data-testid="resume-button">Resume</button></form>',
     'plain-a': '<form method="post" action="/a" data-live-key="plain:a" data-testid="plain-a"><button type="submit">A</button></form>',
     'plain-b': '<form method="post" action="/b" data-live-key="plain:b" data-testid="plain-b"><button type="submit">B</button></form>',
+    'plain-a-copy': '<form method="post" action="/a" data-live-key="plain:a-copy" data-testid="plain-a-copy"><button type="submit">A2</button></form>',
     'unkeyed-a': '<form method="post" action="/a" data-testid="unkeyed-a"><button type="submit">A</button></form>',
     'unkeyed-b': '<form method="post" action="/b" data-testid="unkeyed-b"><button type="submit">B</button></form>',
     'wrap-div': wrappedForm('div', 'wrap-old'),
     'wrap-section': wrappedForm('section', 'wrap-new'),
+    'status-old': '<section data-testid="status-old">Old read-only status</section>',
+    'status-new': '<section data-testid="status-new"><form method="post" action="/w" data-testid="wrapped-form-new">'
+      + `<input id="wrapped-field" name="field" type="text" value="${m.statusValue}"></form></section>`,
   };
   return m.keys.map((key) => parts[key]).join('\n');
 }
@@ -987,6 +993,72 @@ test.describe('replacement of an item whose removal ownership blocks', () => {
     expect(await count(page, '#wrapped-field')).toBe(1);
     expect(await count(page, '#page-region form')).toBe(1);
     expect(await original!.evaluate((node: HTMLInputElement) => node.isConnected && node.value)).toBe('typed draft');
+  });
+
+  const formsAndIds = (page: Page) => page.evaluate(() => ({
+    forms: document.querySelectorAll('#page-region form').length,
+    ids: document.querySelectorAll('#wrapped-field').length,
+  }));
+
+  for (const [order, current] of [
+    ['an earlier sibling than the wrapper', ['status-old', 'wrap-div']],
+    ['a later sibling than the wrapper', ['wrap-div', 'status-old']],
+  ] as const) {
+    for (const dirty of [false, true]) {
+      test(`a replacement offered inside ${order} is deferred while the ${dirty ? 'dirty' : 'clean'} original form stays`, async ({ page }) => {
+        const server = await openLive(page);
+        await showActions(page, server, ...current);
+        if (dirty) {
+          await page.locator('#wrapped-field').fill('typed draft');
+          await page.evaluate(() => (document.activeElement as HTMLElement).blur());
+        }
+        const original = await page.locator('#wrapped-field').elementHandle();
+        const originalForm = await testId(page, 'wrapped-form').elementHandle();
+
+        server.current = snapshot({ other: 'Sibling changed', keys: ['other', 'status-new'] });
+        expect(await handleRefresh(page)).toBe('deferred');
+
+        await expect(testId(page, 'other')).toHaveText('Sibling changed');
+        expect(await formsAndIds(page)).toEqual({ forms: 1, ids: 1 });
+        expect(await count(page, '[data-testid="wrapped-form-new"]')).toBe(0);
+        expect(await original!.evaluate((node: HTMLInputElement) => node.isConnected && node.value)).toBe(dirty ? 'typed draft' : '');
+        expect(await connected(originalForm!)).toBe(true);
+        expect(await etagRetained(page)).toBe(etagOf(server.current));
+
+        for (let flush = 0; flush < 2; flush += 1) {
+          expect(await handleFlush(page)).toEqual({ accepted: true, deferred: true });
+          expect(await formsAndIds(page)).toEqual({ forms: 1, ids: 1 });
+          expect(await original!.evaluate((node: HTMLInputElement) => node.isConnected && node.value)).toBe(dirty ? 'typed draft' : '');
+        }
+
+        server.current = snapshot({ other: 'Newest', statusValue: 'newer', keys: ['other', 'status-new'] });
+        expect(await handleRefresh(page)).toBe('deferred');
+        await expect(testId(page, 'other')).toHaveText('Newest');
+        expect(await formsAndIds(page)).toEqual({ forms: 1, ids: 1 });
+        expect(await etagRetained(page)).toBe(etagOf(server.current));
+
+        await page.evaluate(() => document.querySelector('[data-testid="wrap-old"]')!.remove());
+        expect(await handleFlush(page)).toEqual({ accepted: true, deferred: false });
+        expect(await formsAndIds(page)).toEqual({ forms: 1, ids: 1 });
+        await expect(page.locator('#wrapped-field')).toHaveValue('newer');
+        expect(await count(page, '[data-testid="wrapped-form-new"]')).toBe(1);
+        expect(await handleFlush(page)).toEqual({ accepted: true, deferred: false });
+      });
+    }
+  }
+
+  test('a new keyed form sharing an action with a staying form is inserted in the same pass', async ({ page }) => {
+    const server = await openLive(page);
+    await showActions(page, server, 'plain-a');
+    const original = await testId(page, 'plain-a').elementHandle();
+
+    server.current = snapshot({ keys: ['other', 'plain-a', 'plain-a-copy'] });
+    expect(await handleRefresh(page)).toBe('applied');
+
+    await expect(testId(page, 'plain-a-copy')).toHaveCount(1);
+    expect(await connected(original!)).toBe(true);
+    expect(await count(page, '#page-region form')).toBe(2);
+    expect((await page.evaluate(() => window.__applied)).at(-1)).toEqual({ accepted: true, deferred: false });
   });
 });
 

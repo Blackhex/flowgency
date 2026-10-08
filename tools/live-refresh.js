@@ -555,6 +555,10 @@ class LiveRegionView {
 
   #retainedNodes = new Set();
 
+  #heldTokens = null;
+
+  #deferredAdds = false;
+
   #onDrop;
 
   #onRelease = () => {
@@ -657,15 +661,25 @@ class LiveRegionView {
   }
 
   // A replacement for an item whose removal ownership blocks would duplicate its forms and
-  // field ids, so it waits with the rest of the target until the old item can go.
+  // field ids, so it waits with the rest of the target until the old item can go. Removals
+  // are only known once the pass has met them, so a first pass defers every addition that
+  // shares an identity with held content and a second pass decides with the complete set.
   // morphdom inserts the node it gets back, so an accepted node is returned, not true.
   allowAdd(node) {
-    if (node.nodeType !== Node.ELEMENT_NODE || this.#retainedNodes.size === 0 || !hasProtectedContent(node)) return node;
+    if (node.nodeType !== Node.ELEMENT_NODE || !hasProtectedContent(node)) return node;
     const tokens = identityTokens(node);
     for (const kept of this.#retainedNodes) {
       for (const token of identityTokens(kept)) {
         if (tokens.has(token)) {
           this.#retained = true;
+          return false;
+        }
+      }
+    }
+    if (this.#heldTokens) {
+      for (const token of tokens) {
+        if (this.#heldTokens.has(token)) {
+          this.#deferredAdds = true;
           return false;
         }
       }
@@ -800,6 +814,14 @@ class LiveRegionView {
     return Array.from(region.childNodes).some((node) => node.nodeType === Node.TEXT_NODE && this.#selectionTouches(node));
   }
 
+  #heldIdentityTokens(region, chain) {
+    const tokens = new Set();
+    for (const node of [...region.querySelectorAll(PROTECTED_SELECTOR), ...chain]) {
+      for (const token of identityTokens(node)) tokens.add(token);
+    }
+    return tokens;
+  }
+
   #applyRegion(region, fragment) {
     if (this.#rootBlocked(region)) return true;
     const next = region.cloneNode(false);
@@ -813,12 +835,24 @@ class LiveRegionView {
     this.#chain = chain;
     this.#retained = false;
     this.#retainedNodes = new Set();
+    this.#heldTokens = this.#heldIdentityTokens(region, chain);
+    this.#deferredAdds = false;
+    const reconcile = (target) => (chain.size === 0 && !this.#rootTextSelected(region)
+      ? (this.#morph(region, target, true), false)
+      : this.#reconcileChildren(region, target));
     try {
-      if (chain.size === 0 && !this.#rootTextSelected(region)) this.#morph(region, next, true);
-      else deferred = this.#reconcileChildren(region, next);
+      deferred = reconcile(next);
+      if (this.#deferredAdds) {
+        this.#heldTokens = null;
+        const retry = region.cloneNode(false);
+        retry.append(fragment.cloneNode(true));
+        deferred = reconcile(retry);
+      }
     } finally {
       this.#chain = null;
       this.#retainedNodes = new Set();
+      this.#heldTokens = null;
+      this.#deferredAdds = false;
     }
     if (this.#retained) deferred = true;
     this.#retained = false;
@@ -871,10 +905,17 @@ class LiveRegionView {
     }
 
     const counterparts = identities(nextNodes);
-    for (const [identity, node] of identities(currentNodes)) {
+    const currentIdentities = identities(currentNodes);
+    for (const [identity, node] of currentIdentities) {
+      if (counterparts.has(identity)) continue;
+      if (this.#chain.has(node) || hasProtectedContent(node)) {
+        this.#retainedNodes.add(node);
+        markRemoved(node);
+      }
+    }
+    for (const [identity, node] of currentIdentities) {
       const counterpart = counterparts.get(identity);
       if (counterpart) this.#reconcileElement(node, counterpart);
-      else if (this.#chain.has(node) || hasProtectedContent(node)) markRemoved(node);
     }
     return true;
   }
