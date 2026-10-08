@@ -1523,6 +1523,35 @@ def test_live_inbox_setup_session_region_is_owner_only(monkeypatch, tmp_path, ra
         assert "Setup session needs attention" in failed["setup-session"]
 
 
+def test_live_inbox_setup_banner_carries_a_tokenless_stop_destination(monkeypatch, tmp_path, raw_config):
+    _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+    with TestClient(app_mod.app, base_url="http://127.0.0.1:8500", client=("127.0.0.1", 50001)) as client:
+        scope = {
+            "type": "http", "scheme": "http", "path": "/setup",
+            "client": ("127.0.0.1", 50001), "server": ("127.0.0.1", 8500),
+            "headers": [(b"host", b"127.0.0.1:8500")],
+        }
+        owner, csrf, _ = app_mod.app.state.setup_access.ensure_browser(Request(scope))
+        current = SetupSessionSnapshot("running", "copilot", tmp_path, b"", False, "fallback", None, "")
+
+        class OwnedSession:
+            def snapshot(self, claimant):
+                return current if claimant == owner else None
+
+            async def shutdown(self):
+                return None
+
+        monkeypatch.setattr(app_mod.app.state, "setup_sessions", OwnedSession())
+        ownerless = client.get("/newsletter/").text
+        client.cookies.set("flowgency_setup", owner)
+        _, owned = _live_inbox(client)
+
+        assert 'id="setup-stop-form"' not in ownerless and "setup_csrf" not in ownerless
+        assert 'data-setup-stop="/setup/session?view=inspection"' in owned["setup-session"]
+        assert csrf not in owned["setup-session"] and owner not in owned["setup-session"]
+        assert "data-setup-stop" in client.get("/newsletter/").text
+
+
 def test_live_inbox_live_request_for_an_unknown_team_is_not_found(monkeypatch, tmp_path, raw_config):
     client, _, _ = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
 

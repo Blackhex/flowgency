@@ -1902,6 +1902,37 @@ test.describe('cross-page behaviour', () => {
     expect(await (await request.get('/newsletter/')).text()).not.toContain(token);
   });
 
+  test('a setup banner that appears after the Inbox loaded can still stop the session without a token', async ({ page, context, request }) => {
+    await resetFixture(request, 'connected-setup');
+    const meta = await (await request.get('/__ui/setup/meta')).json();
+    await page.goto('/setup', { waitUntil: 'domcontentloaded' });
+    await page.getByLabel('Flowgency data root', { exact: true }).fill(meta.data_root as string);
+    await page.getByRole('button', { name: 'Continue in GitHub Copilot' }).click();
+    await expect(page).toHaveURL(/\/setup\/session$/);
+    expect((await request.post('/__ui/setup/ready')).status()).toBe(204);
+
+    // This tab loads the Inbox without the owner credential; another tab then holds it.
+    const owner = (await context.cookies()).filter((cookie) => cookie.name === 'flowgency_setup');
+    await context.clearCookies();
+    const inbox = await context.newPage();
+    await inbox.goto('/newsletter/');
+    await expect(inbox.locator('[data-setup-session]')).toHaveCount(0);
+    await expect(inbox.locator('#setup-stop-form')).toHaveCount(0);
+
+    await context.addCookies(owner);
+    await expect.poll(() => handleKeys(inbox)).toEqual(['page']);
+    await refreshHandle(inbox);
+    const banner = inbox.locator('[data-setup-session]');
+    await expect(banner).toContainText('Setup session running');
+    await expect(inbox.locator('#setup-stop-form')).toHaveCount(0);
+
+    const snapshot = await inbox.evaluate(() => fetch('/newsletter/?__live=1', { cache: 'no-store' }).then((reply) => reply.text()));
+    for (const secret of [owner[0].value, 'setup_csrf']) expect(snapshot).not.toContain(secret);
+
+    await banner.getByRole('button', { name: 'Stop setup session' }).click();
+    await expect(inbox).toHaveURL(/\/setup\/session\?view=inspection$/);
+  });
+
   test('live reports release their observers and a navigation leaves no request behind', async ({ page, request }) => {
     await page.addInitScript(() => {
       const holder = window as unknown as { __observers: Set<object> };

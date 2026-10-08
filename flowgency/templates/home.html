@@ -10,7 +10,7 @@
 <div class="mb-3 flex flex-wrap items-center gap-3 border-l-4 border-emerald-600 dark:border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30 px-3 py-2 text-sm text-gray-900 dark:text-gray-100" data-live-key="setup-session:banner" data-setup-session>
   <span class="font-semibold">{{ "Setup session running" if setup_session.state == "running" else "Setup session needs attention" }}</span>
   <a href="{{ setup_session.href }}" class="underline">View terminal</a>
-  <button type="submit" form="setup-stop-form" title="Stop setup session" aria-label="Stop setup session" class="ml-auto rounded bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 px-2 py-1 text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700">Stop</button>
+  <button type="submit" form="setup-stop-form" data-setup-stop="{{ setup_session.href }}" title="Stop setup session" aria-label="Stop setup session" class="ml-auto rounded bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 px-2 py-1 text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700">Stop</button>
 </div>
 {% endif %}
 {%- endmacro %}
@@ -247,6 +247,16 @@
   <input type="hidden" name="setup_csrf" value="{{ setup_stop_csrf }}">
 </form>
 {% endif %}
+<script>
+// A banner that arrives after the page loaded has no stop form (its token is never in a snapshot);
+// Stop then opens the session page, which holds the owner's own form.
+document.addEventListener('click', function (event) {
+  var button = event.target.closest && event.target.closest('[data-setup-stop]');
+  if (!button || document.getElementById('setup-stop-form')) return;
+  event.preventDefault();
+  window.location.assign(button.getAttribute('data-setup-stop'));
+});
+</script>
 <div data-live-region="setup-session">{{ live_setup_session() }}</div>
 {# ════════════════════════════════════════════════════════════
    ZONE 1: FLEET STATUS BAR
