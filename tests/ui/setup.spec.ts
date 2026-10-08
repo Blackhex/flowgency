@@ -961,3 +961,107 @@ test('the inspection view stays put after completion while the plain session vie
   await expect(page).toHaveURL(/\/newsletter\/$/);
   await assertNoConsoleErrors(page);
 });
+
+const SETUP_STATUS_HANDLE = 'setup-status';
+const SETUP_STATUS_INTERVAL_MS = 1500;
+
+type LiveWindow = { FlowgencyLive?: { handles: Map<string, { status: string | null }> } };
+
+async function setVisibility(page: Page, state: 'hidden' | 'visible'): Promise<void> {
+  await page.evaluate((value) => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => value });
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => value === 'hidden' });
+    document.dispatchEvent(new Event('visibilitychange'));
+  }, state);
+}
+
+function trackStatusRequests(page: Page): string[] {
+  const requests: string[] = [];
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname === '/setup/status') requests.push(request.url());
+  });
+  return requests;
+}
+
+async function setupWrites(request: APIRequestContext): Promise<string[]> {
+  return (await (await request.get('/__ui/setup/session/writes')).json()).writes as string[];
+}
+
+test('setup status reads run on one shared lifecycle loop at the existing cadence', async ({ page, request }) => {
+  const statusRequests = trackStatusRequests(page);
+  await launchConnectedTerminal(page, request);
+
+  await expect.poll(() => page.evaluate(
+    (key) => (window as unknown as LiveWindow).FlowgencyLive?.handles.has(key) ?? false,
+    SETUP_STATUS_HANDLE,
+  )).toBe(true);
+  expect(await page.evaluate(() => (window as unknown as LiveWindow).FlowgencyLive?.handles.size)).toBe(1);
+
+  await waitForStatusPolls(page, 1);
+  const before = statusRequests.length;
+  await page.waitForTimeout(SETUP_STATUS_INTERVAL_MS * 3 + 300);
+  const reads = statusRequests.length - before;
+  // A second loop would double the cadence to six or more reads in this window.
+  expect(reads).toBeGreaterThanOrEqual(2);
+  expect(reads).toBeLessThanOrEqual(4);
+  await assertNoConsoleErrors(page);
+});
+
+test('hiding and showing the setup page pauses and catches up status reads without touching the terminal stream', async ({ page, request }) => {
+  const sockets = trackSetupSockets(page);
+  const stops = trackStopRequests(page);
+  const statusRequests = trackStatusRequests(page);
+  await launchConnectedTerminal(page, request);
+  const terminal = await trackTerminalContinuity(page);
+  await waitForStatusPolls(page, 1);
+  expect(sockets).toHaveLength(1);
+  const writesBefore = await setupWrites(request);
+  const navigations = trackMainFrameNavigations(page);
+
+  await setVisibility(page, 'hidden');
+  await page.waitForTimeout(300);
+  const pausedAt = statusRequests.length;
+  await page.waitForTimeout(SETUP_STATUS_INTERVAL_MS * 2 + 300);
+  expect(statusRequests.length).toBe(pausedAt);
+
+  // The configuration becomes ready while hidden: no read may run until the page is visible.
+  await markSetupReady(request);
+  await page.waitForTimeout(SETUP_STATUS_INTERVAL_MS + 300);
+  expect(statusRequests.length).toBe(pausedAt);
+
+  await setVisibility(page, 'visible');
+  await expect.poll(() => statusRequests.length, { timeout: SETUP_STATUS_INTERVAL_MS - 500 }).toBeGreaterThan(pausedAt);
+  await expect(page.locator('#status-message')).toContainText('Waiting for setup to report completion.');
+
+  await setVisibility(page, 'hidden');
+  await setVisibility(page, 'visible');
+  await page.waitForTimeout(300);
+
+  expect(sockets).toHaveLength(1);
+  expect(stops).toEqual([]);
+  expect(navigations).toEqual([]);
+  expect(await terminal.evaluate((node) => node.isConnected)).toBe(true);
+  expect(await page.locator('#setup-terminal .xterm').elementHandle().then((node) => node?.evaluate((n) => n.isConnected))).toBe(true);
+  await expect(page).toHaveURL(/\/setup\/session$/);
+  expect(await setupWrites(request)).toEqual(writesBefore);
+  await assertNoConsoleErrors(page);
+});
+
+test('the terminal stream survives the ready transition and the completion redirect with one status loop', async ({ page, request }) => {
+  const sockets = trackSetupSockets(page);
+  const stops = trackStopRequests(page);
+  await launchConnectedTerminal(page, request);
+  const terminal = await trackTerminalContinuity(page);
+  await markSetupReady(request);
+  await waitForStatusPolls(page, 1);
+  await expect(page).toHaveURL(/\/setup\/session$/);
+  expect(await terminal.evaluate((node) => node.isConnected)).toBe(true);
+  expect(sockets).toHaveLength(1);
+
+  expect((await completeSetup(request)).status()).toBe(200);
+  await expect(page).toHaveURL(/\/newsletter\/$/);
+  expect(await recordedContinuity(page)).toEqual({ connected: true, same: true });
+  expect(sockets).toHaveLength(1);
+  expect(stops).toEqual([]);
+  await assertNoConsoleErrors(page);
+});

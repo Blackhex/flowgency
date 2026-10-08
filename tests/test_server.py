@@ -570,7 +570,10 @@ def test_setup_launch_does_not_write_config(tmp_path, monkeypatch):
     assert response.status_code == 200
     assert not config_path.exists()
     assert "Waiting for setup to complete" in response.text
-    assert "setTimeout(" in response.text
+    assert response.text.count('<script src="/static/live-refresh.js"></script>') == 1
+    assert response.text.index("/static/live-refresh.js") < response.text.index("FlowgencyLive.register(")
+    assert 'key: "setup-status"' in response.text
+    assert "setTimeout(" not in response.text
     assert "setInterval(" not in response.text
     assert integration.requests[0].data_root == data_root.resolve()
     assert not hasattr(integration.requests[0], "project_dir")
@@ -2602,6 +2605,30 @@ def test_session_view_keeps_inspection_intent_and_launch_identity(completion_ses
     assert 'data-setup-view="inspection"' in inspection.text
     assert f'data-launch-id="{session.launch_id}"' in inspection.text
     assert session.token not in waiting.text + inspection.text
+
+
+def test_session_view_loads_the_shared_coordinator_before_its_status_controller(
+    completion_session,
+):
+    session = completion_session
+
+    page = session.client.get("/setup/session").text
+
+    assert page.count('<script src="/static/live-refresh.js"></script>') == 1
+    assert page.index("/static/live-refresh.js") < page.index("FlowgencyLive.register(")
+    assert page.index("FlowgencyLive.register(") < page.index("/static/setup-terminal.js")
+    assert "setTimeout(" not in page
+    assert "setInterval(" not in page
+
+
+def test_setup_form_and_completion_pages_register_no_status_loop(tmp_path, monkeypatch):
+    _configure_missing_config(tmp_path, monkeypatch)
+    with _local_client() as client:
+        form = client.get("/setup").text
+
+    assert "live-refresh.js" not in form
+    assert "FlowgencyLive" not in form
+    assert "/setup/status" not in form
 
 
 def test_launch_form_does_not_bounce_to_dashboard_while_attempt_is_pending(

@@ -235,7 +235,6 @@
       const copyButton = document.getElementById("copy-fallback");
       const copyFeedback = document.getElementById("copy-feedback");
       const fallbackCommand = document.getElementById("fallback-command");
-      const statusMessage = document.getElementById("status-message");
 
       if (integrationSelect && integrationName) {
         const syncIntegrationName = () => {
@@ -340,55 +339,62 @@
           }
         });
       }
-
-      if (statusMessage) {
-        const inspectionView = statusMessage.dataset.setupView === "inspection";
-        const launchId = statusMessage.dataset.launchId || "";
-        const defaultMessages = {
-          waiting: "We’ll keep checking for a complete configuration.",
-          invalid: "Setup wrote an invalid configuration. Fix the setup session, then wait for the next refresh.",
-          incomplete: "Setup is not finished yet. Complete the configuration in the launched session.",
-        };
-        let pollTimer = null;
-        let readInFlight = false;
-
-        const pollStatus = async () => {
-          if (readInFlight) {
-            return;
-          }
-          readInFlight = true;
-          let shouldScheduleNextPoll = true;
-          try {
-            const response = await fetch("/setup/status", { cache: "no-store" });
-            const payload = await response.json();
-            const completion = payload.completion || null;
-            if ((completion ? completion.launch_id || "" : "") !== launchId) {
-              statusMessage.textContent = "A different setup launch is active. Reload this page to follow it.";
-              return;
-            }
-            if (payload.state === "ready" && payload.redirect && !inspectionView) {
-              shouldScheduleNextPoll = false;
-              window.location.assign(payload.redirect);
-              return;
-            }
-            statusMessage.textContent = payload.message
-              || (completion && completion.message)
-              || defaultMessages[payload.state]
-              || "";
-          } catch (error) {
-            statusMessage.textContent = "Status check failed. Retrying.";
-          } finally {
-            readInFlight = false;
-            if (shouldScheduleNextPoll) {
-              pollTimer = window.setTimeout(pollStatus, 1500);
-            }
-          }
-        };
-
-        pollTimer = window.setTimeout(pollStatus, 1500);
-      }
     })();
   </script>
+  {% if waiting %}
+  <script src="/static/live-refresh.js"></script>
+  <script>
+    (() => {
+      const statusMessage = document.getElementById("status-message");
+      if (!statusMessage) {
+        return;
+      }
+      const inspectionView = statusMessage.dataset.setupView === "inspection";
+      const launchId = statusMessage.dataset.launchId || "";
+      const defaultMessages = {
+        waiting: "We’ll keep checking for a complete configuration.",
+        invalid: "Setup wrote an invalid configuration. Fix the setup session, then wait for the next refresh.",
+        incomplete: "Setup is not finished yet. Complete the configuration in the launched session.",
+      };
+      const accepted = { accepted: true, deferred: false };
+      let handle = null;
+
+      // The status payload is a completion decision, not a region snapshot: the terminal,
+      // its socket and its process are never touched by a status read.
+      const applyStatus = (payload) => {
+        const completion = payload.completion || null;
+        if ((completion ? completion.launch_id || "" : "") !== launchId) {
+          statusMessage.textContent = "A different setup launch is active. Reload this page to follow it.";
+          return accepted;
+        }
+        if (payload.state === "ready" && payload.redirect && !inspectionView) {
+          handle.dispose();
+          window.location.assign(payload.redirect);
+          return accepted;
+        }
+        statusMessage.textContent = payload.message
+          || (completion && completion.message)
+          || defaultMessages[payload.state]
+          || "";
+        return accepted;
+      };
+
+      handle = window.FlowgencyLive.register({
+        key: "setup-status",
+        interval: 1500,
+        binding: () => ({ page: "setup-status" }),
+        url: () => "/setup/status",
+        validate: (payload) => payload !== null && typeof payload === "object" && !Array.isArray(payload),
+        apply: applyStatus,
+        status: (kind) => {
+          if (kind !== "healthy") {
+            statusMessage.textContent = "Status check failed. Retrying.";
+          }
+        },
+      });
+    })();
+  </script>
+  {% endif %}
   {% if connected %}
   <script src="/static/setup-terminal.js"></script>
   {% endif %}
