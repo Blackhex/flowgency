@@ -100,8 +100,40 @@ function region(overrides: Partial<Model> = {}): string {
     'plain-b': '<form method="post" action="/b" data-live-key="plain:b" data-testid="plain-b"><button type="submit">B</button></form>',
     'unkeyed-a': '<form method="post" action="/a" data-testid="unkeyed-a"><button type="submit">A</button></form>',
     'unkeyed-b': '<form method="post" action="/b" data-testid="unkeyed-b"><button type="submit">B</button></form>',
+    'wrap-div': wrappedForm('div', 'wrap-old'),
+    'wrap-section': wrappedForm('section', 'wrap-new'),
   };
   return m.keys.map((key) => parts[key]).join('\n');
+}
+
+function wrappedForm(tag: string, testId: string): string {
+  return `<${tag} data-testid="${testId}"><form method="post" action="/w" data-testid="wrapped-form">`
+    + `<input id="wrapped-field" name="field" type="text" value=""></form></${tag}>`;
+}
+
+interface RootModel {
+  options: string[];
+  text: string;
+  sibling: string;
+}
+
+function rootRegions(overrides: Partial<RootModel> = {}): { key: string; html: string }[] {
+  const m: RootModel = { options: ['Alpha', 'Beta'], text: 'Root direct text', sibling: 'Sibling', ...overrides };
+  return [
+    {
+      key: 'switcher',
+      html: m.options.map((label, index) => `<option value="${'abcd'[index]}">${label}</option>`).join(''),
+    },
+    { key: 'root-text', html: `${m.text}<span data-testid="root-sibling">${m.sibling}</span>` },
+  ];
+}
+
+function rootSnapshot(
+  overrides: Partial<Model> = {},
+  roots: Partial<RootModel> = {},
+): LiveSnapshotShape {
+  const base = snapshot(overrides);
+  return { ...base, regions: [...base.regions, ...rootRegions(roots)] };
 }
 
 function snapshot(overrides: Partial<Model> = {}, extra: Partial<LiveSnapshotShape> = {}): LiveSnapshotShape {
@@ -161,11 +193,18 @@ class LiveServer {
   }
 }
 
-function documentHtml(): string {
+// A region root that is itself a control or holds direct text, like the real team switcher.
+function rootsHtml(): string {
+  const [switcher, text] = rootRegions();
+  return `<select id="root-select" data-live-region="${switcher.key}" aria-label="Root select">${switcher.html}</select>`
+    + `<p id="root-text" data-live-region="${text.key}">${text.html}</p>`;
+}
+
+function documentHtml(roots = false): string {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Live refresh contract</title></head>
 <body>
-<main id="app"><div data-live-region="page" id="page-region">${region()}</div></main>
+<main id="app"><div data-live-region="page" id="page-region">${region()}</div>${roots ? rootsHtml() : ''}</main>
 <script type="application/json" id="initial">${JSON.stringify({
     binding: BINDING,
     structure: 'test:1',
@@ -246,12 +285,13 @@ window.__mount = (interval = 2000, timeout = 15000) => {
 </body></html>`;
 }
 
-async function openLive(page: Page, options: { interval?: number; timeout?: number } = {}) {
+async function openLive(page: Page, options: { interval?: number; timeout?: number; roots?: boolean } = {}) {
   const server = new LiveServer();
+  if (options.roots) server.current = rootSnapshot();
   await page.route(`**${DOCUMENT_PATH}`, (route) => route.fulfill({
     status: 200,
     contentType: 'text/html; charset=utf-8',
-    body: documentHtml(),
+    body: documentHtml(options.roots),
   }));
   await page.route(`**${SNAPSHOT_PATH}*`, (route) => server.handle(route));
   page.on('requestfailed', (request) => {
@@ -628,6 +668,8 @@ for (const owned of OWNED_REMOVAL_CASES) {
     expect(await host!.evaluate((node) => node.isConnected)).toBe(true);
     expect(await kept!.evaluate((node) => node.isConnected)).toBe(true);
     expect(await page.evaluate(() => window.FlowgencyLive.handles.get('test')!.etag)).toBe(etagOf(server.current));
+    await expect(page.locator(hostSelector)).toHaveAttribute('data-live-removed', '');
+    await expect(page.locator(`${hostSelector} > [data-live-removed-notice][role="status"]`)).toContainText('no longer available');
 
     // The controller disposes the owned content; only then may the item go.
     await kept!.evaluate((node) => node.remove());
@@ -635,6 +677,63 @@ for (const owned of OWNED_REMOVAL_CASES) {
     expect(await host!.evaluate((node) => node.isConnected)).toBe(false);
   });
 }
+
+test.describe('retained removed items are reported', () => {
+  const WITHOUT_OWNED = ALL_KEYS.filter((key) => key !== 'owned' && key !== 'tail');
+  const host = (page: Page) => page.locator('[data-live-key="owned-host"]');
+  const notice = (page: Page) => page.locator('[data-live-key="owned-host"] [data-live-removed-notice]');
+
+  test('a clean removed item keeps its notice once, and it clears when the item is listed again', async ({ page }) => {
+    const server = await openLive(page);
+    const original = await host(page).elementHandle();
+    server.current = snapshot({ keys: WITHOUT_OWNED });
+    expect(await handleRefresh(page)).toBe('deferred');
+    server.current = snapshot({ other: 'Again', keys: WITHOUT_OWNED });
+    expect(await handleRefresh(page)).toBe('deferred');
+
+    await expect(notice(page)).toHaveCount(1);
+    await expect(notice(page)).toHaveAttribute('role', 'status');
+
+    server.current = snapshot({ other: 'Back' });
+    expect(await handleRefresh(page)).toBe('applied');
+    expect(await connected(original!)).toBe(true);
+    await expect(host(page)).not.toHaveAttribute('data-live-removed', /.*/);
+    await expect(notice(page)).toHaveCount(0);
+    await expect(page.locator('[data-live-key="tail"]')).toHaveCount(1);
+  });
+
+  test('a removed item with a dirty form keeps the draft and reports the removal', async ({ page }) => {
+    const server = await openLive(page);
+    await page.locator('#owned-name').fill('typed draft');
+    await page.evaluate(() => (document.activeElement as HTMLElement).blur());
+    server.current = snapshot({ other: 'Remote change', keys: WITHOUT_OWNED });
+
+    expect(await handleRefresh(page)).toBe('deferred');
+
+    await expect(page.locator('#owned-name')).toHaveValue('typed draft');
+    await expect(page.getByTestId('other')).toHaveText('Remote change');
+    await expect(host(page)).toHaveAttribute('data-live-removed', '');
+    await expect(notice(page)).toContainText('no longer available');
+
+    server.current = snapshot({ other: 'Back' });
+    expect(await handleRefresh(page)).toBe('applied');
+    await expect(notice(page)).toHaveCount(0);
+    await expect(page.locator('#owned-name')).toHaveValue('typed draft');
+  });
+
+  test('an item removed only for the focus hold is reported until it goes', async ({ page }) => {
+    const server = await openLive(page);
+    await select(page).focus();
+    server.current = snapshot({ keys: ['other', 'tail', 'dialog', 'owned'] });
+
+    expect(await handleRefresh(page)).toBe('deferred');
+    await expect(heldItem(page)).toHaveAttribute('data-live-removed', '');
+
+    await page.evaluate(() => (document.activeElement as HTMLElement).blur());
+    expect(await handleFlush(page)).toEqual({ accepted: true, deferred: false });
+    await expect(heldItem(page)).toHaveCount(0);
+  });
+});
 
 test('a navigation drops the pending target of the previous binding', async ({ page }) => {
   const server = await openLive(page);
@@ -749,6 +848,146 @@ test('selected page text is not rewritten under the user until the selection end
   await page.evaluate(() => window.getSelection()!.removeAllRanges());
   expect(await handleFlush(page)).toEqual({ accepted: true, deferred: false });
   await expect(page.getByTestId('other')).toHaveText('Remote text');
+});
+
+test.describe('region roots', () => {
+  const rootSelect = (page: Page) => page.locator('#root-select');
+  const optionLabels = (page: Page) => rootSelect(page).evaluate(
+    (element: HTMLSelectElement) => Array.from(element.options).map((option) => option.textContent),
+  );
+  const RENAMED = ['Alpha renamed', 'Beta renamed', 'Gamma'];
+
+  test('a focused root select keeps its node, value and options while a sibling region updates', async ({ page }) => {
+    const server = await openLive(page, { roots: true });
+    await rootSelect(page).focus();
+    await rootSelect(page).selectOption('b');
+    const original = await rootSelect(page).elementHandle();
+
+    server.current = rootSnapshot({ other: 'Sibling updated' }, { options: RENAMED });
+    expect(await handleRefresh(page)).toBe('deferred');
+
+    await expect(page.getByTestId('other')).toHaveText('Sibling updated');
+    expect(await optionLabels(page)).toEqual(['Alpha', 'Beta']);
+    expect(await rootSelect(page).inputValue()).toBe('b');
+    expect(await original!.evaluate((node) => node.isConnected && node === document.activeElement)).toBe(true);
+
+    await rootSelect(page).selectOption('a');
+    await page.evaluate(() => (document.activeElement as HTMLElement).blur());
+    expect(await handleFlush(page)).toEqual({ accepted: true, deferred: false });
+    expect(await optionLabels(page)).toEqual(RENAMED);
+    expect(await original!.evaluate((node) => node.isConnected)).toBe(true);
+  });
+
+  test('a focused root select that was not changed still keeps its options until released', async ({ page }) => {
+    const server = await openLive(page, { roots: true });
+    await rootSelect(page).focus();
+    server.current = rootSnapshot({}, { options: RENAMED });
+
+    expect(await handleRefresh(page)).toBe('deferred');
+    expect(await optionLabels(page)).toEqual(['Alpha', 'Beta']);
+
+    await page.evaluate(() => (document.activeElement as HTMLElement).blur());
+    expect(await handleFlush(page)).toEqual({ accepted: true, deferred: false });
+    expect(await optionLabels(page)).toEqual(RENAMED);
+  });
+
+  test('an idle root select is updated in place', async ({ page }) => {
+    const server = await openLive(page, { roots: true });
+    server.current = rootSnapshot({}, { options: RENAMED });
+
+    expect(await handleRefresh(page)).toBe('applied');
+    expect(await optionLabels(page)).toEqual(RENAMED);
+  });
+
+  test('releasing a root select applies the deferred target without another network read', async ({ page }) => {
+    const server = await openLive(page, { roots: true });
+    await rootSelect(page).focus();
+    server.current = rootSnapshot({}, { options: RENAMED });
+    expect(await handleRefresh(page)).toBe('deferred');
+    const requests = server.requests.length;
+
+    await page.evaluate(() => (document.activeElement as HTMLElement).blur());
+    await page.clock.runFor(10);
+
+    await expect.poll(() => optionLabels(page)).toEqual(RENAMED);
+    expect(server.requests.length).toBe(requests);
+  });
+
+  test('selected direct text of a root is kept while its sibling elements update, then applied on release', async ({ page }) => {
+    const server = await openLive(page, { roots: true });
+    await page.locator('#root-text').evaluate((element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element.firstChild!);
+      const selection = window.getSelection()!;
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
+    server.current = rootSnapshot({}, { text: 'Changed direct text', sibling: 'Sibling changed' });
+
+    expect(await handleRefresh(page)).toBe('deferred');
+
+    await expect(page.getByTestId('root-sibling')).toHaveText('Sibling changed');
+    expect(await page.locator('#root-text').evaluate((element) => element.firstChild!.nodeValue)).toBe('Root direct text');
+    expect(await page.evaluate(() => window.getSelection()!.toString())).toBe('Root direct text');
+
+    await page.evaluate(() => window.getSelection()!.removeAllRanges());
+    expect(await handleFlush(page)).toEqual({ accepted: true, deferred: false });
+    expect(await page.locator('#root-text').evaluate((element) => element.firstChild!.nodeValue)).toBe('Changed direct text');
+  });
+
+  test('unselected direct text of a root updates in the same pass', async ({ page }) => {
+    const server = await openLive(page, { roots: true });
+    server.current = rootSnapshot({}, { text: 'Changed direct text' });
+
+    expect(await handleRefresh(page)).toBe('applied');
+    expect(await page.locator('#root-text').evaluate((element) => element.firstChild!.nodeValue)).toBe('Changed direct text');
+  });
+});
+
+test.describe('replacement of an item whose removal ownership blocks', () => {
+  const count = (page: Page, selector: string) => page.locator(selector).count();
+
+  test('an unkeyed wrapper replaced around a clean form is deferred, never duplicated', async ({ page }) => {
+    const server = await openLive(page);
+    await showActions(page, server, 'wrap-div');
+    const original = await testId(page, 'wrapped-form').elementHandle();
+
+    server.current = snapshot({ other: 'Wrapper changed', keys: ['other', 'wrap-section'] });
+    expect(await handleRefresh(page)).toBe('deferred');
+
+    await expect(testId(page, 'other')).toHaveText('Wrapper changed');
+    expect(await count(page, '#page-region form')).toBe(1);
+    expect(await count(page, '#wrapped-field')).toBe(1);
+    expect(await count(page, '[data-testid="wrap-new"]')).toBe(0);
+    expect(await connected(original!)).toBe(true);
+
+    for (let flush = 0; flush < 2; flush += 1) {
+      expect(await handleFlush(page)).toEqual({ accepted: true, deferred: true });
+      expect(await count(page, '#page-region form')).toBe(1);
+      expect(await count(page, '#wrapped-field')).toBe(1);
+    }
+
+    await page.evaluate(() => document.querySelector('[data-testid="wrap-old"]')!.remove());
+    expect(await handleFlush(page)).toEqual({ accepted: true, deferred: false });
+    expect(await count(page, '#page-region form')).toBe(1);
+    expect(await count(page, '[data-testid="wrap-new"] #wrapped-field')).toBe(1);
+  });
+
+  test('an unkeyed wrapper replaced around a dirty form keeps the typed text and one set of ids', async ({ page }) => {
+    const server = await openLive(page);
+    await showActions(page, server, 'wrap-div');
+    await page.locator('#wrapped-field').fill('typed draft');
+    await page.evaluate(() => (document.activeElement as HTMLElement).blur());
+    const original = await page.locator('#wrapped-field').elementHandle();
+
+    server.current = snapshot({ keys: ['other', 'wrap-section'] });
+    expect(await handleRefresh(page)).toBe('deferred');
+    expect(await handleFlush(page)).toEqual({ accepted: true, deferred: true });
+
+    expect(await count(page, '#wrapped-field')).toBe(1);
+    expect(await count(page, '#page-region form')).toBe(1);
+    expect(await original!.evaluate((node: HTMLInputElement) => node.isConnected && node.value)).toBe('typed draft');
+  });
 });
 
 test('malformed and unsafe responses keep the old DOM and never become the ETag', async ({ page }) => {

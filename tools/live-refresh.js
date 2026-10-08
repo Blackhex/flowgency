@@ -392,6 +392,47 @@ function ownedCounterpartDiffers(current, next) {
     || current.getAttribute('action') !== next.getAttribute('action');
 }
 
+function hasProtectedContent(node) {
+  return node.matches(PROTECTED_SELECTOR) || node.querySelector(PROTECTED_SELECTOR) !== null;
+}
+
+// Identities a replacement would share with the retained item it duplicates.
+function identityTokens(node) {
+  const tokens = new Set();
+  for (const element of [node, ...node.querySelectorAll('[id], [data-live-key], form[action]')]) {
+    if (element.id) tokens.add(`id:${element.id}`);
+    const key = element.getAttribute('data-live-key');
+    if (key) tokens.add(`key:${key}`);
+    if (element.localName === 'form' && element.hasAttribute('action')) tokens.add(`action:${element.getAttribute('action')}`);
+  }
+  return tokens;
+}
+
+const REMOVED_NOTICE_TEXT = 'This item was removed elsewhere and is no longer available.';
+const REMOVED_NOTICE_CLASS = 'mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900';
+
+// A retained item the server no longer lists is reported rather than left as if still current.
+function markRemoved(node) {
+  if (node.hasAttribute('data-live-removed')) return;
+  node.setAttribute('data-live-removed', '');
+  if (node.matches('dialog, .xterm, [data-live-owned]')) return;
+  const notice = document.createElement('p');
+  notice.setAttribute('role', 'status');
+  notice.setAttribute('aria-live', 'polite');
+  notice.setAttribute('data-live-removed-notice', '');
+  notice.className = REMOVED_NOTICE_CLASS;
+  notice.textContent = REMOVED_NOTICE_TEXT;
+  node.append(notice);
+}
+
+function clearRemoved(node) {
+  if (!node.hasAttribute('data-live-removed')) return;
+  node.removeAttribute('data-live-removed');
+  for (const child of Array.from(node.children)) {
+    if (child.hasAttribute('data-live-removed-notice')) child.remove();
+  }
+}
+
 function isDirtyControl(control) {
   if (control instanceof HTMLSelectElement) {
     const options = Array.from(control.options);
@@ -512,6 +553,8 @@ class LiveRegionView {
 
   #retained = false;
 
+  #retainedNodes = new Set();
+
   #onDrop;
 
   #onRelease = () => {
@@ -588,8 +631,10 @@ class LiveRegionView {
   allowUpdate(current, next) {
     if (isInsideOwned(current)) {
       if (isOwned(current) && ownedCounterpartDiffers(current, next)) this.#retained = true;
+      else clearRemoved(current);
       return false;
     }
+    clearRemoved(current);
     const chain = this.#chain || this.#chainFor(current.closest(REGION_SELECTOR));
     if (chain.has(current)) return false;
     for (const name of localAttributeNames(current)) {
@@ -604,9 +649,28 @@ class LiveRegionView {
     const chain = this.#chain || this.#chainFor(node.closest(REGION_SELECTOR));
     if (chain.has(node) || node.matches(PROTECTED_SELECTOR) || node.querySelector(PROTECTED_SELECTOR)) {
       this.#retained = true;
+      this.#retainedNodes.add(node);
+      markRemoved(node);
       return false;
     }
     return true;
+  }
+
+  // A replacement for an item whose removal ownership blocks would duplicate its forms and
+  // field ids, so it waits with the rest of the target until the old item can go.
+  // morphdom inserts the node it gets back, so an accepted node is returned, not true.
+  allowAdd(node) {
+    if (node.nodeType !== Node.ELEMENT_NODE || this.#retainedNodes.size === 0 || !hasProtectedContent(node)) return node;
+    const tokens = identityTokens(node);
+    for (const kept of this.#retainedNodes) {
+      for (const token of identityTokens(kept)) {
+        if (tokens.has(token)) {
+          this.#retained = true;
+          return false;
+        }
+      }
+    }
+    return node;
   }
 
   // A controller that navigated calls this with its new binding (and structure) so a
@@ -724,7 +788,20 @@ class LiveRegionView {
     return selection.getRangeAt(0).intersectsNode(textNode);
   }
 
+  // The region root has no ancestor chain of its own: a focused or changed root control, a
+  // held root, or a selection inside its direct text must not be rewritten under the user.
+  #rootBlocked(region) {
+    if (region === document.activeElement && region !== document.body) return true;
+    if (isDirtyControl(region)) return true;
+    return region.matches('dialog[open], [data-live-hold], [data-live-dirty]');
+  }
+
+  #rootTextSelected(region) {
+    return Array.from(region.childNodes).some((node) => node.nodeType === Node.TEXT_NODE && this.#selectionTouches(node));
+  }
+
   #applyRegion(region, fragment) {
+    if (this.#rootBlocked(region)) return true;
     const next = region.cloneNode(false);
     next.append(fragment.cloneNode(true));
     const chain = this.#chainFor(region);
@@ -735,11 +812,13 @@ class LiveRegionView {
     let deferred = false;
     this.#chain = chain;
     this.#retained = false;
+    this.#retainedNodes = new Set();
     try {
-      if (chain.size === 0) this.#morph(region, next, true);
+      if (chain.size === 0 && !this.#rootTextSelected(region)) this.#morph(region, next, true);
       else deferred = this.#reconcileChildren(region, next);
     } finally {
       this.#chain = null;
+      this.#retainedNodes = new Set();
     }
     if (this.#retained) deferred = true;
     this.#retained = false;
@@ -761,6 +840,7 @@ class LiveRegionView {
       },
       onBeforeElUpdated: (from, to) => this.allowUpdate(from, to),
       onBeforeNodeDiscarded: (node) => this.allowDiscard(node),
+      onBeforeNodeAdded: (node) => this.allowAdd(node),
     });
   }
 
@@ -794,12 +874,18 @@ class LiveRegionView {
     for (const [identity, node] of identities(currentNodes)) {
       const counterpart = counterparts.get(identity);
       if (counterpart) this.#reconcileElement(node, counterpart);
+      else if (this.#chain.has(node) || hasProtectedContent(node)) markRemoved(node);
     }
     return true;
   }
 
   #reconcileElement(current, next) {
-    if (isOwned(current)) return ownedCounterpartDiffers(current, next);
+    if (isOwned(current)) {
+      const differs = ownedCounterpartDiffers(current, next);
+      if (!differs) clearRemoved(current);
+      return differs;
+    }
+    clearRemoved(current);
     if (!this.#chain.has(current)) {
       this.#morph(current, next, false);
       return false;
