@@ -113,7 +113,7 @@ def test_status_windows_initialises_com_around_the_inspection_and_releases_it():
     fake_client = MagicMock()
     fake_com = _fake_pythoncom()
     calls: list[str] = []
-    fake_com.CoInitialize.side_effect = lambda: calls.append("init")
+    fake_com.CoInitializeEx.side_effect = lambda *_flags: calls.append("init")
     fake_com.CoUninitialize.side_effect = lambda: calls.append("uninit")
     fake_client.Dispatch.side_effect = lambda *_args: calls.append("dispatch") or MagicMock()
 
@@ -126,6 +126,7 @@ def test_status_windows_initialises_com_around_the_inspection_and_releases_it():
     assert "dispatch" in calls
     assert calls[-1] == "uninit"
     assert calls.count("init") == calls.count("uninit") == 1
+    fake_com.CoInitializeEx.assert_called_once_with(fake_com.COINIT_APARTMENTTHREADED)
 
 
 def test_status_windows_releases_com_when_the_scheduler_fails():
@@ -140,21 +141,135 @@ def test_status_windows_releases_com_when_the_scheduler_fails():
 
     assert status["installed"] is False
     assert "unavailable" in status["error"]
-    fake_com.CoInitialize.assert_called_once()
+    fake_com.CoInitializeEx.assert_called_once()
     fake_com.CoUninitialize.assert_called_once()
+
+
+RPC_E_CHANGED_MODE = -2147417850
 
 
 def test_status_windows_does_not_release_a_com_apartment_it_could_not_join():
     fake_client = MagicMock()
     fake_com = _fake_pythoncom()
-    fake_com.CoInitialize.side_effect = fake_com.com_error("already initialised")
+    fake_com.CoInitializeEx.side_effect = fake_com.com_error(RPC_E_CHANGED_MODE, "Cannot change thread mode", None, None)
 
     with patch("platform.system", return_value="Windows"), \
          patch.dict(sys.modules, {"win32com": MagicMock(), "win32com.client": fake_client, "pythoncom": fake_com}):
         from flowgency.dispatch.install import get_timer_status
         get_timer_status("C:\\config.yaml", 15)
 
+    fake_client.Dispatch.assert_called()
     fake_com.CoUninitialize.assert_not_called()
+
+
+def test_status_windows_accepts_the_unsigned_changed_mode_hresult():
+    fake_client = MagicMock()
+    fake_com = _fake_pythoncom()
+    fake_com.CoInitializeEx.side_effect = fake_com.com_error(0x80010106, "Cannot change thread mode", None, None)
+
+    with patch("platform.system", return_value="Windows"), \
+         patch.dict(sys.modules, {"win32com": MagicMock(), "win32com.client": fake_client, "pythoncom": fake_com}):
+        from flowgency.dispatch.install import get_timer_status
+        get_timer_status("C:\\config.yaml", 15)
+
+    fake_client.Dispatch.assert_called()
+    fake_com.CoUninitialize.assert_not_called()
+
+
+def test_status_windows_reports_a_genuine_com_initialisation_failure_without_inspecting():
+    fake_client = MagicMock()
+    fake_com = _fake_pythoncom()
+    fake_com.CoInitializeEx.side_effect = fake_com.com_error(-2147024882, "Not enough memory", None, None)
+
+    with patch("platform.system", return_value="Windows"), \
+         patch.dict(sys.modules, {"win32com": MagicMock(), "win32com.client": fake_client, "pythoncom": fake_com}):
+        from flowgency.dispatch.install import get_timer_status
+        status = get_timer_status("C:\\config.yaml", 15)
+
+    assert status["installed"] is False
+    assert status["error"]
+    assert status["timer_active"] is False
+    fake_client.Dispatch.assert_not_called()
+    fake_com.CoUninitialize.assert_not_called()
+
+
+def test_com_apartment_releases_one_reference_per_nested_acquisition():
+    fake_com = _fake_pythoncom()
+    calls: list[str] = []
+    fake_com.CoInitializeEx.side_effect = lambda *_flags: calls.append("init")
+    fake_com.CoUninitialize.side_effect = lambda: calls.append("uninit")
+
+    with patch.dict(sys.modules, {"pythoncom": fake_com}):
+        with dispatch_install._com_apartment():
+            with dispatch_install._com_apartment():
+                calls.append("body")
+            assert calls == ["init", "init", "body", "uninit"]
+
+    assert calls == ["init", "init", "body", "uninit", "uninit"]
+
+
+def test_com_apartment_does_not_release_a_reference_after_the_body_raises_in_a_foreign_apartment():
+    fake_com = _fake_pythoncom()
+    fake_com.CoInitializeEx.side_effect = fake_com.com_error(RPC_E_CHANGED_MODE, "Cannot change thread mode", None, None)
+
+    with patch.dict(sys.modules, {"pythoncom": fake_com}):
+        with pytest.raises(RuntimeError):
+            with dispatch_install._com_apartment():
+                raise RuntimeError("body failed")
+
+    fake_com.CoUninitialize.assert_not_called()
+
+
+def test_status_windows_leaves_a_caller_owned_mta_apartment_initialised_on_a_real_worker_thread():
+    pythoncom = pytest.importorskip("pythoncom")
+    import threading
+
+    outcome: dict[str, object] = {}
+
+    def worker():
+        pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHREADED)
+        try:
+            with dispatch_install._com_apartment():
+                outcome["inside"] = True
+            try:
+                pythoncom.CoInitializeEx(pythoncom.COINIT_APARTMENTTHREADED)
+            except pythoncom.com_error as error:
+                outcome["still_mta"] = (error.args[0] & 0xFFFFFFFF) == 0x80010106
+            else:
+                pythoncom.CoUninitialize()
+                outcome["still_mta"] = False
+        finally:
+            pythoncom.CoUninitialize()
+        outcome["released_caller"] = True
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    thread.join(10)
+
+    assert not thread.is_alive()
+    assert outcome == {"inside": True, "still_mta": True, "released_caller": True}
+
+
+def test_status_windows_balances_a_real_worker_thread_sta_acquisition():
+    pythoncom = pytest.importorskip("pythoncom")
+    import threading
+
+    outcome: dict[str, object] = {}
+
+    def worker():
+        with dispatch_install._com_apartment():
+            with dispatch_install._com_apartment():
+                pass
+        pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHREADED)
+        outcome["uninitialised_after"] = True
+        pythoncom.CoUninitialize()
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    thread.join(10)
+
+    assert not thread.is_alive()
+    assert outcome == {"uninitialised_after": True}
 
 
 def test_status_windows_runs_in_a_worker_thread_with_its_own_com_apartment():
@@ -164,7 +279,7 @@ def test_status_windows_runs_in_a_worker_thread_with_its_own_com_apartment():
     fake_client = MagicMock()
     fake_com = _fake_pythoncom()
     threads: dict[str, threading.Thread] = {}
-    fake_com.CoInitialize.side_effect = lambda: threads.setdefault("init", threading.current_thread())
+    fake_com.CoInitializeEx.side_effect = lambda *_flags: threads.setdefault("init", threading.current_thread())
     fake_com.CoUninitialize.side_effect = lambda: threads.setdefault("uninit", threading.current_thread())
     fake_client.Dispatch.side_effect = lambda *_args: threads.setdefault("dispatch", threading.current_thread()) and MagicMock()
 

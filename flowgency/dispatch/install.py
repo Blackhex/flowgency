@@ -247,8 +247,19 @@ def _status_windows(config_path: str | Path, interval: int) -> TimerStatus:
             error="pywin32 is required for Windows dispatch. Install it with: pip install pywin32",
         )
     # The COM objects the helper creates are released when it returns, inside the apartment.
-    with _com_apartment():
-        return _read_windows_status(Dispatch, config_path, interval)
+    try:
+        with _com_apartment():
+            return _read_windows_status(Dispatch, config_path, interval)
+    except Exception as error:
+        return _make_status(
+            expected_config_path=config_path,
+            expected_interval=interval,
+            installed=False,
+            error=str(error),
+        )
+
+
+_RPC_E_CHANGED_MODE = 0x80010106
 
 
 @contextmanager
@@ -259,16 +270,18 @@ def _com_apartment() -> Iterator[None]:
     except ImportError:
         yield
         return
-    initialised = False
+    acquired = False
     try:
-        pythoncom.CoInitialize()
-        initialised = True
-    except pythoncom.com_error:
-        pass  # The thread already runs COM with another threading model.
+        pythoncom.CoInitializeEx(pythoncom.COINIT_APARTMENTTHREADED)
+        acquired = True
+    except pythoncom.com_error as error:
+        # A different threading model is already active, so no reference was taken.
+        if (error.args[0] & 0xFFFFFFFF) != _RPC_E_CHANGED_MODE:
+            raise
     try:
         yield
     finally:
-        if initialised:
+        if acquired:
             pythoncom.CoUninitialize()
 
 
