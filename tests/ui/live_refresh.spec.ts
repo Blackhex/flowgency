@@ -1687,6 +1687,22 @@ test.describe('cross-page behaviour', () => {
     await assertNoConsoleErrors(second);
   });
 
+  test('the Inbox keeps its active navigation highlight while it polls', async ({ page, request }) => {
+    await page.goto('/newsletter/');
+    await expect.poll(() => handleKeys(page)).toEqual(['page']);
+    const inbox = page.locator('[data-live-region="navigation-primary"] [data-live-key="nav:inbox"]');
+    const active = page.locator('[data-live-region="navigation-primary"] a.active');
+    await expect(inbox).toHaveClass(/\bactive\b/);
+
+    await applyChange(request, 'inbox-routine-pending');
+    await refreshHandle(page);
+    await expect.poll(() => handleStatus(page)).toBe('healthy');
+
+    await expect(inbox).toHaveClass(/\bactive\b/);
+    await expect(active).toHaveCount(1);
+    await assertNoConsoleErrors(page);
+  });
+
   test('hiding the document pauses reads and showing it catches up immediately', async ({ page, request }) => {
     // Playwright's Chromium never reports a hidden tab, so the browser's own visibilitychange is dispatched instead.
     const reads: string[] = [];

@@ -1867,6 +1867,7 @@ def build_inbox_context(request: Request, services: FlowgencyServices, snapshot,
     return {
         "request": request,
         **team_context(g, snapshot),
+        "active": "home",
         # Zone 1: Fleet
         "fleet_agents": agents,
         "fleet_healthy": sum(1 for a in agents if a["health"] == "green"),
