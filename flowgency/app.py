@@ -42,7 +42,6 @@ from flowgency.configuration.models import MemorySelector
 from flowgency.jobs.store import revision_bound_team_operation
 from flowgency.integrations import get_integration, REGISTRY
 from flowgency.dispatch.install import (
-    detect_platform,
     install_timer,
     get_timer_status as _get_timer_status,
 )
@@ -375,9 +374,7 @@ def get_dispatch_status() -> dict:
 
 
 async def _get_dispatch_status_off_loop() -> dict:
-    """Run the scheduler inspection off the event loop, except where Windows COM requires it."""
-    if detect_platform() == "windows":
-        return get_dispatch_status()
+    """Run the scheduler inspection off the event loop; the Windows inspection owns its COM apartment."""
     return await run_in_threadpool(get_dispatch_status)
 
 
@@ -1867,8 +1864,6 @@ def build_inbox_context(request: Request, services: FlowgencyServices, snapshot,
     # Zone 4: Activity feed
     activity = workflow_dashboard["activity"]
 
-    setup_session, setup_stop_csrf = _inbox_setup_session(request)
-
     return {
         "request": request,
         **team_context(g, snapshot),
@@ -1886,8 +1881,6 @@ def build_inbox_context(request: Request, services: FlowgencyServices, snapshot,
         "needs_action_count": needs_action_count,
         # Zone 4: Activity
         "activity_feed": activity,
-        "setup_session": setup_session,
-        "setup_stop_csrf": setup_stop_csrf,
     }
 
 
@@ -1900,7 +1893,10 @@ async def home(request: Request, team: str):
         raise HTTPException(status_code=409, detail=_config_error_message(error))
     if team not in snapshot.config.teams:
         raise HTTPException(404, f"Unknown team: {team}")
-    context = build_inbox_context(request, get_services(request), snapshot, team)
+    # Ticket and job enumeration blocks, so it runs off the loop; the setup session is loop-owned state.
+    context = await run_in_threadpool(build_inbox_context, request, get_services(request), snapshot, team)
+    setup_session, setup_stop_csrf = _inbox_setup_session(request)
+    context = {**context, "setup_session": setup_session, "setup_stop_csrf": setup_stop_csrf}
     return respond_live_or_html(request, templates, context, _inbox_policy(team, context))
 
 
@@ -1994,9 +1990,7 @@ def _log_view_policy(
     return replace(policy, region_macros=shared_region_macros(context, policy))
 
 
-@app.get("/{team}/logs", response_class=HTMLResponse)
-async def logs_list(request: Request, team: str):
-    """Browse execution logs by date; ``?__live=1`` returns the live region snapshot."""
+def _logs_list_response(request: Request, team: str):
     g = get_team(team)
     logs = with_log_links(collect_logs(g), team)
     context = {
@@ -2006,6 +2000,13 @@ async def logs_list(request: Request, team: str):
         "logs": logs,
     }
     return respond_live_or_html(request, templates, context, _logs_list_policy(team, context))
+
+
+@app.get("/{team}/logs", response_class=HTMLResponse)
+async def logs_list(request: Request, team: str):
+    """Browse execution logs by date; ``?__live=1`` returns the live region snapshot."""
+    # Listing the log directories and the team's tickets blocks, so it runs off the loop.
+    return await run_in_threadpool(_logs_list_response, request, team)
 
 
 def _log_view_context(

@@ -9,6 +9,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from starlette.concurrency import run_in_threadpool
 from pydantic import ValidationError
 
 from flowgency.configuration import ConfigConflictError, ConfigSnapshot, ValidationFailed, ValidationIssue
@@ -551,7 +552,8 @@ async def routines_page(
     services: FlowgencyServices = Depends(get_services),
 ):
     snapshot = services.config_store.load()
-    return render_routines_page(request, services, snapshot, team, agent)
+    # The editor load reads catalogs and the team's tickets, which blocks, so it runs off the loop.
+    return await run_in_threadpool(render_routines_page, request, services, snapshot, team, agent)
 
 
 @router.post("/{team}/agents/{agent}/routines/preview")

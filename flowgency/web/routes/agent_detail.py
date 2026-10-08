@@ -11,6 +11,7 @@ from urllib.parse import quote
 import yaml
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from starlette.concurrency import run_in_threadpool
 
 from flowgency.configuration import (
     AgentProfilePatch,
@@ -674,6 +675,10 @@ def _detail_context(
     return respond_agent_detail(request, context, team_id, agent_id, tab, status_code=status_code)
 
 
+async def _read_detail(request: Request, services: FlowgencyServices, team_id: str, agent_id: str, tab: str):
+    """A GET of a detail tab; its filesystem and navigation reads block, so they run off the loop."""
+    return await run_in_threadpool(_detail_context, request, services, team_id, agent_id, tab)
+
 @router.get("/{team}/agents/{agent}", response_class=HTMLResponse)
 async def agent_detail_base(team: str, agent: str):
     return RedirectResponse(f"/{team}/agents/{agent}/profile", status_code=303)
@@ -681,7 +686,7 @@ async def agent_detail_base(team: str, agent: str):
 
 @router.get("/{team}/agents/{agent}/profile", response_class=HTMLResponse)
 async def agent_detail_profile(request: Request, team: str, agent: str, services: FlowgencyServices = Depends(get_services)):
-    return _detail_context(request, services, team, agent, "profile")
+    return await _read_detail(request, services, team, agent, "profile")
 
 
 @router.post("/{team}/agents/{agent}/profile", response_class=HTMLResponse)
@@ -712,12 +717,12 @@ async def agent_detail_profile_save(request: Request, team: str, agent: str, ser
 
 @router.get("/{team}/agents/{agent}/blueprint", response_class=HTMLResponse)
 async def agent_detail_blueprint(request: Request, team: str, agent: str, services: FlowgencyServices = Depends(get_services)):
-    return _detail_context(request, services, team, agent, "blueprint")
+    return await _read_detail(request, services, team, agent, "blueprint")
 
 
 @router.get("/{team}/agents/{agent}/runtime", response_class=HTMLResponse)
 async def agent_detail_runtime(request: Request, team: str, agent: str, services: FlowgencyServices = Depends(get_services)):
-    return _detail_context(request, services, team, agent, "runtime")
+    return await _read_detail(request, services, team, agent, "runtime")
 
 
 @router.post("/{team}/agents/{agent}/runtime", response_class=HTMLResponse)
@@ -821,12 +826,12 @@ async def agent_detail_runtime_save(request: Request, team: str, agent: str, ser
 
 @router.get("/{team}/agents/{agent}/prompts", response_class=HTMLResponse)
 async def agent_detail_prompts(request: Request, team: str, agent: str, services: FlowgencyServices = Depends(get_services)):
-    return _detail_context(request, services, team, agent, "prompts")
+    return await _read_detail(request, services, team, agent, "prompts")
 
 
 @router.get("/{team}/agents/{agent}/logs", response_class=HTMLResponse)
 async def agent_detail_logs(request: Request, team: str, agent: str, services: FlowgencyServices = Depends(get_services)):
-    return _detail_context(request, services, team, agent, "logs")
+    return await _read_detail(request, services, team, agent, "logs")
 
 
 @router.post("/{team}/agents/{agent}/prompts/create", response_class=HTMLResponse)
@@ -1022,7 +1027,7 @@ async def agent_detail_prompts_delete(
 
 @router.get("/{team}/agents/{agent}/memory", response_class=HTMLResponse)
 async def agent_detail_memory(request: Request, team: str, agent: str, services: FlowgencyServices = Depends(get_services)):
-    return _detail_context(request, services, team, agent, "memory")
+    return await _read_detail(request, services, team, agent, "memory")
 
 
 @router.post("/{team}/agents/{agent}/memory", response_class=HTMLResponse)
@@ -1127,4 +1132,4 @@ async def agent_detail_memory_save(request: Request, team: str, agent: str, serv
 
 @router.get("/{team}/agents/{agent}/activity", response_class=HTMLResponse)
 async def agent_detail_activity(request: Request, team: str, agent: str, services: FlowgencyServices = Depends(get_services)):
-    return _detail_context(request, services, team, agent, "activity")
+    return await _read_detail(request, services, team, agent, "activity")

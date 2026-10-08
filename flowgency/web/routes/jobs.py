@@ -286,6 +286,17 @@ def _job_detail_context(snapshot, team_id: str, record, ticket_service=None) -> 
     }
 
 
+def _jobs_list_context(request: Request, snapshot, job_store: JobStore, team: str) -> dict[str, Any]:
+    jobs = _job_rows(snapshot, job_store, team)
+    return {
+        "request": request,
+        **_team_context(request, snapshot, team),
+        "active": "jobs",
+        "jobs": jobs,
+        "queue_waiting": sum(1 for job in jobs if job["queue_position"]),
+    }
+
+
 @router.get("/{team}/jobs", response_class=HTMLResponse)
 async def jobs_list(request: Request, team: str, services: FlowgencyServices = Depends(get_services)):
     snapshot = services.config_store.load()
@@ -293,14 +304,8 @@ async def jobs_list(request: Request, team: str, services: FlowgencyServices = D
         raise HTTPException(status_code=404, detail="Unknown team")
     if services.job_store is None:
         raise HTTPException(status_code=409, detail="Job store unavailable")
-    jobs = _job_rows(snapshot, services.job_store, team)
-    context = {
-        "request": request,
-        **_team_context(request, snapshot, team),
-        "active": "jobs",
-        "jobs": jobs,
-        "queue_waiting": sum(1 for job in jobs if job["queue_position"]),
-    }
+    # Scanning the team's job files and tickets blocks, so it runs off the loop.
+    context = await run_in_threadpool(_jobs_list_context, request, snapshot, services.job_store, team)
     return respond_live_or_html(request, _templates(request), context, _jobs_list_policy(team, context))
 
 
@@ -327,7 +332,7 @@ async def job_detail(request: Request, team: str, job_id: str, artifact: str = "
     )
     page_context = {
         "request": request,
-        **_team_context(request, snapshot, team),
+        **await run_in_threadpool(_team_context, request, snapshot, team),
         "active": "jobs",
         **context,
         "resume_notice": {

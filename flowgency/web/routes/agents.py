@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from starlette.concurrency import run_in_threadpool
 
 from flowgency.configuration import ConfigConflictError, ValidationFailed
 from flowgency.configuration.models import MemorySelector
@@ -376,7 +377,8 @@ def _render_roster(
 async def agents_roster(request: Request, team: str, services: FlowgencyServices = Depends(get_services)):
     if services.instances is None:
         if isinstance(services.startup_error, ValidationFailed):
-            return _render_roster(
+            return await run_in_threadpool(
+                _render_roster,
                 request,
                 services,
                 team,
@@ -384,7 +386,8 @@ async def agents_roster(request: Request, team: str, services: FlowgencyServices
                 status_code=409,
             )
         raise HTTPException(status_code=409, detail="Instance services unavailable")
-    return _render_roster(request, services, team)
+    # Reading the roster, its jobs and the team's tickets blocks, so it runs off the loop.
+    return await run_in_threadpool(_render_roster, request, services, team)
 
 
 @router.post("/{team}/agents/create", response_class=HTMLResponse)

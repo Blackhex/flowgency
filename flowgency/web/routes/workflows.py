@@ -122,7 +122,9 @@ async def workflow_board_page(
         selected_ticket_id=ticket,
         ticket_jobs=services.ticket_jobs,
     )
-    template_context = _workflow_page_context(request, services, team, workflow, board, ticket_id=ticket)
+    template_context = await run_in_threadpool(
+        _workflow_page_context, request, services, team, workflow, board, ticket_id=ticket
+    )
     return _templates(request).TemplateResponse(request, "workflow_board.html", template_context)
 
 

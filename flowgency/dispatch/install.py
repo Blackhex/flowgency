@@ -9,9 +9,10 @@ import shutil
 import stat
 import subprocess
 import sys
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, TypedDict
+from typing import Iterator, Literal, TypedDict
 
 DISPATCH_CONF_DIR = Path.home() / ".config" / "flowgency"
 SYSTEMD_USER_DIR = Path.home() / ".config" / "systemd" / "user"
@@ -245,6 +246,33 @@ def _status_windows(config_path: str | Path, interval: int) -> TimerStatus:
             installed=False,
             error="pywin32 is required for Windows dispatch. Install it with: pip install pywin32",
         )
+    # The COM objects the helper creates are released when it returns, inside the apartment.
+    with _com_apartment():
+        return _read_windows_status(Dispatch, config_path, interval)
+
+
+@contextmanager
+def _com_apartment() -> Iterator[None]:
+    """Initialise COM for the calling thread, which a worker thread does not have on its own."""
+    try:
+        import pythoncom
+    except ImportError:
+        yield
+        return
+    initialised = False
+    try:
+        pythoncom.CoInitialize()
+        initialised = True
+    except pythoncom.com_error:
+        pass  # The thread already runs COM with another threading model.
+    try:
+        yield
+    finally:
+        if initialised:
+            pythoncom.CoUninitialize()
+
+
+def _read_windows_status(Dispatch, config_path: str | Path, interval: int) -> TimerStatus:
     try:
         scheduler = Dispatch("Schedule.Service")
         scheduler.Connect()

@@ -103,6 +103,81 @@ def test_status_windows_installed_and_active():
     assert status["definition_matches"] is True
 
 
+def _fake_pythoncom():
+    module = MagicMock()
+    module.com_error = type("com_error", (Exception,), {})
+    return module
+
+
+def test_status_windows_initialises_com_around_the_inspection_and_releases_it():
+    fake_client = MagicMock()
+    fake_com = _fake_pythoncom()
+    calls: list[str] = []
+    fake_com.CoInitialize.side_effect = lambda: calls.append("init")
+    fake_com.CoUninitialize.side_effect = lambda: calls.append("uninit")
+    fake_client.Dispatch.side_effect = lambda *_args: calls.append("dispatch") or MagicMock()
+
+    with patch("platform.system", return_value="Windows"), \
+         patch.dict(sys.modules, {"win32com": MagicMock(), "win32com.client": fake_client, "pythoncom": fake_com}):
+        from flowgency.dispatch.install import get_timer_status
+        get_timer_status("C:\\config.yaml", 15)
+
+    assert calls[0] == "init"
+    assert "dispatch" in calls
+    assert calls[-1] == "uninit"
+    assert calls.count("init") == calls.count("uninit") == 1
+
+
+def test_status_windows_releases_com_when_the_scheduler_fails():
+    fake_client = MagicMock()
+    fake_client.Dispatch.side_effect = RuntimeError("Task Scheduler is unavailable")
+    fake_com = _fake_pythoncom()
+
+    with patch("platform.system", return_value="Windows"), \
+         patch.dict(sys.modules, {"win32com": MagicMock(), "win32com.client": fake_client, "pythoncom": fake_com}):
+        from flowgency.dispatch.install import get_timer_status
+        status = get_timer_status("C:\\config.yaml", 15)
+
+    assert status["installed"] is False
+    assert "unavailable" in status["error"]
+    fake_com.CoInitialize.assert_called_once()
+    fake_com.CoUninitialize.assert_called_once()
+
+
+def test_status_windows_does_not_release_a_com_apartment_it_could_not_join():
+    fake_client = MagicMock()
+    fake_com = _fake_pythoncom()
+    fake_com.CoInitialize.side_effect = fake_com.com_error("already initialised")
+
+    with patch("platform.system", return_value="Windows"), \
+         patch.dict(sys.modules, {"win32com": MagicMock(), "win32com.client": fake_client, "pythoncom": fake_com}):
+        from flowgency.dispatch.install import get_timer_status
+        get_timer_status("C:\\config.yaml", 15)
+
+    fake_com.CoUninitialize.assert_not_called()
+
+
+def test_status_windows_runs_in_a_worker_thread_with_its_own_com_apartment():
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    fake_client = MagicMock()
+    fake_com = _fake_pythoncom()
+    threads: dict[str, threading.Thread] = {}
+    fake_com.CoInitialize.side_effect = lambda: threads.setdefault("init", threading.current_thread())
+    fake_com.CoUninitialize.side_effect = lambda: threads.setdefault("uninit", threading.current_thread())
+    fake_client.Dispatch.side_effect = lambda *_args: threads.setdefault("dispatch", threading.current_thread()) and MagicMock()
+
+    with patch("platform.system", return_value="Windows"), \
+         patch.dict(sys.modules, {"win32com": MagicMock(), "win32com.client": fake_client, "pythoncom": fake_com}):
+        from flowgency.dispatch.install import get_timer_status
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pool.submit(get_timer_status, "C:\\config.yaml", 15).result()
+
+    assert threads["init"] is threads["dispatch"] is threads["uninit"]
+    assert threads["init"] is not threading.current_thread()
+
+
 def test_status_windows_not_installed():
     fake_client = MagicMock()
     scheduler = fake_client.Dispatch.return_value

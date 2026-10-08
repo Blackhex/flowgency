@@ -416,7 +416,7 @@ async def _render_ticket_page(
     )
     snapshot = services.config_store.load()
     agent_options = _agent_options(snapshot, team)
-    template_context = _team_context(request, snapshot, team)
+    template_context = await run_in_threadpool(_team_context, request, snapshot, team)
     template_context.update(
         {
             "active": "workflow-board",
@@ -483,7 +483,7 @@ async def _render_board_page(
     )
     snapshot = services.config_store.load()
     agent_options = _agent_options(snapshot, team)
-    template_context = _team_context(request, snapshot, team)
+    template_context = await run_in_threadpool(_team_context, request, snapshot, team)
     template_context.update(
         {
             "active": "workflow-board",
@@ -566,7 +566,7 @@ async def ticket_detail_page(
     )
     snapshot = services.config_store.load()
     agent_options = _agent_options(snapshot, team)
-    template_context = _team_context(request, snapshot, team)
+    template_context = await run_in_threadpool(_team_context, request, snapshot, team)
     template_context.update(
         {
             "active": "workflow-board",

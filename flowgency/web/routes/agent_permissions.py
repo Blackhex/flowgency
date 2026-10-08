@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from starlette.concurrency import run_in_threadpool
 from markupsafe import Markup
 from pydantic import ValidationError
 
@@ -239,7 +240,8 @@ async def permissions_page(
 ):
     snapshot = services.config_store.load()
     _get_snapshot_instance(snapshot, team, agent)
-    return render_permissions_page(request, services, snapshot, team, agent)
+    # The editor load reads catalogs and the team's tickets, which blocks, so it runs off the loop.
+    return await run_in_threadpool(render_permissions_page, request, services, snapshot, team, agent)
 
 
 @router.post("/{team}/agents/{agent}/permissions/preview")
