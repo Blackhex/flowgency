@@ -174,8 +174,8 @@ def _render_channel_detail(
     status_code: int = 200,
 ):
     resolved = _resolve_channel_memory(snapshot, services, channel_key)
-    # A live snapshot is a read: it never creates the channel directory or its lock.
-    if request.method == "GET" and request.query_params.get("__live") == "1":
+    # A GET (page or snapshot) is a read: it never creates the channel directory or its lock.
+    if request.method == "GET":
         memory_snapshot = services.memory_store.preview(resolved)
     else:
         memory_snapshot = services.memory_store.ensure(resolved)

@@ -956,7 +956,6 @@ def test_library_and_channel_cases_are_fully_undone_by_a_reset(monkeypatch, sequ
         changed = False
         for case in sequence:
             _apply(client, case)
-            # Rendering a declared channel's page creates its memory directory, which a reset must also remove.
             client.get(f"/admin/memory-channels/{server.CHANNEL_ADDED}")
             changed = changed or _library_state(runtime) != before
         assert changed

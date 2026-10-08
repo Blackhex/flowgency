@@ -2482,12 +2482,10 @@ def _seed_memory(runtime: Path, config: dict) -> None:
     )
     store.ensure(channel)
     _write(channel.directory / "memory.md", "# Brand Strategy\n\nPrefer concise, evidence-led releases.\n")
-    # Files a live case added beside memory.md, and the memory of a channel it declared.
+    # Files a live case added beside memory.md.
     for extra in channel.directory.glob("*.md"):
         if extra.name != "memory.md":
             extra.unlink()
-    added = _channel_memory(runtime, CHANNEL_ADDED, {**config["memory"]["channels"], CHANNEL_ADDED: {}})[1]
-    shutil.rmtree(added.directory, ignore_errors=True)
 
 
 def _clear_readonly(function, path, _error) -> None:

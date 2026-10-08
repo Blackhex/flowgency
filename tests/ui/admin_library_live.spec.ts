@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
-import { assertNoConsoleErrors, assertNoLayoutIssues, installBasePageSetup } from './layout';
+import { assertNoConsoleErrors, assertNoLayoutIssues, assertOnlyExpectedConflictConsoleError, installBasePageSetup } from './layout';
 import { expectNoNotice, expectOnlyNotice, expectQuietPolls } from './live_notice';
 
 const SOURCE_NOTICE = 'Blueprint source changed since this editor loaded. Reload to see the latest.';
@@ -118,6 +118,7 @@ test.describe('live blueprint detail', () => {
     expect((await snapshot).status()).toBe(200);
     await expect(page.getByText('Blueprint source changed; reload before saving')).toBeVisible();
     await expect(page.locator('#agents-content')).toHaveValue('Draft that will be rejected');
+    await assertOnlyExpectedConflictConsoleError(page);
   });
 
   test('unchanged polls leave the page untouched', async ({ page }) => {
@@ -231,6 +232,7 @@ test.describe('live memory channel list', () => {
     await expect(page.getByText('Channel keys must be lowercase stable slugs.')).toBeVisible();
     expect((await snapshot).status()).toBe(200);
     await expect(page.getByText('Channel keys must be lowercase stable slugs.')).toBeVisible();
+    await assertOnlyExpectedConflictConsoleError(page);
   });
 
   test('unchanged polls leave the page untouched', async ({ page }) => {
@@ -319,6 +321,7 @@ test.describe('live memory channel detail', () => {
     await expect(page.getByText('Cannot rekey a referenced channel.')).toBeVisible();
     expect((await snapshot).status()).toBe(200);
     await expect(page.getByText('Cannot rekey a referenced channel.')).toBeVisible();
+    await assertOnlyExpectedConflictConsoleError(page);
   });
 
   test('unchanged polls leave the page untouched', async ({ page }) => {

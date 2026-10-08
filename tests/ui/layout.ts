@@ -99,6 +99,15 @@ export async function assertNoConsoleErrors(page: Page): Promise<void> {
   expect(pageErrors.get(page) ?? []).toEqual([]);
 }
 
+// For a test that drives a rejected POST: the browser logs exactly one
+// "Failed to load resource ... 409" for the navigation; anything else fails.
+export async function assertOnlyExpectedConflictConsoleError(page: Page): Promise<void> {
+  const errors = pageErrors.get(page) ?? [];
+  const conflicts = errors.filter((error) => /^console: Failed to load resource: .* 409 /.test(error));
+  expect(conflicts).toHaveLength(1);
+  expect(errors.filter((error) => !conflicts.includes(error))).toEqual([]);
+}
+
 export async function assertNoTailwindCdnRequests(page: Page): Promise<void> {
   expect(tailwindCdnRequests.get(page) ?? []).toEqual([]);
 }

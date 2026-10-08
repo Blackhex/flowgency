@@ -524,6 +524,28 @@ class TestMemoryChannelDetailLive:
         assert not resolved.directory.exists()
         assert (sorted(path.name for path in locks.iterdir()) if locks.exists() else []) == before
 
+    def test_plain_page_reads_never_write_for_a_declared_but_never_created_channel(self, channels):
+        def fingerprint() -> dict[str, int]:
+            return {
+                path.relative_to(channels.tmp).as_posix(): path.stat().st_size if path.is_file() else -1
+                for path in sorted(channels.tmp.rglob("*"))
+            }
+
+        page_path = "/admin/memory-channels/support"
+        before = fingerprint()
+
+        page = channels.client.get(page_path)
+        listing = channels.client.get("/admin/memory-channels")
+        snapshot = channels.client.get(f"{page_path}?__live=1")
+
+        assert page.status_code == listing.status_code == snapshot.status_code == 200
+        assert fingerprint() == before
+        assert re.search(r'<textarea[^>]*id="memory-content"[^>]*>\s*</textarea>', page.text)
+        regions = _regions(snapshot)
+        _assert_snapshot_matches_page(page.text, regions)
+        revision = re.search(r'name="content_revision" value="([0-9a-f]+)"', page.text).group(1)
+        assert f'data-live-revision="{revision}"' in regions["channel-status"]
+
     def test_an_unknown_channel_is_unavailable(self, channels):
         assert channels.client.get("/admin/memory-channels/nope?__live=1").status_code == 404
 
