@@ -1366,6 +1366,7 @@ def _admin_settings_context(
     ai_backend: str | None = None,
     current_theme: str | None = None,
     form_revision: str | None = None,
+    drafts: dict[str, str] | None = None,
 ) -> dict:
     context = {
         "request": request,
@@ -1375,6 +1376,7 @@ def _admin_settings_context(
         "installed_count": len(REGISTRY),
         "themes": load_themes(),
         "current_theme": current_theme if current_theme is not None else get_flowgency_config()["theme"],
+        **(drafts or {}),
     }
     # A rejected save keeps the revision its retained values were loaded against, so a resubmit conflicts again.
     if form_revision:
@@ -1580,7 +1582,15 @@ async def admin_save_settings(request: Request):
             )
     except ConfigConflictError:
         context = _admin_settings_context(
-            request, ai_backend=ai_backend, current_theme=theme, form_revision=revision
+            request,
+            ai_backend=ai_backend,
+            current_theme=theme,
+            form_revision=revision,
+            drafts={
+                "form_title": title,
+                "form_default_team": default_team,
+                "form_workflow_library": workflow_library_raw,
+            },
         )
         return respond_live_or_html(
             request, templates, context, settings_policy(context), status_code=409

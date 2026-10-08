@@ -178,6 +178,32 @@ class TestAdminSettingsLive:
         assert marker == admin_env.revision() != loaded
         assert 'data-live-baseline-input="revision"' in response.text
 
+    def test_a_rejected_save_keeps_every_submitted_draft_without_advancing_the_revision(self, admin_env):
+        loaded = admin_env.revision()
+        admin_env.patch(lambda raw: raw["flowgency"].update(title="Renamed elsewhere", default_team="test"))
+        config = admin_env.root / "config.yaml"
+        remote = config.read_bytes()
+        draft = {
+            "title": "My drafted title",
+            "default_team": "other",
+            "ai_backend": "copilot",
+            "workflow_library": "C:/drafted/workflows",
+        }
+
+        for _attempt in range(2):
+            response = admin_env.client.post("/admin/settings", data={"revision": loaded, **draft})
+            assert response.status_code == 409
+            assert re.search(r'name="revision" value="([0-9a-f]+)"', response.text).group(1) == loaded
+            assert 'name="title" id="title" value="My drafted title"' in response.text
+            assert re.search(r'<option value="other"\s+selected', response.text)
+            assert not re.search(r'<option value="test"\s+selected', response.text)
+            assert 'name="workflow_library" id="workflow_library" value="C:/drafted/workflows"' in response.text
+            assert config.read_bytes() == remote
+
+        assert "Renamed elsewhere" in response.text
+        marker = re.search(r'data-live-revision="([0-9a-f]+)"', response.text).group(1)
+        assert marker == admin_env.revision() != loaded
+
 
 class TestAdminIntegrationsLive:
     PAGE = "/admin/integrations"
