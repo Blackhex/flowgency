@@ -368,6 +368,25 @@ def test_readme_and_getting_started_describe_the_data_root_handoff():
         assert "return to the dashboard automatically" not in text
 
 
+def test_deployment_guide_documents_live_refresh_and_its_generated_files():
+    guide = (REPO_ROOT / "kb" / "deployment.md").read_text(encoding="utf-8")
+
+    for expected in (
+        "?__live=1",
+        "If-None-Match",
+        "304 Not Modified",
+        "every 2 seconds",
+        "1.5 seconds",
+        "immediately",
+        "no polling guarantee",
+        "npm run build:live",
+        "flowgency/static/morphdom.LICENSE.txt",
+    ):
+        assert expected in guide, expected
+    for generated in ("live-refresh.js", "morphdom.LICENSE.txt"):
+        assert (REPO_ROOT / "flowgency" / "static" / generated).is_file()
+
+
 def test_local_links_in_active_documentation_resolve():
     missing: list[str] = []
     link_pattern = re.compile(r"(?<!!)\[[^]]+\]\(([^)]+)\)")
