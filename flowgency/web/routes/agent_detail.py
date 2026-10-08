@@ -168,7 +168,7 @@ def _resolve_tab_memory(
         channels=snapshot.config.memory.channels,
         store_root=services.memory_store.root,
     )
-    # A live snapshot is a read: it never creates the memory directory or its lock.
+    # A GET, plain or live, is a read: it never creates the memory directory or its lock.
     if read_only:
         return services.memory_store.preview(resolved)
     return services.memory_store.ensure(resolved)
@@ -483,7 +483,7 @@ def build_agent_detail_context(
 ) -> dict[str, Any]:
     """One context for a detail tab, its POST error renders and its live snapshots.
 
-    ``read_only`` is set for snapshot reads, which must not create directories.
+    ``read_only`` is set for GET reads, which must not create directories.
     """
     team_cfg, instance = _get_snapshot_instance(snapshot, team_id, agent_id)
     handler_issues = issues or []
@@ -669,7 +669,7 @@ def _detail_context(
         banner=banner,
         memory_conflict=memory_conflict,
         overrides=overrides,
-        read_only=is_live_read(request),
+        read_only=request.method == "GET",
     )
     return respond_agent_detail(request, context, team_id, agent_id, tab, status_code=status_code)
 

@@ -8,6 +8,7 @@ import math
 from multiprocessing import Event, Process
 from pathlib import Path
 import re
+import shutil
 from urllib.parse import parse_qs, unquote, urlparse
 
 import pytest
@@ -1655,6 +1656,29 @@ def test_live_detail_snapshot_creates_no_runtime_state(monkeypatch, tmp_path, ra
     _live(client, tab)
 
     assert filesystem_tree(tmp_path) == before
+
+
+@pytest.mark.parametrize("tab", _LIVE_TABS)
+def test_ordinary_detail_get_creates_no_runtime_state(monkeypatch, tmp_path, raw_config, tab):
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+    before = filesystem_tree(tmp_path)
+
+    page = client.get(f"/newsletter/agents/advisor/{tab}")
+
+    assert page.status_code == 200
+    assert filesystem_tree(tmp_path) == before
+
+
+def test_ordinary_memory_get_with_a_missing_store_shows_empty_memory_and_creates_nothing(monkeypatch, tmp_path, raw_config):
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+    memory_root = tmp_path / "memory-store"
+    shutil.rmtree(memory_root, ignore_errors=True)
+
+    page = client.get("/newsletter/agents/advisor/memory")
+    snapshot = client.get(_live_url("memory"))
+
+    assert page.status_code == 200 and snapshot.status_code == 200
+    assert not memory_root.exists()
 
 
 @pytest.mark.parametrize("tab", _LIVE_TABS)
