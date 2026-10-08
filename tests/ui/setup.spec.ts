@@ -1040,11 +1040,45 @@ test('hiding and showing the setup page pauses and catches up status reads witho
   expect(sockets).toHaveLength(1);
   expect(stops).toEqual([]);
   expect(navigations).toEqual([]);
-  expect(await terminal.evaluate((node) => node.isConnected)).toBe(true);
-  expect(await page.locator('#setup-terminal .xterm').elementHandle().then((node) => node?.evaluate((n) => n.isConnected))).toBe(true);
+  expect(await terminal.evaluate((node) => node.isConnected && document.querySelector('#setup-terminal .xterm') === node)).toBe(true);
   await expect(page).toHaveURL(/\/setup\/session$/);
   expect(await setupWrites(request)).toEqual(writesBefore);
   await assertNoConsoleErrors(page);
+});
+
+test('a completion that arrives while the page is hidden redirects only once the page is visible', async ({ page, request }) => {
+  const statusRequests = trackStatusRequests(page);
+  await launchConnectedTerminal(page, request);
+  await markSetupReady(request);
+  await waitForStatusPolls(page, 1);
+  await expect(page).toHaveURL(/\/setup\/session$/);
+  const navigations = trackMainFrameNavigations(page);
+
+  await setVisibility(page, 'hidden');
+  await page.waitForTimeout(300);
+  const pausedAt = statusRequests.length;
+  expect((await completeSetup(request)).status()).toBe(200);
+  await page.waitForTimeout(SETUP_STATUS_INTERVAL_MS * 2 + 300);
+
+  expect(statusRequests.length).toBe(pausedAt);
+  expect(navigations).toEqual([]);
+  await expect(page).toHaveURL(/\/setup\/session$/);
+
+  await setVisibility(page, 'visible');
+  await expect(page).toHaveURL(/\/newsletter\/$/);
+  expect(navigations).toEqual(['/newsletter/']);
+  await assertNoConsoleErrors(page);
+});
+
+test('a blocked live-refresh bundle shows a visible message instead of failing silently', async ({ page, request }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  await page.route('**/static/live-refresh.js', (route) => route.abort());
+  await launchConnectedTerminal(page, request);
+
+  await expect(page.locator('#status-message')).toHaveText('Status updates are unavailable. Reload this page.');
+  await expect(page.locator('#setup-terminal .xterm-screen')).toBeVisible();
+  expect(pageErrors).toEqual([]);
 });
 
 test('the terminal stream survives the ready transition and the completion redirect with one status loop', async ({ page, request }) => {
