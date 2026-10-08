@@ -66,7 +66,7 @@
         <p class="mt-1 text-xs text-gray-500">Creates .agents/prompts/&lt;slug&gt;.prompt.md in canonical source.</p>
       </div>
       <form method="post" action="/admin/agent-library/blueprints/{{ blueprint.key }}/source" data-live-owned class="space-y-3">
-        <input type="hidden" name="expected_digest" value="{{ blueprint.snapshot.digest }}">
+        <input type="hidden" name="expected_digest" value="{{ form_expected_digest | default(blueprint.snapshot.digest) }}">
         <label class="block text-sm font-medium text-gray-700" for="create-slug">Prompt slug</label>
         <input id="create-slug" name="slug" value="{{ create_slug }}" class="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500" placeholder="pr-review">
         <label class="block text-sm font-medium text-gray-700" for="create-content">Initial source</label>
@@ -82,14 +82,14 @@
         </div>
         <form method="post" action="/admin/agent-library/blueprints/{{ blueprint.key }}/source" data-live-owned class="mt-4 space-y-4">
           <input type="hidden" name="path" value="{{ form_path }}">
-          <input type="hidden" name="expected_digest" value="{{ blueprint.snapshot.digest }}">
+          <input type="hidden" name="expected_digest" value="{{ form_expected_digest | default(blueprint.snapshot.digest) }}">
           <label for="selected-prompt-content" class="block text-sm font-medium text-gray-700">Prompt source</label>
           <textarea id="selected-prompt-content" name="content" rows="14" class="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500">{{ form_content }}</textarea>
           <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">Save prompt source</button>
         </form>
 
         <form method="post" action="/admin/agent-library/blueprints/{{ blueprint.key }}/prompts/{{ selected_prompt.slug }}/delete" data-live-owned class="mt-4 border-t border-gray-200 pt-4 space-y-3">
-          <input type="hidden" name="expected_digest" value="{{ blueprint.snapshot.digest }}">
+          <input type="hidden" name="expected_digest" value="{{ form_expected_digest | default(blueprint.snapshot.digest) }}">
           <label class="block text-sm font-medium text-gray-700" for="delete-confirm">Type {{ selected_prompt.slug }} to confirm delete</label>
           <input id="delete-confirm" name="confirmation" class="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-sm" placeholder="{{ selected_prompt.slug }}">
           <button type="submit" class="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700">Delete prompt</button>

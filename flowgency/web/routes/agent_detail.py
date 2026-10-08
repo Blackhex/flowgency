@@ -298,11 +298,13 @@ def _prompts_context(
     create_name: str = "",
     create_source: str = "",
     source_overrides: dict[str, str] | None = None,
+    digest_overrides: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     _team_cfg, instance = _get_snapshot_instance(snapshot, team_id, agent_id)
     if services.prompt_service is None:
         raise HTTPException(status_code=409, detail="Prompt service unavailable")
     overrides = source_overrides or {}
+    loaded_digests = digest_overrides or {}
     try:
         catalog = services.prompt_service.catalog(snapshot, team_id, agent_id)
     except ValidationFailed as exc:
@@ -333,6 +335,8 @@ def _prompts_context(
             continue
         source_text = item.document.source.decode("utf-8")
         row["source"] = overrides.get(item.document.name, source_text)
+        # A retained draft stays bound to the digest it was loaded against, not the saved one.
+        row["form_digest"] = loaded_digests.get(item.document.name, item.document.digest)
         private.append(row)
     return {
         "shared_prompts": tuple(shared),
@@ -742,6 +746,8 @@ async def agent_detail_runtime_save(request: Request, team: str, agent: str, ser
         "agent_timeout": timeout_text,
         "show_allow_local_network": show_allow_local_network,
         "allow_local_network": allow_local_network,
+        # The retained values stay bound to the configuration revision they were loaded against.
+        "form_revision": revision,
     }
     if "permission_rules_yaml" in form:
         return _detail_context(
@@ -862,14 +868,17 @@ async def agent_detail_prompts_create(request: Request, team: str, agent: str, s
             "prompts",
             status_code=409,
             issues=_issue_dicts(exc),
-            overrides=_prompts_context(
-                services,
-                services.config_store.load(),
-                team,
-                agent,
-                create_name=name,
-                create_source=source,
-            ),
+            overrides={
+                **_prompts_context(
+                    services,
+                    services.config_store.load(),
+                    team,
+                    agent,
+                    create_name=name,
+                    create_source=source,
+                ),
+                "form_revision": revision,
+            },
         )
     except ConfigConflictError as exc:
         return _detail_context(
@@ -880,14 +889,17 @@ async def agent_detail_prompts_create(request: Request, team: str, agent: str, s
             "prompts",
             status_code=409,
             issues=_single_issue("revision", str(exc), "Reload and resubmit the prompt."),
-            overrides=_prompts_context(
-                services,
-                services.config_store.load(),
-                team,
-                agent,
-                create_name=name,
-                create_source=source,
-            ),
+            overrides={
+                **_prompts_context(
+                    services,
+                    services.config_store.load(),
+                    team,
+                    agent,
+                    create_name=name,
+                    create_source=source,
+                ),
+                "form_revision": revision,
+            },
         )
     except PromptConflictError as exc:
         return _detail_context(
@@ -898,14 +910,17 @@ async def agent_detail_prompts_create(request: Request, team: str, agent: str, s
             "prompts",
             status_code=409,
             issues=_single_issue("name", str(exc), "Choose a different prompt name or reload and retry."),
-            overrides=_prompts_context(
-                services,
-                services.config_store.load(),
-                team,
-                agent,
-                create_name=name,
-                create_source=source,
-            ),
+            overrides={
+                **_prompts_context(
+                    services,
+                    services.config_store.load(),
+                    team,
+                    agent,
+                    create_name=name,
+                    create_source=source,
+                ),
+                "form_revision": revision,
+            },
         )
     request.app.state.refresh_services()
     return RedirectResponse(f"/{team}/agents/{agent}/prompts", status_code=303)
@@ -950,6 +965,7 @@ async def agent_detail_prompts_save(
                 team,
                 agent,
                 source_overrides={name: source},
+                digest_overrides={name: digest},
             ),
         )
     except PromptConflictError as exc:
@@ -967,6 +983,7 @@ async def agent_detail_prompts_save(
                 team,
                 agent,
                 source_overrides={name: source},
+                digest_overrides={name: digest},
             ),
         )
     request.app.state.refresh_services()
@@ -1038,6 +1055,8 @@ async def agent_detail_memory_save(request: Request, team: str, agent: str, serv
     content_revision = str(form.get("content_revision", "")).strip()
     filename = str(form.get("filename", "memory.md")).strip() or "memory.md"
     content = str(form.get("content", ""))
+    # A re-render that keeps the submitted text also keeps the revision that text was loaded against.
+    retained_baseline = {"form_content_revision": content_revision} if action == "content" else {}
     try:
         snapshot = services.config_store.load()
         if action == "selector":
@@ -1099,6 +1118,7 @@ async def agent_detail_memory_save(request: Request, team: str, agent: str, serv
                 "selector_token": str(form.get("selector_token", "")).strip(),
                 "selected_memory_file": filename,
                 "selected_memory_content": content,
+                **retained_baseline,
             },
         )
     except MemoryConflictError as exc:
@@ -1120,12 +1140,13 @@ async def agent_detail_memory_save(request: Request, team: str, agent: str, serv
                 "selector_token": str(form.get("selector_token", "")).strip(),
                 "selected_memory_file": filename,
                 "selected_memory_content": content,
+                **retained_baseline,
             },
         )
     except ValidationFailed as exc:
-        return _detail_context(request, services, team, agent, "memory", status_code=409, issues=_issue_dicts(exc), overrides={"selector_token": str(form.get("selector_token", "")).strip(), "selected_memory_file": filename, "selected_memory_content": content})
+        return _detail_context(request, services, team, agent, "memory", status_code=409, issues=_issue_dicts(exc), overrides={"selector_token": str(form.get("selector_token", "")).strip(), "selected_memory_file": filename, "selected_memory_content": content, **retained_baseline})
     except ConfigConflictError as exc:
-        return _detail_context(request, services, team, agent, "memory", status_code=409, banner=str(exc), overrides={"selector_token": str(form.get("selector_token", "")).strip(), "selected_memory_file": filename, "selected_memory_content": content})
+        return _detail_context(request, services, team, agent, "memory", status_code=409, banner=str(exc), overrides={"selector_token": str(form.get("selector_token", "")).strip(), "selected_memory_file": filename, "selected_memory_content": content, **retained_baseline})
     request.app.state.refresh_services()
     return RedirectResponse(f"/{team}/agents/{agent}/memory", status_code=303)
 

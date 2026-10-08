@@ -154,8 +154,9 @@
   </div>
 {%- endmacro %}
 
-{#- Each card's digest line is read-only status; its forms keep the digest they loaded, so a save after
-    an external edit still reaches the existing conflict path. -#}
+{#- Each card's digest line is read-only status; its forms keep the digest they loaded (a rejected save keeps the
+    digest the draft was loaded against), so a save after an external edit still reaches the existing conflict path.
+    The digest line is also the per-prompt change marker, compared with the loaded digest the save form holds. -#}
 {% macro prompts_edit() -%}
     <h3 class="text-sm font-semibold text-gray-900">Edit private prompts</h3>
     {% for prompt in private_prompts %}
@@ -163,11 +164,11 @@
       <div class="mb-2 flex items-center justify-between gap-3">
         <div>
           <p class="font-mono text-xs text-gray-700">{{ prompt.name }}</p>
-          <p class="text-xs text-gray-500">Digest: {{ prompt.digest }}</p>
+          <p class="text-xs text-gray-500" data-live-revision="{{ prompt.digest }}" data-live-scope="prompt:{{ prompt.name }}" data-live-baseline-key="prompt:{{ prompt.name }}" data-live-changed="Prompt {{ prompt.name }} changed since this form loaded. Reload to see the latest.">Digest: {{ prompt.digest }}</p>
         </div>
       </div>
       <form method="post" action="/{{ team }}/agents/{{ agent }}/prompts/{{ prompt.name }}/save" class="space-y-3">
-        <input type="hidden" name="digest" value="{{ prompt.digest }}">
+        <input type="hidden" name="digest" value="{{ prompt.form_digest | default(prompt.digest) }}" data-live-baseline="prompt:{{ prompt.name }}">
         <label for="edit-prompt-source-{{ prompt.name }}" class="block text-sm font-medium text-gray-700">Prompt source for {{ prompt.name }}</label>
         <textarea id="edit-prompt-source-{{ prompt.name }}" name="source" rows="9" class="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-xs">{{ prompt.source }}</textarea>
         <div class="flex items-center justify-between gap-3">
@@ -176,7 +177,7 @@
       </form>
       <form method="post" action="/{{ team }}/agents/{{ agent }}/prompts/{{ prompt.name }}/delete" class="mt-3 border-t border-gray-200 pt-3">
         <input type="hidden" name="revision" value="{{ config_revision }}">
-        <input type="hidden" name="digest" value="{{ prompt.digest }}">
+        <input type="hidden" name="digest" value="{{ prompt.form_digest | default(prompt.digest) }}">
         <button type="submit" class="rounded-lg bg-red-600 px-4 py-2 text-xs font-medium text-white hover:bg-red-700">Delete prompt</button>
       </form>
     </div>

@@ -128,7 +128,7 @@
       </div>
       <form method="post" action="/admin/agent-library/blueprints/{{ blueprint.key }}/source" data-live-owned class="mt-4 space-y-4">
         <input type="hidden" name="path" value="{{ form_path }}">
-        <input type="hidden" name="expected_digest" value="{{ blueprint.snapshot.digest }}">
+        <input type="hidden" name="expected_digest" value="{{ form_expected_digest | default(blueprint.snapshot.digest) }}">
         <label for="agents-content" class="block text-sm font-medium text-gray-700">Instruction source</label>
         <textarea id="agents-content" name="content" rows="20" class="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500">{{ form_content }}</textarea>
         <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">Save AGENTS.md</button>

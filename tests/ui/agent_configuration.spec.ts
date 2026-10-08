@@ -494,7 +494,25 @@ test.describe('agent detail live refresh', () => {
     await expect(revision).toHaveValue(loadedRevision);
     await page.getByRole('button', { name: 'Save runtime' }).click();
     await expect(page.locator('input[name="timeout"]')).toHaveValue('900');
-    await expect(page.locator('.border-amber-200').filter({ hasText: /changed/i })).toBeVisible();
+    await expect(page.locator('.border-amber-200').filter({ hasText: /config\.yaml changed/i })).toBeVisible();
+  });
+
+  test('a rejected runtime save keeps its loaded revision, so a resubmit conflicts again and the change stays announced', async ({ page, request }) => {
+    await page.goto('/newsletter/agents/advisor/runtime');
+    const revision = page.locator('input[name="revision"]');
+    const loadedRevision = await revision.inputValue();
+    await page.locator('input[name="timeout"]').fill('900');
+
+    await changeLiveFixture(request, 'agent-team-runtime');
+    await page.getByRole('button', { name: 'Save runtime' }).click();
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await expect(page.locator('.border-amber-200').filter({ hasText: /config\.yaml changed/i })).toBeVisible();
+      await expect(revision).toHaveValue(loadedRevision);
+      await expect(page.locator('input[name="timeout"]')).toHaveValue('900');
+      await expectOnlyNotice(page, 'Agent configuration changed since this form loaded. Reload to see the latest.');
+      if (attempt === 0) await page.getByRole('button', { name: 'Save runtime' }).click();
+    }
   });
 
   test('profile identity refreshes in the header while a name draft and its revision stay', async ({ page, request }) => {
@@ -554,6 +572,29 @@ test.describe('agent detail live refresh', () => {
     await expect(content).toHaveValue('Local memory draft');
     await expect(memoryStatus.locator('[data-live-key="memory:revision"]')).toHaveAttribute('role', 'status');
     await expectQuietPolls(page, [memoryStatus, status(page), notices(page)]);
+  });
+
+  test('a source-only prompt change is announced for the prompt and never advances its loaded digest', async ({ page, request }) => {
+    await page.goto('/newsletter/agents/advisor/prompts');
+    await expectNoNotice(page);
+    const card = page.locator('[data-live-key="prompt:local-triage"]');
+    const digest = card.locator('form[action$="/save"] input[name="digest"]');
+    const loadedDigest = await digest.inputValue();
+    const source = card.locator('textarea[name="source"]');
+    const draft = '---\nname: local-triage\ndescription: Private local triage.\n---\n\nLocal working draft\n';
+    await source.fill(draft);
+    const loadedJobs = await status(page).textContent();
+
+    await changeLiveFixture(request, 'agent-catalog-digest');
+
+    await expectOnlyNotice(page, 'Prompt local-triage changed since this form loaded. Reload to see the latest.');
+    await expect(digest).toHaveValue(loadedDigest);
+    await expect(source).toHaveValue(draft);
+    await expect(status(page)).toHaveText(loadedJobs!);
+    await expectQuietPolls(page, [status(page), notices(page)]);
+
+    expect((await request.post('/__ui/reset')).status()).toBe(204);
+    await expectNoNotice(page);
   });
 
   test('a changed active-job set is announced and the visible default layout is untouched', async ({ page, request }) => {

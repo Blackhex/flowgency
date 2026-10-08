@@ -203,6 +203,56 @@ class TestBlueprintDetailLive:
         assert "/source" not in _registration(response.text)["url"]
 
 
+class TestBlueprintConflictBaselines:
+    """A rejected save keeps the baseline its editor loaded, so a resubmit conflicts again."""
+
+    @pytest.mark.parametrize(
+        ("page", "path"),
+        [
+            (_ADVISOR, "AGENTS.md"),
+            (f"{_ADVISOR}/skills/daily-review", _SKILL_FILE),
+            (f"{_ADVISOR}/prompts", _PROMPT_FILE),
+        ],
+    )
+    def test_a_resubmitted_rejected_save_conflicts_again_and_never_overwrites_the_remote_edit(self, library, page, path):
+        loaded = _digest(library.client)
+        agents = library.root / "advisor" / "AGENTS.md"
+        agents.write_text("# Advisor\n\nEdited elsewhere.\n", encoding="utf-8")
+        remote = agents.read_bytes()
+        marker = re.compile(r'name="expected_digest" value="([0-9a-f]+)"')
+        submitted = loaded
+
+        for attempt in range(3):
+            response = library.client.post(
+                f"{_ADVISOR}/source",
+                data={"path": path, "expected_digest": submitted, "content": f"# My draft {attempt}\n"},
+            )
+            assert response.status_code == 409, attempt
+            assert f"# My draft {attempt}" in response.text
+            submitted = marker.search(response.text).group(1)
+            assert submitted == loaded, attempt
+            assert agents.read_bytes() == remote
+
+        current = _digest(library.client)
+        assert current != loaded
+        assert library.client.get(f"{page}?__live=1").status_code == 200
+
+    def test_the_change_marker_still_names_the_current_digest_beside_the_retained_baseline(self, library):
+        loaded = _digest(library.client)
+        (library.root / "advisor" / "AGENTS.md").write_text("# Advisor\n\nEdited elsewhere.\n", encoding="utf-8")
+
+        response = library.client.post(
+            f"{_ADVISOR}/source",
+            data={"path": "AGENTS.md", "expected_digest": loaded, "content": "# Draft\n"},
+        )
+        marker = re.search(r'data-live-revision="([0-9a-f]+)"', response.text).group(1)
+
+        assert marker != loaded
+        assert f'name="expected_digest" value="{loaded}"' in response.text
+        assert 'data-live-baseline-input="expected_digest"' in response.text
+        assert marker == _digest(library.client)
+
+
 class TestBlueprintSkillLive:
     URL = f"{_ADVISOR}/skills/daily-review?path={quote(_SKILL_FILE, safe='')}&__live=1"
     REGIONS = [*_NAVIGATION, "skill-header", "skill-files", "skill-source"]
@@ -572,3 +622,25 @@ class TestMemoryChannelDetailLive:
         assert response.status_code == 409
         assert "my unsaved memory draft" in response.text
         assert _registration(response.text)["url"] == self.URL
+
+    def test_a_rejected_content_save_keeps_the_loaded_revision_so_a_resubmit_conflicts_again(self, channels):
+        loaded = channels.store.read(channels.resolved).revision
+        channels.store.try_update(
+            channels.resolved, loaded, lambda current: {**current.files, "memory.md": b"# Brand\n\nEdited elsewhere.\n"}
+        )
+        remote = channels.store.read(channels.resolved)
+        submitted = loaded
+
+        for attempt in range(3):
+            response = channels.client.post(
+                f"{self.PAGE}/content",
+                data={"filename": "memory.md", "content_revision": submitted, "content": f"draft {attempt}"},
+            )
+            assert response.status_code == 409
+            assert f"draft {attempt}" in response.text
+            submitted = re.search(r'name="content_revision" value="([0-9a-f]+)"', response.text).group(1)
+            assert submitted == loaded
+            assert channels.store.read(channels.resolved).files == remote.files
+
+        marker = re.search(r'data-live-revision="([0-9a-f]+)"[^>]*data-live-scope="content"', response.text).group(1)
+        assert marker == remote.revision != loaded

@@ -157,6 +157,27 @@ class TestAdminSettingsLive:
         assert _registration(response.text)["url"] == self.URL
         assert 'data-live-region="settings-status"' in response.text
 
+    def test_a_rejected_save_keeps_the_loaded_revision_so_a_resubmit_conflicts_again(self, admin_env):
+        loaded = admin_env.revision()
+        admin_env.patch(lambda raw: raw["flowgency"].update(title="Renamed elsewhere"))
+        config = admin_env.root / "config.yaml"
+        remote = config.read_bytes()
+        submitted = loaded
+
+        for attempt in range(3):
+            response = admin_env.client.post(
+                "/admin/settings",
+                data={"revision": submitted, "title": f"Draft {attempt}", "default_team": "test", "ai_backend": "copilot"},
+            )
+            assert response.status_code == 409
+            submitted = re.search(r'name="revision" value="([0-9a-f]+)"', response.text).group(1)
+            assert submitted == loaded
+            assert config.read_bytes() == remote
+
+        marker = re.search(r'data-live-revision="([0-9a-f]+)"', response.text).group(1)
+        assert marker == admin_env.revision() != loaded
+        assert 'data-live-baseline-input="revision"' in response.text
+
 
 class TestAdminIntegrationsLive:
     PAGE = "/admin/integrations"

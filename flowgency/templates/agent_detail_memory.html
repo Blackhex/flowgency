@@ -46,7 +46,7 @@
   </form>
   <form method="post" action="/{{ team }}/agents/{{ agent }}/memory" class="grid gap-4 md:grid-cols-2 border-t border-gray-200 pt-4">
     <input type="hidden" name="action" value="content">
-    <input type="hidden" name="content_revision" value="{{ memory_snapshot.revision }}">
+    <input type="hidden" name="content_revision" value="{{ form_content_revision | default(memory_snapshot.revision) }}">
     <input type="hidden" name="selector_token" value="{{ selector_token }}">
     <label class="block text-sm text-gray-700 md:col-span-2">
       <span class="mb-1 block font-medium">Markdown file</span>

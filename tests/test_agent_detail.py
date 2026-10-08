@@ -1550,6 +1550,150 @@ def test_memory_post_returns_423_when_memory_is_busy(monkeypatch, tmp_path, raw_
     assert "Memory is busy" in response.text
     assert config_path.read_bytes() == before_config_bytes
 
+# ── Conflict baselines ───────────────────────────────────────────────────────
+
+
+def _conflict_hidden(html: str, name: str) -> str:
+    return re.search(rf'<input type="hidden" name="{name}" value="([^"]*)"', html).group(1)
+
+
+def _change_config_elsewhere(config_path: Path) -> None:
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["flowgency"]["title"] = "Changed elsewhere"
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    app_mod.refresh_services()
+
+
+def test_runtime_conflict_keeps_the_submitted_revision_so_a_resubmit_conflicts_again(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    loaded = _revision(config_path)
+    _change_config_elsewhere(config_path)
+    remote = config_path.read_bytes()
+    submitted = loaded
+
+    for _attempt in range(3):
+        response = client.post("/newsletter/agents/advisor/runtime", data={"revision": submitted, "timeout": "1801"})
+        assert response.status_code == 409
+        assert "config.yaml changed" in response.text
+        submitted = _conflict_hidden(response.text, "revision")
+        assert submitted == loaded
+        assert config_path.read_bytes() == remote
+
+    marker = _revision_markers(response.text)["config"]
+    assert marker["data-live-revision"] == _revision(config_path) != loaded
+    assert marker["data-live-baseline-input"] == "revision"
+
+
+def test_prompt_create_conflict_keeps_the_submitted_revision(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    loaded = _revision(config_path)
+    _change_config_elsewhere(config_path)
+    remote = config_path.read_bytes()
+    source = "---\nname: stale-check\ndescription: stale\n---\n\nKeep me\n"
+    submitted = loaded
+
+    for _attempt in range(2):
+        response = client.post(
+            "/newsletter/agents/advisor/prompts/create",
+            data={"revision": submitted, "name": "stale-check", "source": source},
+        )
+        assert response.status_code == 409
+        assert source in response.text
+        submitted = _conflict_hidden(response.text, "revision")
+        assert submitted == loaded
+        assert config_path.read_bytes() == remote
+
+
+def test_prompt_save_conflict_keeps_the_submitted_digest_and_the_source_unchanged(monkeypatch, tmp_path, raw_config):
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+    prompt_file = tmp_path / "prompts" / "newsletter" / "advisor" / "local-triage.prompt.md"
+    page = client.get("/newsletter/agents/advisor/prompts").text
+    loaded = re.search(r'name="digest" value="([0-9a-f]{64})" data-live-baseline="prompt:local-triage"', page).group(1)
+    prompt_file.write_text(_local_triage_source("Edited elsewhere.\n"), encoding="utf-8")
+    remote = prompt_file.read_bytes()
+    submitted = loaded
+
+    for attempt in range(3):
+        response = client.post(
+            "/newsletter/agents/advisor/prompts/local-triage/save",
+            data={"digest": submitted, "source": _local_triage_source(f"My draft {attempt}.\n")},
+        )
+        assert response.status_code == 409
+        assert f"My draft {attempt}." in response.text
+        submitted = re.search(
+            r'name="digest" value="([0-9a-f]{64})" data-live-baseline="prompt:local-triage"', response.text
+        ).group(1)
+        assert submitted == loaded
+        assert prompt_file.read_bytes() == remote
+
+    marker = _revision_markers(response.text)["prompt:local-triage"]
+    assert marker["data-live-revision"] != loaded
+    assert marker["data-live-baseline-key"] == "prompt:local-triage"
+
+
+def test_memory_content_conflict_keeps_the_submitted_revision(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    snapshot = ConfigStore(config_path).load()
+    resolved = resolve_memory_selector(
+        MemorySelector(scope="agent"),
+        job_id="detail-newsletter-advisor",
+        team_key="newsletter",
+        agent_name="advisor",
+        routine_id=None,
+        channels=snapshot.config.memory.channels,
+        store_root=(tmp_path / "memory-store"),
+    )
+    memory_store = app_mod.app.state.services.memory_store
+    seeded = memory_store.ensure(resolved)
+    current = memory_store.try_save(resolved, seeded.revision, {"memory.md": b"server"})
+    submitted = seeded.revision
+
+    for _attempt in range(3):
+        response = client.post(
+            "/newsletter/agents/advisor/memory",
+            data={
+                "action": "content",
+                "content_revision": submitted,
+                "selector_token": "agent",
+                "filename": "memory.md",
+                "content": "client",
+            },
+        )
+        assert response.status_code == 409
+        submitted = _conflict_hidden(response.text, "content_revision")
+        assert submitted == seeded.revision
+        assert memory_store.read(resolved).revision == current.revision
+        assert memory_store.read(resolved).files["memory.md"] == b"server"
+
+    assert _revision_markers(response.text)["memory"]["data-live-revision"] == current.revision
+
+
+def test_prompt_cards_carry_a_per_prompt_marker_bound_to_the_loaded_digest(monkeypatch, tmp_path, raw_config):
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+
+    page = client.get("/newsletter/agents/advisor/prompts").text
+
+    marker = _revision_markers(page)["prompt:local-triage"]
+    loaded = re.search(r'name="digest" value="([0-9a-f]{64})" data-live-baseline="prompt:local-triage"', page).group(1)
+    assert marker["data-live-revision"] == loaded
+    assert marker["data-live-baseline-key"] == "prompt:local-triage"
+    assert marker["data-live-changed"] == "Prompt local-triage changed since this form loaded. Reload to see the latest."
+
+
+def test_a_source_only_prompt_change_moves_only_that_prompts_marker(monkeypatch, tmp_path, raw_config):
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+    before = live_regions(_live(client, "prompts"))
+    loaded = _revision_markers(before["agent-prompts-edit"])["prompt:local-triage"]["data-live-revision"]
+
+    (tmp_path / "prompts" / "newsletter" / "advisor" / "local-triage.prompt.md").write_text(
+        _local_triage_source("Source-only change.\n"), encoding="utf-8"
+    )
+    after = live_regions(_live(client, "prompts"))
+
+    assert after["agent-status"] == before["agent-status"]
+    assert _revision_markers(after["agent-prompts-edit"])["prompt:local-triage"]["data-live-revision"] != loaded
+
+
 # ── Live detail snapshots ────────────────────────────────────────────────────
 
 from tests._live_helpers import (  # noqa: E402

@@ -8,7 +8,7 @@
   <div data-live-region="agent-prompts-catalog" class="space-y-5">{{ live.prompts_catalog() }}</div>
 
   <form method="post" action="/{{ team }}/agents/{{ agent }}/prompts/create" class="space-y-4 rounded-lg border border-gray-200 bg-white p-4">
-    <input type="hidden" name="revision" value="{{ config_revision }}">
+    <input type="hidden" name="revision" value="{{ form_revision | default(config_revision) }}">
     <div>
       <h3 class="text-sm font-semibold text-gray-900">Create private prompt</h3>
       <p class="text-xs text-gray-500">This publishes prompt source and registers the prompt name on the instance.</p>

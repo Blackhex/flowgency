@@ -171,6 +171,7 @@ def _render_channel_detail(
     memory_conflict: dict[str, str] | None = None,
     filename: str = "memory.md",
     content_override: str | None = None,
+    content_revision: str | None = None,
     status_code: int = 200,
 ):
     resolved = _resolve_channel_memory(snapshot, services, channel_key)
@@ -204,6 +205,9 @@ def _render_channel_detail(
         "selected_filename": selected_name,
         "selected_content": selected_content,
     }
+    # Retained text stays bound to the revision it was loaded against, so a resubmit still conflicts.
+    if content_revision is not None:
+        context["form_content_revision"] = content_revision
     return respond_live_or_html(
         request,
         _templates(request),
@@ -650,6 +654,7 @@ async def admin_memory_channel_content(
             ),
             filename=filename,
             content_override=content,
+            content_revision=content_revision,
             status_code=409,
         )
     try:
@@ -674,6 +679,7 @@ async def admin_memory_channel_content(
             ),
             filename=filename,
             content_override=content,
+            content_revision=content_revision,
             status_code=423,
         )
     except MemoryConflictError as exc:
@@ -693,6 +699,7 @@ async def admin_memory_channel_content(
             },
             filename=filename,
             content_override=content,
+            content_revision=content_revision,
             status_code=409,
         )
     except (ValueError, TypeError) as exc:
@@ -704,6 +711,7 @@ async def admin_memory_channel_content(
             content_warning=str(exc),
             filename=filename,
             content_override=content,
+            content_revision=content_revision,
             status_code=409,
         )
     return RedirectResponse(

@@ -10,6 +10,14 @@
   var loaded = {};
 
   function loadedRevision(marker) {
+    // A marker may name the owned form input (even one inside a live region) that holds its loaded baseline.
+    var key = marker.getAttribute('data-live-baseline-key');
+    if (key) {
+      var bound = document.querySelectorAll('input[data-live-baseline]');
+      for (var j = 0; j < bound.length; j++) {
+        if (bound[j].getAttribute('data-live-baseline') === key) return bound[j].value;
+      }
+    }
     var name = marker.getAttribute('data-live-baseline-input');
     if (name) {
       var inputs = document.querySelectorAll('input[name="' + name + '"]');
@@ -52,8 +60,9 @@
     });
   }
 
-  // Record the loaded revisions before the first refresh can replace a marker.
-  changedScopes();
+  // Record the loaded revisions before the first refresh can replace a marker; a page that loaded
+  // with a retained baseline (a rejected save) already differs and announces it straight away.
+  render();
   // A controller that advanced its own baselines after saving announces it, so no stale notice lingers.
   document.addEventListener('flowgency:live-baseline', render);
   new MutationObserver(function (records) {

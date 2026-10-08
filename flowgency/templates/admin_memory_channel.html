@@ -92,7 +92,7 @@
     <section class="rounded-xl border border-gray-200 bg-white p-5">
       <div data-live-region="channel-files">{{ live_channel_files() }}</div>
       <form method="post" action="/admin/memory-channels/{{ channel_key }}/content" data-live-owned class="mt-4 space-y-4">
-        <input type="hidden" name="content_revision" value="{{ memory_snapshot.revision }}">
+        <input type="hidden" name="content_revision" value="{{ form_content_revision | default(memory_snapshot.revision) }}">
         <div>
           <label for="filename" class="block text-sm font-medium text-gray-700">File</label>
           <select id="filename" name="filename" class="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white">

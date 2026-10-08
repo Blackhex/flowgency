@@ -461,6 +461,12 @@ def _render_library_list(
     )
 
 
+def _keep_submitted_digest(context: dict, expected_digest: str | None) -> None:
+    """A conflict re-render keeps the digest the rejected editor loaded, so a resubmit still conflicts."""
+    if expected_digest is not None:
+        context["form_expected_digest"] = expected_digest
+
+
 def _render_blueprint_detail(
     request: Request,
     services: FlowgencyServices,
@@ -471,6 +477,7 @@ def _render_blueprint_detail(
     issues: list[dict[str, str]] | None = None,
     form_path: str = "AGENTS.md",
     form_content: str | None = None,
+    expected_digest: str | None = None,
     status_code: int = 200,
 ):
     inspection = _load_blueprint(services, key)
@@ -495,6 +502,7 @@ def _render_blueprint_detail(
             + ("s" if len(users) != 1 else "")
         ),
     }
+    _keep_submitted_digest(context, expected_digest)
     return respond_live_or_html(
         request,
         _templates(request),
@@ -515,6 +523,7 @@ def _render_blueprint_skill(
     warning: str = "",
     issues: list[dict[str, str]] | None = None,
     form_content: str | None = None,
+    expected_digest: str | None = None,
     status_code: int = 200,
 ):
     inspection = _load_blueprint(services, key)
@@ -552,6 +561,7 @@ def _render_blueprint_skill(
             else selected["content"]
         ),
     }
+    _keep_submitted_digest(context, expected_digest)
     return respond_live_or_html(
         request,
         _templates(request),
@@ -573,6 +583,7 @@ def _render_blueprint_prompts(
     form_content: str | None = None,
     create_slug: str = "",
     create_content: str = "",
+    expected_digest: str | None = None,
     status_code: int = 200,
 ):
     inspection = _load_blueprint(services, key)
@@ -617,6 +628,7 @@ def _render_blueprint_prompts(
         "create_slug": create_slug,
         "create_content": create_content or default_create_content,
     }
+    _keep_submitted_digest(context, expected_digest)
     return respond_live_or_html(
         request,
         _templates(request),
@@ -985,6 +997,7 @@ async def admin_blueprint_source_save(
                 selected_path=raw_path,
                 warning=str(exc.detail),
                 form_content=str(form.get("content", "")),
+                expected_digest=expected_digest,
                 status_code=exc.status_code,
             )
         if raw_path.startswith(".agents/prompts/") or slug:
@@ -998,6 +1011,7 @@ async def admin_blueprint_source_save(
                 form_content=str(form.get("content", "")),
                 create_slug=slug,
                 create_content=str(form.get("content", "")),
+                expected_digest=expected_digest,
                 status_code=exc.status_code,
             )
         return _render_blueprint_detail(
@@ -1008,6 +1022,7 @@ async def admin_blueprint_source_save(
             warning=str(exc.detail),
             form_path=raw_path or "AGENTS.md",
             form_content=str(form.get("content", "")),
+            expected_digest=expected_digest,
             status_code=exc.status_code,
         )
     except ValidationFailed as exc:
@@ -1023,6 +1038,7 @@ async def admin_blueprint_source_save(
                 selected_path=raw_path,
                 issues=_issue_dicts(exc),
                 form_content=str(form.get("content", "")),
+                expected_digest=expected_digest,
                 status_code=409,
             )
         if raw_path.startswith(".agents/prompts/") or slug:
@@ -1036,6 +1052,7 @@ async def admin_blueprint_source_save(
                 form_content=str(form.get("content", "")),
                 create_slug=slug,
                 create_content=str(form.get("content", "")),
+                expected_digest=expected_digest,
                 status_code=409,
             )
         return _render_blueprint_detail(
@@ -1046,6 +1063,7 @@ async def admin_blueprint_source_save(
             issues=_issue_dicts(exc),
             form_path=raw_path or "AGENTS.md",
             form_content=str(form.get("content", "")),
+            expected_digest=expected_digest,
             status_code=409,
         )
     return RedirectResponse(

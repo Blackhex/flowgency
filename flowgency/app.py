@@ -1361,9 +1361,13 @@ def admin_context(
 
 
 def _admin_settings_context(
-    request: Request, *, ai_backend: str | None = None, current_theme: str | None = None
+    request: Request,
+    *,
+    ai_backend: str | None = None,
+    current_theme: str | None = None,
+    form_revision: str | None = None,
 ) -> dict:
-    return {
+    context = {
         "request": request,
         **admin_context("settings"),
         "integrations": {name: i.display_name for name, i in REGISTRY.items() if i.supports_ai_backend},
@@ -1372,6 +1376,10 @@ def _admin_settings_context(
         "themes": load_themes(),
         "current_theme": current_theme if current_theme is not None else get_flowgency_config()["theme"],
     }
+    # A rejected save keeps the revision its retained values were loaded against, so a resubmit conflicts again.
+    if form_revision:
+        context["revision"] = form_revision
+    return context
 
 
 @app.get("/admin/", response_class=HTMLResponse)
@@ -1571,7 +1579,9 @@ async def admin_save_settings(request: Request):
                 ),
             )
     except ConfigConflictError:
-        context = _admin_settings_context(request, ai_backend=ai_backend, current_theme=theme)
+        context = _admin_settings_context(
+            request, ai_backend=ai_backend, current_theme=theme, form_revision=revision
+        )
         return respond_live_or_html(
             request, templates, context, settings_policy(context), status_code=409
         )
