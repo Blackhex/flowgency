@@ -1631,6 +1631,114 @@ def test_prompt_save_conflict_keeps_the_submitted_digest_and_the_source_unchange
     assert marker["data-live-baseline-key"] == "prompt:local-triage"
 
 
+def _delete_form_baseline(html: str, name: str) -> tuple[str, str]:
+    form = re.search(rf'<form[^>]*/prompts/{name}/delete".*?</form>', html, re.S).group(0)
+    return (
+        re.search(r'name="revision" value="([^"]*)"', form).group(1),
+        re.search(r'name="digest" value="([^"]*)"', form).group(1),
+    )
+
+
+def _local_prompt_file(tmp_path: Path, name: str = "local-triage") -> Path:
+    return tmp_path / "prompts" / "newsletter" / "advisor" / f"{name}.prompt.md"
+
+
+def _register_second_prompt(config_path: Path, tmp_path: Path) -> None:
+    _local_prompt_file(tmp_path, "second-triage").write_text(
+        "---\nname: second-triage\ndescription: Second.\n---\n\nSecond body.\n", encoding="utf-8"
+    )
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["teams"]["newsletter"]["agents"][0]["prompts"].append("second-triage")
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    app_mod.refresh_services()
+
+
+@pytest.mark.parametrize("change_config, change_source", [(True, True), (True, False), (False, True)])
+def test_prompt_delete_conflict_keeps_the_loaded_revision_and_digest(
+    monkeypatch, tmp_path, raw_config, change_config, change_source
+):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    prompt_file = _local_prompt_file(tmp_path)
+    loaded_revision, loaded_digest = _delete_form_baseline(
+        client.get("/newsletter/agents/advisor/prompts").text, "local-triage"
+    )
+    if change_config:
+        _change_config_elsewhere(config_path)
+    if change_source:
+        prompt_file.write_text(_local_triage_source("Edited elsewhere.\n"), encoding="utf-8")
+    remote_config = config_path.read_bytes()
+    remote_source = prompt_file.read_bytes()
+    submitted = (loaded_revision, loaded_digest)
+
+    for _attempt in range(3):
+        response = client.post(
+            "/newsletter/agents/advisor/prompts/local-triage/delete",
+            data={"revision": submitted[0], "digest": submitted[1]},
+            follow_redirects=False,
+        )
+        assert response.status_code == 409
+        submitted = _delete_form_baseline(response.text, "local-triage")
+        assert submitted == (loaded_revision, loaded_digest)
+        assert config_path.read_bytes() == remote_config
+        assert prompt_file.read_bytes() == remote_source
+        assert "local-triage" in yaml.safe_load(config_path.read_text(encoding="utf-8"))["teams"]["newsletter"]["agents"][0]["prompts"]
+
+    assert _revision_markers(response.text)["config"]["data-live-revision"] == _revision(config_path)
+
+    reloaded = _delete_form_baseline(client.get("/newsletter/agents/advisor/prompts").text, "local-triage")
+    assert reloaded == (_revision(config_path), reloaded[1])
+    deleted = client.post(
+        "/newsletter/agents/advisor/prompts/local-triage/delete",
+        data={"revision": reloaded[0], "digest": reloaded[1]},
+        follow_redirects=False,
+    )
+    assert deleted.status_code == 303
+    assert "local-triage" not in yaml.safe_load(config_path.read_text(encoding="utf-8"))["teams"]["newsletter"]["agents"][0]["prompts"]
+
+
+def test_prompt_delete_conflict_does_not_lend_its_digest_to_another_prompt(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    _register_second_prompt(config_path, tmp_path)
+    page = client.get("/newsletter/agents/advisor/prompts").text
+    loaded_first = _delete_form_baseline(page, "local-triage")
+    loaded_second = _delete_form_baseline(page, "second-triage")
+    _local_prompt_file(tmp_path).write_text(_local_triage_source("First edited.\n"), encoding="utf-8")
+    _local_prompt_file(tmp_path, "second-triage").write_text(
+        "---\nname: second-triage\ndescription: Second.\n---\n\nSecond edited.\n", encoding="utf-8"
+    )
+
+    response = client.post(
+        "/newsletter/agents/advisor/prompts/local-triage/delete",
+        data={"revision": loaded_first[0], "digest": loaded_first[1]},
+    )
+
+    assert response.status_code == 409
+    assert _delete_form_baseline(response.text, "local-triage") == loaded_first
+    assert _delete_form_baseline(response.text, "second-triage")[1] != loaded_first[1]
+    assert _delete_form_baseline(response.text, "second-triage")[1] != loaded_second[1]
+
+
+def test_prompt_delete_validation_failure_keeps_the_loaded_baseline(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["teams"]["newsletter"]["agents"][0]["routines"].append(
+        {"id": "local-review", "prompt": {"scope": "instance", "name": "local-triage"}, "schedule": {"every": "6h"}}
+    )
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    app_mod.refresh_services()
+    loaded = _delete_form_baseline(client.get("/newsletter/agents/advisor/prompts").text, "local-triage")
+    _change_config_elsewhere(config_path)
+    _local_prompt_file(tmp_path).write_text(_local_triage_source("Edited elsewhere.\n"), encoding="utf-8")
+
+    response = client.post(
+        "/newsletter/agents/advisor/prompts/local-triage/delete",
+        data={"revision": loaded[0], "digest": loaded[1]},
+    )
+
+    assert response.status_code == 409
+    assert _delete_form_baseline(response.text, "local-triage") == loaded
+
+
 def test_memory_content_conflict_keeps_the_submitted_revision(monkeypatch, tmp_path, raw_config):
     client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     snapshot = ConfigStore(config_path).load()

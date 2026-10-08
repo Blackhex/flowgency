@@ -142,6 +142,8 @@ class PromptService:
                     )
                 )
         stored = self.store.read(team_id, agent_id, prompt_name)
+        if stored.document.digest != expected_digest:
+            raise PromptConflictError("prompt changed; reload and retry")
         updated = unregister_agent_prompt(
             self.config_store,
             expected_revision,

@@ -1001,6 +1001,23 @@ async def agent_detail_prompts_delete(
     form = await request.form()
     revision = str(form.get("revision", "")).strip()
     digest = str(form.get("digest", "")).strip()
+
+    def rejected(issues: list[dict[str, str]]):
+        snapshot = services.config_store.load()
+        return _detail_context(
+            request,
+            services,
+            team,
+            agent,
+            "prompts",
+            status_code=409,
+            issues=issues,
+            overrides={
+                **_prompts_context(services, snapshot, team, agent, digest_overrides={name: digest}),
+                "form_revision": revision,
+            },
+        )
+
     try:
         if services.prompt_service is None:
             raise HTTPException(status_code=409, detail="Prompt service unavailable")
@@ -1017,27 +1034,11 @@ async def agent_detail_prompts_delete(
     except PromptNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Unknown prompt") from exc
     except ValidationFailed as exc:
-        return _detail_context(request, services, team, agent, "prompts", status_code=409, issues=_issue_dicts(exc))
+        return rejected(_issue_dicts(exc))
     except ConfigConflictError as exc:
-        return _detail_context(
-            request,
-            services,
-            team,
-            agent,
-            "prompts",
-            status_code=409,
-            issues=_single_issue("revision", str(exc), "Reload and retry deletion."),
-        )
+        return rejected(_single_issue("revision", str(exc), "Reload and retry deletion."))
     except PromptConflictError as exc:
-        return _detail_context(
-            request,
-            services,
-            team,
-            agent,
-            "prompts",
-            status_code=409,
-            issues=_single_issue("digest", str(exc), "Reload and confirm the prompt digest before deleting."),
-        )
+        return rejected(_single_issue("digest", str(exc), "Reload and confirm the prompt digest before deleting."))
     request.app.state.refresh_services()
     return RedirectResponse(f"/{team}/agents/{agent}/prompts", status_code=303)
 

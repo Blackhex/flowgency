@@ -183,6 +183,38 @@ def test_delete_private_rejects_referenced_routine(prompt_service_env):
     assert excinfo.value.issues[0].code == "prompt-in-use"
 
 
+def test_delete_private_rejects_a_stale_digest_without_unregistering(prompt_service_env):
+    created = prompt_service_env.service.create_private(
+        "newsletter",
+        "reviewer",
+        "local-triage",
+        local_triage_source(),
+        expected_revision=prompt_service_env.config_store.load().revision,
+    )
+    config_bytes = prompt_service_env.config_store.path.read_bytes()
+    source_path = prompt_service_env.store.path("newsletter", "reviewer", "local-triage")
+    prompt_service_env.service.update_private(
+        "newsletter",
+        "reviewer",
+        "local-triage",
+        local_triage_source("Edited elsewhere.\n"),
+        expected_digest=created.document.digest,
+    )
+    source_bytes = source_path.read_bytes()
+
+    with pytest.raises(PromptConflictError):
+        prompt_service_env.service.delete_private(
+            "newsletter",
+            "reviewer",
+            "local-triage",
+            expected_revision=created.snapshot.revision,
+            expected_digest=created.document.digest,
+        )
+
+    assert prompt_service_env.config_store.path.read_bytes() == config_bytes
+    assert source_path.read_bytes() == source_bytes
+
+
 def test_delete_private_reports_orphan_when_source_cleanup_fails(
     prompt_service_env,
     monkeypatch,
